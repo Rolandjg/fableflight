@@ -5,9 +5,9 @@
 //! cuts any piece along it (see `tear_d` in plane.wgsl), so the stump left on
 //! the aircraft and the part fluttering down are the same mesh seen from the
 //! two sides of the same tear, with the same ragged edge.
-use crate::aircraft::{Spec, MAX_GEAR};
-use crate::airframe::{Piece, Role, G_ENGINE, G_FUSE, G_LWING, G_RWING, G_TAIL, N_GROUPS};
-use crate::crash::{Rng, GRIT, SPARK};
+use crate::aircraft::{MAX_GEAR, Spec};
+use crate::airframe::{G_ENGINE, G_FUSE, G_LWING, G_RWING, G_TAIL, N_GROUPS, Piece, Role};
+use crate::crash::{GRIT, Rng, SPARK};
 use crate::geo;
 use crate::render::{DrawObj, Particle};
 use crate::world::World;
@@ -28,30 +28,50 @@ pub struct Tear {
 }
 
 impl Tear {
-    pub const NONE: Tear = Tear { n: Vec3::ZERO, d: 0.0, mode: 0.0, jag: 0.0 };
+    pub const NONE: Tear = Tear {
+        n: Vec3::ZERO,
+        d: 0.0,
+        mode: 0.0,
+        jag: 0.0,
+    };
     pub fn new(n: Vec3, d: f32, mode: f32) -> Self {
-        Self { n, d, mode, jag: JAG }
+        Self {
+            n,
+            d,
+            mode,
+            jag: JAG,
+        }
     }
     pub fn is_some(&self) -> bool {
         self.mode != 0.0
     }
     /// The same break seen from the other side.
     pub fn flip(&self) -> Self {
-        Self { mode: -self.mode, ..*self }
+        Self {
+            mode: -self.mode,
+            ..*self
+        }
     }
     /// Moved so the kept side grows by `by` metres (spars poking out past torn skin).
     pub fn grow(&self, by: f32) -> Self {
         if self.mode == 0.0 {
             return *self;
         }
-        Self { d: self.d + by * self.mode.signum(), ..*self }
+        Self {
+            d: self.d + by * self.mode.signum(),
+            ..*self
+        }
     }
     /// Does the break (without its ragged edge) keep this body-frame point?
     pub fn keeps(&self, p: Vec3) -> bool {
         if self.mode == 0.0 {
             return true;
         }
-        let q = if self.mode.abs() > 1.5 { Vec3::new(p.x.abs(), p.y, p.z) } else { p };
+        let q = if self.mode.abs() > 1.5 {
+            Vec3::new(p.x.abs(), p.y, p.z)
+        } else {
+            p
+        };
         let v = q.dot(self.n) - self.d;
         (v < 0.0) == (self.mode > 0.0)
     }
@@ -85,7 +105,9 @@ pub struct Fold {
 impl Fold {
     /// Where the hanging part is drawn: its rest pose swung about the hinge.
     pub fn mat(&self) -> Mat4 {
-        Mat4::from_translation(self.pivot) * Mat4::from_axis_angle(self.axis, self.ang) * Mat4::from_translation(-self.pivot)
+        Mat4::from_translation(self.pivot)
+            * Mat4::from_axis_angle(self.axis, self.ang)
+            * Mat4::from_translation(-self.pivot)
     }
 }
 
@@ -205,7 +227,11 @@ impl Damage {
         let tl = &self.spec.tail;
         let structure = matches!(p.role, Role::WingStructure(_) | Role::TailStructure);
         // Spars poke out a little past the torn skin.
-        let stick = if structure { 0.12 * self.spec.span / 5.5 } else { 0.0 };
+        let stick = if structure {
+            0.12 * self.spec.span / 5.5
+        } else {
+            0.0
+        };
         match p.group {
             G_LWING | G_RWING => {
                 let s = if p.group == G_RWING { 1 } else { 0 };
@@ -236,7 +262,9 @@ impl Damage {
                 _ => {}
             },
             _ => {
-                if let (Role::Prop, crate::aircraft::Engine::Piston(pe)) = (p.role, &self.spec.engine) {
+                if let (Role::Prop, crate::aircraft::Engine::Piston(pe)) =
+                    (p.role, &self.spec.engine)
+                {
                     if self.prop > 0.0 && self.prop < 1.0 {
                         t[0] = Tear::new(Vec3::Y, pe.blade_break_y, 1.0);
                     }
@@ -273,7 +301,11 @@ impl Damage {
         let span = self.spec.span;
         let b = b.clamp(0.0, span);
         let n = 16;
-        (0..n).map(|k| (self.spec.wing_sect)(b + (span - b) * (k as f32 + 0.5) / n as f32).c).sum::<f32>() * (span - b) / n as f32
+        (0..n)
+            .map(|k| (self.spec.wing_sect)(b + (span - b) * (k as f32 + 0.5) / n as f32).c)
+            .sum::<f32>()
+            * (span - b)
+            / n as f32
     }
     /// How much of the ailerons is still on a wing that ends at `b`.
     pub fn aileron_frac(&self, b: f32) -> f32 {
@@ -289,7 +321,10 @@ impl Damage {
             if self.fold[s].on {
                 r.push(format!("{lr} WING BUCKLED, HANGING"));
             } else if self.wing[s] < self.spec.span {
-                r.push(format!("{lr} WING  -{:.1} m", self.spec.span - self.wing[s]));
+                r.push(format!(
+                    "{lr} WING  -{:.1} m",
+                    self.spec.span - self.wing[s]
+                ));
             }
             if self.wing[s] < self.spec.tank[1] {
                 r.push(format!("{lr} TANK RUPTURED"));
@@ -312,7 +347,14 @@ impl Damage {
             }
         }
         if self.tail.is_some() {
-            r.push(if self.spec.rocket().is_some() { "BOOSTER SEPARATED" } else { "TAIL BROKEN OFF" }.into());
+            r.push(
+                if self.spec.rocket().is_some() {
+                    "BOOSTER SEPARATED"
+                } else {
+                    "TAIL BROKEN OFF"
+                }
+                .into(),
+            );
         } else if self.fin < 1.0 {
             r.push(format!("FIN {:.0}%", self.fin * 100.0));
         }
@@ -331,7 +373,11 @@ impl Damage {
         if self.engine <= 0.0 {
             r.push(if jet { "ENGINES DEAD" } else { "ENGINE DEAD" }.into());
         } else if self.engine < 1.0 {
-            r.push(if jet { format!("ENGINES {:.0}%", self.engine * 100.0) } else { format!("ENGINE {:.0}%  OIL LEAK", self.engine * 100.0) });
+            r.push(if jet {
+                format!("ENGINES {:.0}%", self.engine * 100.0)
+            } else {
+                format!("ENGINE {:.0}%  OIL LEAK", self.engine * 100.0)
+            });
         }
         for (g, leg) in self.gear.iter().zip(self.spec.gear) {
             if !g {
@@ -387,11 +433,28 @@ impl Damage {
                     let s = if k.trim().starts_with('l') { 0 } else { 1 };
                     let mut rng = Rng(v.to_bits() as u64 * 7919 + 1 + s as u64);
                     let ks = self.spec.span / 5.5;
-                    let tear = wing_break(self.spec, s, v, rng.range(-0.5, 0.5) * ks, rng.range(-0.2, 0.2), rng.range(0.06, 0.3) * ks.sqrt(), &Tear::NONE);
+                    let tear = wing_break(
+                        self.spec,
+                        s,
+                        v,
+                        rng.range(-0.5, 0.5) * ks,
+                        rng.range(-0.2, 0.2),
+                        rng.range(0.06, 0.3) * ks.sqrt(),
+                        &Tear::NONE,
+                    );
                     self.wing[s] = v;
                     self.wing_tear[s] = tear;
                     if k.trim().ends_with("fold") {
-                        self.fold[s] = fold_at(self.spec, s, v, tear, Tear::NONE, self.spec.span, rng.f() < 0.5, 2500.0 * ks * ks * ks);
+                        self.fold[s] = fold_at(
+                            self.spec,
+                            s,
+                            v,
+                            tear,
+                            Tear::NONE,
+                            self.spec.span,
+                            rng.f() < 0.5,
+                            2500.0 * ks * ks * ks,
+                        );
                     }
                 }
                 "tail" => self.tail = tail_break(self.spec, v, 0.1, -0.1, 0.2),
@@ -414,7 +477,15 @@ pub fn wing_pt(spec: &Spec, s: usize, station: f32, xc: f32, skin: f32) -> Vec3 
 /// across the chord (a diagonal snap), `ty` through the thickness, `jag` is
 /// how ragged it is. It is kept wholly inboard of the break `prev` the wing
 /// already ends in (straightened if it has to be).
-pub fn wing_break(spec: &Spec, s: usize, station: f32, tz: f32, ty: f32, jag: f32, prev: &Tear) -> Tear {
+pub fn wing_break(
+    spec: &Spec,
+    s: usize,
+    station: f32,
+    tz: f32,
+    ty: f32,
+    jag: f32,
+    prev: &Tear,
+) -> Tear {
     let sg = sgn(s);
     let k = (spec.wing_sect)(station.clamp(0.0, spec.span));
     let mid = wing_pt(spec, 1, station, 0.45, 0.0);
@@ -422,16 +493,23 @@ pub fn wing_break(spec: &Spec, s: usize, station: f32, tz: f32, ty: f32, jag: f3
     let make = |tz: f32| {
         let n = Vec3::new(sg, ty, tz).normalize();
         let p = Vec3::new(sg * station, mid.y, mid.z);
-        Tear { n, d: n.dot(p), mode: 1.0, jag }
+        Tear {
+            n,
+            d: n.dot(p),
+            mode: 1.0,
+            jag,
+        }
     };
     let mut tz = tz;
     for _ in 0..5 {
         let t = make(tz);
         // Where it crosses the leading and trailing edges must still be on the wing.
-        let fits = [k.le.z - 0.05 * sc, k.le.z + k.c + 0.05 * sc].iter().all(|&z| {
-            let x = (t.d - t.n.y * mid.y - t.n.z * z) / t.n.x;
-            prev.keeps(Vec3::new(x + sg * 0.2 * sc, mid.y, z))
-        });
+        let fits = [k.le.z - 0.05 * sc, k.le.z + k.c + 0.05 * sc]
+            .iter()
+            .all(|&z| {
+                let x = (t.d - t.n.y * mid.y - t.n.z * z) / t.n.x;
+                prev.keeps(Vec3::new(x + sg * 0.2 * sc, mid.y, z))
+            });
         if fits {
             return t;
         }
@@ -443,19 +521,45 @@ pub fn wing_break(spec: &Spec, s: usize, station: f32, tz: f32, ty: f32, jag: f3
 /// A buckled wing hanging from the stump at `tear` (span `root`), out to `tip`
 /// where it ends in `outer`: hinged on its upper skin if it folds `up`, on
 /// its lower skin if it folds down.
-pub fn fold_at(spec: &Spec, s: usize, root: f32, tear: Tear, outer: Tear, tip: f32, up: bool, hold: f32) -> Fold {
+pub fn fold_at(
+    spec: &Spec,
+    s: usize,
+    root: f32,
+    tear: Tear,
+    outer: Tear,
+    tip: f32,
+    up: bool,
+    hold: f32,
+) -> Fold {
     let q = wing_pt(spec, s, root, 0.4, if up { 1.0 } else { -1.0 });
     let x = (tear.d - tear.n.y * q.y - tear.n.z * q.z) / tear.n.x;
     let pivot = Vec3::new(x, q.y, q.z);
     let axis = tear.n.cross(Vec3::Y).normalize();
-    Fold { on: true, pivot, axis, ang: 0.0, rate: if up { 0.6 } else { -0.6 }, tear, outer, root, tip, stress: 0.0, hold }
+    Fold {
+        on: true,
+        pivot,
+        axis,
+        ang: 0.0,
+        rate: if up { 0.6 } else { -0.6 },
+        tear,
+        outer,
+        root,
+        tip,
+        stress: 0.0,
+        hold,
+    }
 }
 
 /// The tail broken off through the tail cone at `z`, slanted by `tx`, `ty`.
 pub fn tail_break(spec: &Spec, z: f32, tx: f32, ty: f32, jag: f32) -> Tear {
     let n = Vec3::new(tx, ty, 1.0).normalize();
     let p = Vec3::new(0.0, (spec.fuse)(z).1, z);
-    Tear { n, d: n.dot(p), mode: 1.0, jag }
+    Tear {
+        n,
+        d: n.dot(p),
+        mode: 1.0,
+        jag,
+    }
 }
 
 /// Which pieces a shed request refers to.
@@ -491,7 +595,17 @@ pub struct ShedReq {
 
 impl ShedReq {
     pub fn new(sel: Sel, tear: Tear, kick: Vec3, spin: f32) -> Self {
-        Self { sel, tear, tear2: Tear::NONE, kick, spin, rigid: false, pre: Mat4::IDENTITY, own2: false, clean: false }
+        Self {
+            sel,
+            tear,
+            tear2: Tear::NONE,
+            kick,
+            spin,
+            rigid: false,
+            pre: Mat4::IDENTITY,
+            own2: false,
+            clean: false,
+        }
     }
 }
 
@@ -529,7 +643,20 @@ pub struct Sheds {
 impl Sheds {
     /// Spawn whatever `req` tears off: every piece it names, cut along the tear.
     #[allow(clippy::too_many_arguments)]
-    pub fn spawn(&mut self, req: &ShedReq, dmg: &Damage, pieces: &[Piece], piece_mesh: &[usize], piece_cut: &[bool], pose: &[Mat4], pos: DVec3, rot: DQuat, vel: DVec3, rng: &mut Rng, emit: &mut Vec<(DVec3, Particle)>) {
+    pub fn spawn(
+        &mut self,
+        req: &ShedReq,
+        dmg: &Damage,
+        pieces: &[Piece],
+        piece_mesh: &[usize],
+        piece_cut: &[bool],
+        pose: &[Mat4],
+        pos: DVec3,
+        rot: DQuat,
+        vel: DVec3,
+        rng: &mut Rng,
+        emit: &mut Vec<(DVec3, Particle)>,
+    ) {
         // The pieces that go, each with its pose and the breaks it is cut along.
         let mut picked: Vec<(usize, Mat4, [Tear; 2], Vec3, Vec3, Vec3, usize)> = Vec::new();
         for (i, p) in pieces.iter().enumerate() {
@@ -547,11 +674,20 @@ impl Sheds {
             if !take || (dmg.hidden(p) && !(structure && matches!(req.sel, Sel::GroupAll(_)))) {
                 continue;
             }
-            let stick = if structure { 0.12 * dmg.spec.span / 5.5 } else { 0.0 };
-            let second = if req.own2 { req.tear2.grow(stick) } else { dmg.tears_for(p)[0] };
+            let stick = if structure {
+                0.12 * dmg.spec.span / 5.5
+            } else {
+                0.0
+            };
+            let second = if req.own2 {
+                req.tear2.grow(stick)
+            } else {
+                dmg.tears_for(p)[0]
+            };
             let tears = [req.tear.grow(stick), second];
             // Where the leaving part is: the mean of its vertices, body frame.
-            let (mut c, mut n, mut lo, mut hi) = (Vec3::ZERO, 0usize, Vec3::splat(1e9), Vec3::splat(-1e9));
+            let (mut c, mut n, mut lo, mut hi) =
+                (Vec3::ZERO, 0usize, Vec3::splat(1e9), Vec3::splat(-1e9));
             let local = req.pre * pose[i];
             for v in &p.mesh.v {
                 let q = Vec3::from(v.pos);
@@ -577,17 +713,33 @@ impl Sheds {
             let c = picked.iter().map(|k| k.3 * k.6 as f32).sum::<Vec3>() / n as f32;
             let lo = picked.iter().fold(Vec3::splat(1e9), |a, k| a.min(k.4));
             let hi = picked.iter().fold(Vec3::splat(-1e9), |a, k| a.max(k.5));
-            Some((c, hi - lo, rng.dir() * 1.5, rng.dir().as_dvec3() * (req.spin * rng.range(0.6, 1.3)) as f64, rng.f()))
+            Some((
+                c,
+                hi - lo,
+                rng.dir() * 1.5,
+                rng.dir().as_dvec3() * (req.spin * rng.range(0.6, 1.3)) as f64,
+                rng.f(),
+            ))
         } else {
             None
         };
         let mut first = true;
         for (i, local, tears, c, lo, hi, _) in picked {
             let p = &pieces[i];
-            let (origin, ext, jitter, omega, seed) = whole.unwrap_or_else(|| (c, hi - lo, rng.dir() * 1.5, rng.dir().as_dvec3() * (req.spin * rng.range(0.6, 1.3)) as f64, rng.f()));
+            let (origin, ext, jitter, omega, seed) = whole.unwrap_or_else(|| {
+                (
+                    c,
+                    hi - lo,
+                    rng.dir() * 1.5,
+                    rng.dir().as_dvec3() * (req.spin * rng.range(0.6, 1.3)) as f64,
+                    rng.f(),
+                )
+            });
             let wpos = pos + rot * origin.as_dvec3();
             let kick = rot * (req.kick + jitter).as_dvec3();
-            let jag = [tears[0].jag, tears[1].jag].into_iter().fold(0.0f32, f32::max);
+            let jag = [tears[0].jag, tears[1].jag]
+                .into_iter()
+                .fold(0.0f32, f32::max);
             self.items.push(Shed {
                 mesh: piece_mesh[i],
                 local,
@@ -615,11 +767,39 @@ impl Sheds {
                 let up = wpos.normalize().as_vec3();
                 for _ in 0..18 {
                     let d = rng.dir();
-                    emit.push((wpos, Particle { vel: (vel.as_vec3() * 0.6 + d * rng.range(2.0, 9.0) + up * 2.0).into(), life: rng.range(0.4, 1.3), size0: 0.04, size1: 0.02, kind: SPARK, drag: 0.8, seed: rng.f(), alpha: 0.9, ..Default::default() }));
+                    emit.push((
+                        wpos,
+                        Particle {
+                            vel: (vel.as_vec3() * 0.6 + d * rng.range(2.0, 9.0) + up * 2.0).into(),
+                            life: rng.range(0.4, 1.3),
+                            size0: 0.04,
+                            size1: 0.02,
+                            kind: SPARK,
+                            drag: 0.8,
+                            seed: rng.f(),
+                            alpha: 0.9,
+                            ..Default::default()
+                        },
+                    ));
                 }
                 for _ in 0..6 {
                     let d = rng.dir();
-                    emit.push((wpos, Particle { vel: (vel.as_vec3() * 0.5 + d * rng.range(1.0, 4.0)).into(), life: rng.range(1.5, 3.0), size0: 0.4, size1: 1.6, temp: 0.1, kind: GRIT, drag: 1.6, buoy: 0.3, seed: rng.f(), alpha: 0.3, ..Default::default() }));
+                    emit.push((
+                        wpos,
+                        Particle {
+                            vel: (vel.as_vec3() * 0.5 + d * rng.range(1.0, 4.0)).into(),
+                            life: rng.range(1.5, 3.0),
+                            size0: 0.4,
+                            size1: 1.6,
+                            temp: 0.1,
+                            kind: GRIT,
+                            drag: 1.6,
+                            buoy: 0.3,
+                            seed: rng.f(),
+                            alpha: 0.3,
+                            ..Default::default()
+                        },
+                    ));
                 }
             }
         }
@@ -638,13 +818,25 @@ impl Sheds {
             let upw = s.pos.normalize();
             // Torn panels tumble: a lot of drag, more when they turn flat to the
             // airflow, and a sideways skitter as they do.
-            let flat = 0.5 + 0.5 * (s.age as f64 * s.omega.length() * 0.7 + s.seed as f64 * 6.0).sin();
+            let flat =
+                0.5 + 0.5 * (s.age as f64 * s.omega.length() * 0.7 + s.seed as f64 * 6.0).sin();
             // (Above 20 km, where only a rocket drops anything, less of it the
             // thinner the air: a spent stage falls away on its own arc.)
-            let drag = (0.12 + 0.9 * flat) * (s.span as f64).sqrt() * 0.7 * (crate::plane::density(s.pos.length() - geo::R) / crate::plane::density(20_000.0)).min(1.0);
+            let drag = (0.12 + 0.9 * flat)
+                * (s.span as f64).sqrt()
+                * 0.7
+                * (crate::plane::density(s.pos.length() - geo::R)
+                    / crate::plane::density(20_000.0))
+                .min(1.0);
             s.vel -= upw * 9.81 * dtf;
             s.vel *= (-dtf * drag).exp();
-            let skitter = s.rot * DVec3::new((s.age as f64 * 3.1 + s.seed as f64 * 9.0).sin(), 0.0, (s.age as f64 * 2.3).cos()) * (flat * 2.5 * dtf);
+            let skitter = s.rot
+                * DVec3::new(
+                    (s.age as f64 * 3.1 + s.seed as f64 * 9.0).sin(),
+                    0.0,
+                    (s.age as f64 * 2.3).cos(),
+                )
+                * (flat * 2.5 * dtf);
             s.vel += skitter;
             s.pos += s.vel * dtf;
             let w = s.omega * dtf;
@@ -653,7 +845,9 @@ impl Sheds {
             }
             s.omega *= (-dtf * 0.12).exp();
             let (lat, lon, h) = geo::pos_to_lla(s.pos);
-            let Some(g) = world.ground(lat, lon) else { continue };
+            let Some(g) = world.ground(lat, lon) else {
+                continue;
+            };
             let mut floor = (g.h, g.water);
             if let Some(b) = world.building(lat, lon) {
                 if h < b.top + 1.0 && (!b.bridge || h > b.base) {
@@ -690,8 +884,17 @@ impl Sheds {
     /// The newest part made of this mesh that is still falling: the frame it
     /// is drawn in (as `draw`, before its own pose) and how long it has been gone (s).
     pub fn find(&self, mesh: usize, cam: DVec3) -> Option<(Mat4, f32)> {
-        let s = self.items.iter().rev().find(|s| s.mesh == mesh && !s.resting)?;
-        Some((Mat4::from_translation((s.pos - cam).as_vec3()) * Mat4::from_quat(s.rot.as_quat()) * Mat4::from_translation(-s.origin), s.age))
+        let s = self
+            .items
+            .iter()
+            .rev()
+            .find(|s| s.mesh == mesh && !s.resting)?;
+        Some((
+            Mat4::from_translation((s.pos - cam).as_vec3())
+                * Mat4::from_quat(s.rot.as_quat())
+                * Mat4::from_translation(-s.origin),
+            s.age,
+        ))
     }
 
     pub fn draw(&self, cam: DVec3, params: [[f32; 4]; 6], objs: &mut Vec<DrawObj>) {
@@ -700,7 +903,10 @@ impl Sheds {
             if o.length_squared() > 3000.0 * 3000.0 {
                 continue;
             }
-            let model = Mat4::from_translation(o.as_vec3()) * Mat4::from_quat(s.rot.as_quat()) * Mat4::from_translation(-s.origin) * s.local;
+            let model = Mat4::from_translation(o.as_vec3())
+                * Mat4::from_quat(s.rot.as_quat())
+                * Mat4::from_translation(-s.origin)
+                * s.local;
             objs.push(DrawObj {
                 mesh: s.mesh,
                 model,

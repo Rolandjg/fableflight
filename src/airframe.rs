@@ -83,7 +83,12 @@ pub struct Mat {
     pub extra: f32,
 }
 pub const fn mt(id: f32, r: f32, g: f32, b: f32) -> Mat {
-    Mat { id, pat: 0.0, col: Vec3::new(r, g, b), extra: 0.0 }
+    Mat {
+        id,
+        pat: 0.0,
+        col: Vec3::new(r, g, b),
+        extra: 0.0,
+    }
 }
 impl Mat {
     pub const fn pat(mut self, p: f32) -> Self {
@@ -122,7 +127,13 @@ pub type SP = (Vec3, [f32; 2], f32);
 
 impl Mesh {
     pub fn push(&mut self, p: Vec3, n: Vec3, uv: [f32; 2], m: &Mat, wear: f32) -> u32 {
-        self.v.push(PartVertex { pos: p.into(), nrm: n.normalize_or_zero().into(), col: [m.col.x, m.col.y, m.col.z, 1.0], uv, mat: [m.id, m.pat, wear, m.extra] });
+        self.v.push(PartVertex {
+            pos: p.into(),
+            nrm: n.normalize_or_zero().into(),
+            col: [m.col.x, m.col.y, m.col.z, 1.0],
+            uv,
+            mat: [m.id, m.pat, wear, m.extra],
+        });
         (self.v.len() - 1) as u32
     }
     pub fn append(&mut self, o: &Mesh) {
@@ -159,12 +170,20 @@ impl Mesh {
         for i in 0..nr {
             for j in 0..nc {
                 let (a, b) = (i.saturating_sub(1), (i + 1).min(nr - 1));
-                let (c, d) = if wrap { ((j + nc - 2) % (nc - 1), (j + 1) % (nc - 1)) } else { (j.saturating_sub(1), (j + 1).min(nc - 1)) };
+                let (c, d) = if wrap {
+                    ((j + nc - 2) % (nc - 1), (j + 1) % (nc - 1))
+                } else {
+                    (j.saturating_sub(1), (j + 1).min(nc - 1))
+                };
                 let mut n = (p(b, j) - p(a, j)).cross(p(i, d) - p(i, c));
                 // Degenerate (a pole or a collapsed row): borrow from the neighbours.
                 let mut k = 1;
                 while n.length_squared() < 1e-14 && k < 4 {
-                    let i2 = if i + k < nr { i + k } else { i.saturating_sub(k) };
+                    let i2 = if i + k < nr {
+                        i + k
+                    } else {
+                        i.saturating_sub(k)
+                    };
                     let (a2, b2) = (i2.saturating_sub(1), (i2 + 1).min(nr - 1));
                     n = (p(b2, j) - p(a2, j)).cross(p(i2, d) - p(i2, c));
                     if n.length_squared() < 1e-14 {
@@ -189,12 +208,23 @@ impl Mesh {
     }
     /// Parametric patch over [0,1]²: `f(u, v)` gives position, surface coordinates and wear.
     pub fn patch(&mut self, m: &Mat, nu: usize, nv: usize, flip: bool, f: impl Fn(f32, f32) -> SP) {
-        let rows: Vec<Vec<SP>> = (0..=nu).map(|i| (0..=nv).map(|j| f(i as f32 / nu as f32, j as f32 / nv as f32)).collect()).collect();
+        let rows: Vec<Vec<SP>> = (0..=nu)
+            .map(|i| {
+                (0..=nv)
+                    .map(|j| f(i as f32 / nu as f32, j as f32 / nv as f32))
+                    .collect()
+            })
+            .collect();
         self.grid(m, &rows, false, flip);
     }
     pub fn quad(&mut self, m: &Mat, p: [Vec3; 4]) {
         let n = (p[1] - p[0]).cross(p[2] - p[0]).normalize_or_zero();
-        let uvs = [[0.0, 0.0], [(p[1] - p[0]).length(), 0.0], [(p[1] - p[0]).length(), (p[2] - p[1]).length()], [0.0, (p[3] - p[0]).length()]];
+        let uvs = [
+            [0.0, 0.0],
+            [(p[1] - p[0]).length(), 0.0],
+            [(p[1] - p[0]).length(), (p[2] - p[1]).length()],
+            [0.0, (p[3] - p[0]).length()],
+        ];
         let b = self.v.len() as u32;
         for k in 0..4 {
             self.push(p[k], n, uvs[k], m, 0.0);
@@ -249,7 +279,13 @@ impl Mesh {
                         q[cc] = y;
                         let inner = q.clamp(-(h - Vec3::splat(r)), h - Vec3::splat(r));
                         let d = q - inner;
-                        let n = if d.length_squared() > 1e-12 { d.normalize() } else { let mut n = Vec3::ZERO; n[a] = s; n };
+                        let n = if d.length_squared() > 1e-12 {
+                            d.normalize()
+                        } else {
+                            let mut n = Vec3::ZERO;
+                            n[a] = s;
+                            n
+                        };
                         row.push((inner + n * r, [x, y], 0.0, n));
                     }
                     rows.push(row);
@@ -264,7 +300,8 @@ impl Mesh {
                 for i in 0..sb.len() as u32 - 1 {
                     for j in 0..nc - 1 {
                         let a0 = base + i * nc + j;
-                        self.i.extend([a0, a0 + nc, a0 + 1, a0 + 1, a0 + nc, a0 + nc + 1]);
+                        self.i
+                            .extend([a0, a0 + nc, a0 + 1, a0 + 1, a0 + nc, a0 + nc + 1]);
                     }
                 }
             }
@@ -274,11 +311,22 @@ impl Mesh {
 
     /// Surface of revolution. `prof` is (radius, height) going up the outside;
     /// `smooth` shares normals between profile segments.
-    pub fn lathe(&mut self, m: &Mat, c: Vec3, axis: Vec3, prof: &[[f32; 2]], segs: usize, smooth: bool) {
+    pub fn lathe(
+        &mut self,
+        m: &Mat,
+        c: Vec3,
+        axis: Vec3,
+        prof: &[[f32; 2]],
+        segs: usize,
+        smooth: bool,
+    ) {
         let ax = axis.normalize();
         let u = ax.any_orthonormal_vector();
         let w = ax.cross(u);
-        let sn: Vec<Vec2> = prof.windows(2).map(|p| Vec2::new(p[1][1] - p[0][1], -(p[1][0] - p[0][0])).normalize_or_zero()).collect();
+        let sn: Vec<Vec2> = prof
+            .windows(2)
+            .map(|p| Vec2::new(p[1][1] - p[0][1], -(p[1][0] - p[0][0])).normalize_or_zero())
+            .collect();
         // (radius, height, profile normal, arc length)
         let mut rings: Vec<(f32, f32, Vec2, f32)> = Vec::new();
         let mut arc = 0.0;
@@ -287,7 +335,9 @@ impl Mesh {
                 arc += Vec2::new(p[0] - prof[k - 1][0], p[1] - prof[k - 1][1]).length();
             }
             if smooth {
-                let n = (sn.get(k.wrapping_sub(1)).copied().unwrap_or(Vec2::ZERO) + sn.get(k).copied().unwrap_or(Vec2::ZERO)).normalize_or_zero();
+                let n = (sn.get(k.wrapping_sub(1)).copied().unwrap_or(Vec2::ZERO)
+                    + sn.get(k).copied().unwrap_or(Vec2::ZERO))
+                .normalize_or_zero();
                 rings.push((p[0], p[1], n, arc));
             } else {
                 if k > 0 {
@@ -304,10 +354,20 @@ impl Mesh {
             for k in 0..=segs {
                 let t = k as f32 / segs as f32 * TAU;
                 let d = u * t.cos() + w * t.sin();
-                self.push(c + ax * hgt + d * r, d * n.x + ax * n.y, [t * r.max(0.004), a], m, 0.0);
+                self.push(
+                    c + ax * hgt + d * r,
+                    d * n.x + ax * n.y,
+                    [t * r.max(0.004), a],
+                    m,
+                    0.0,
+                );
             }
         }
-        let pairs: Vec<u32> = if smooth { (0..rings.len() as u32 - 1).collect() } else { (0..rings.len() as u32 / 2).map(|k| k * 2).collect() };
+        let pairs: Vec<u32> = if smooth {
+            (0..rings.len() as u32 - 1).collect()
+        } else {
+            (0..rings.len() as u32 / 2).map(|k| k * 2).collect()
+        };
         for i in pairs {
             for j in 0..nc - 1 {
                 let a = base + i * nc + j;
@@ -319,7 +379,9 @@ impl Mesh {
     /// Tube along a polyline with radius `r(t)`, t in [0, 1] along its length.
     pub fn tube(&mut self, m: &Mat, pts: &[Vec3], r: &dyn Fn(f32) -> f32, segs: usize, caps: bool) {
         let n = pts.len();
-        let tang: Vec<Vec3> = (0..n).map(|i| (pts[(i + 1).min(n - 1)] - pts[i.saturating_sub(1)]).normalize()).collect();
+        let tang: Vec<Vec3> = (0..n)
+            .map(|i| (pts[(i + 1).min(n - 1)] - pts[i.saturating_sub(1)]).normalize())
+            .collect();
         let mut len = vec![0.0f32; n];
         for i in 1..n {
             len[i] = len[i - 1] + (pts[i] - pts[i - 1]).length();
@@ -333,10 +395,16 @@ impl Mesh {
             }
             let b = tang[i].cross(nrm);
             let rad = r(len[i] / total);
-            let row: Vec<SP> = (0..=segs).map(|k| {
-                let a = k as f32 / segs as f32 * TAU;
-                (pts[i] + (nrm * a.cos() + b * a.sin()) * rad, [a * rad, len[i]], 0.0)
-            }).collect();
+            let row: Vec<SP> = (0..=segs)
+                .map(|k| {
+                    let a = k as f32 / segs as f32 * TAU;
+                    (
+                        pts[i] + (nrm * a.cos() + b * a.sin()) * rad,
+                        [a * rad, len[i]],
+                        0.0,
+                    )
+                })
+                .collect();
             rows.push(row);
         }
         self.grid(m, &rows, true, true);
@@ -349,11 +417,22 @@ impl Mesh {
     }
 
     /// Flat outline with holes, extruded by `depth` behind the plane of `ax`, `ay`.
-    pub fn slab(&mut self, m: &Mat, outline: &[Vec2], holes: &[Vec<Vec2>], o: Vec3, ax: Vec3, ay: Vec3, depth: f32) {
+    pub fn slab(
+        &mut self,
+        m: &Mat,
+        outline: &[Vec2],
+        holes: &[Vec<Vec2>],
+        o: Vec3,
+        ax: Vec3,
+        ay: Vec3,
+        depth: f32,
+    ) {
         let az = ax.cross(ay).normalize();
         let mut flat: Vec<f64> = Vec::new();
         let mut hi = Vec::new();
-        let rings: Vec<&[Vec2]> = std::iter::once(outline).chain(holes.iter().map(|h| h.as_slice())).collect();
+        let rings: Vec<&[Vec2]> = std::iter::once(outline)
+            .chain(holes.iter().map(|h| h.as_slice()))
+            .collect();
         for (k, ring) in rings.iter().enumerate() {
             if k > 0 {
                 hi.push(flat.len() / 2);
@@ -363,7 +442,10 @@ impl Mesh {
             }
         }
         let tris = earcutr::earcut(&flat, &hi, 2).unwrap_or_default();
-        let pts: Vec<Vec2> = flat.chunks(2).map(|c| Vec2::new(c[0] as f32, c[1] as f32)).collect();
+        let pts: Vec<Vec2> = flat
+            .chunks(2)
+            .map(|c| Vec2::new(c[0] as f32, c[1] as f32))
+            .collect();
         for (off, n) in [(0.0, az), (-depth, -az)] {
             if depth == 0.0 && off != 0.0 {
                 break;
@@ -393,7 +475,13 @@ impl Mesh {
         let b = self.push(c, n, [0.0, 0.0], m, 0.0);
         for k in 0..=segs {
             let a = k as f32 / segs as f32 * TAU;
-            self.push(c + (x * a.cos() + y * a.sin()) * r, n, [a.cos(), a.sin()], m, 0.0);
+            self.push(
+                c + (x * a.cos() + y * a.sin()) * r,
+                n,
+                [a.cos(), a.sin()],
+                m,
+                0.0,
+            );
             if k > 0 {
                 self.i.extend([b, b + k as u32, b + k as u32 + 1]);
             }
@@ -405,7 +493,10 @@ impl Mesh {
         let n = n.normalize();
         let x0 = n.any_orthonormal_vector();
         let y0 = n.cross(x0);
-        let (x, y) = (x0 * spin.cos() + y0 * spin.sin(), -x0 * spin.sin() + y0 * spin.cos());
+        let (x, y) = (
+            x0 * spin.cos() + y0 * spin.sin(),
+            -x0 * spin.sin() + y0 * spin.cos(),
+        );
         let rings = [1.0f32, 0.92, 0.72, 0.42, 0.0];
         let base = self.v.len() as u32;
         for &f in &rings {
@@ -413,8 +504,15 @@ impl Mesh {
             for k in 0..=segs {
                 let a = k as f32 / segs as f32 * TAU;
                 let d = x * a.cos() + y * a.sin();
-                let nn = d * (f / (r * r)) + n * (z / (h * h)).max(if f == 0.0 { 1.0 } else { 0.0 });
-                self.push(c + d * (r * f) + n * z, nn, [f * a.cos(), f * a.sin()], m, 0.0);
+                let nn =
+                    d * (f / (r * r)) + n * (z / (h * h)).max(if f == 0.0 { 1.0 } else { 0.0 });
+                self.push(
+                    c + d * (r * f) + n * z,
+                    nn,
+                    [f * a.cos(), f * a.sin()],
+                    m,
+                    0.0,
+                );
             }
         }
         let nc = segs as u32 + 1;
@@ -432,8 +530,27 @@ impl Mesh {
     /// Hex bolt head with a washer.
     pub fn bolt(&mut self, m: &Mat, c: Vec3, n: Vec3, r: f32) {
         let n = n.normalize();
-        self.lathe(m, c, n, &[[r * 1.5, 0.0], [r * 1.5, r * 0.15], [0.0, r * 0.15]], 12, false);
-        self.lathe(m, c + n * r * 0.15, n, &[[r, 0.0], [r, r * 0.65], [r * 0.85, r * 0.75], [0.0, r * 0.75]], 6, false);
+        self.lathe(
+            m,
+            c,
+            n,
+            &[[r * 1.5, 0.0], [r * 1.5, r * 0.15], [0.0, r * 0.15]],
+            12,
+            false,
+        );
+        self.lathe(
+            m,
+            c + n * r * 0.15,
+            n,
+            &[
+                [r, 0.0],
+                [r, r * 0.65],
+                [r * 0.85, r * 0.75],
+                [0.0, r * 0.75],
+            ],
+            6,
+            false,
+        );
     }
 }
 
@@ -450,9 +567,16 @@ pub fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
 /// NACA four-digit section: camber line height and half thickness at chord fraction x.
 pub fn naca(x: f32, t: f32, m: f32) -> (f32, f32) {
     let x = x.clamp(0.0, 1.0);
-    let yt = 5.0 * t * (0.2969 * x.sqrt() - 0.1260 * x - 0.3516 * x * x + 0.2843 * x * x * x - 0.1036 * x * x * x * x);
+    let yt = 5.0
+        * t
+        * (0.2969 * x.sqrt() - 0.1260 * x - 0.3516 * x * x + 0.2843 * x * x * x
+            - 0.1036 * x * x * x * x);
     let p = 0.4;
-    let yc = if x < p { m / (p * p) * (2.0 * p * x - x * x) } else { m / ((1.0 - p) * (1.0 - p)) * (1.0 - 2.0 * p + 2.0 * p * x - x * x) };
+    let yc = if x < p {
+        m / (p * p) * (2.0 * p * x - x * x)
+    } else {
+        m / ((1.0 - p) * (1.0 - p)) * (1.0 - 2.0 * p + 2.0 * p * x - x * x)
+    };
     (yc, yt.max(0.0))
 }
 
@@ -483,7 +607,18 @@ impl Foil {
         k.le + k.cdir * (xc * k.c) + k.up * (k.c * (yc + side * yt * k.tf))
     }
     /// The skin between chord fractions x0(s) and x1(s), upper surface then lower.
-    pub fn skin(&self, mesh: &mut Mesh, m: &Mat, s0: f32, s1: f32, ns: usize, x0: &dyn Fn(f32) -> f32, x1: &dyn Fn(f32) -> f32, nx: usize, nose: bool) {
+    pub fn skin(
+        &self,
+        mesh: &mut Mesh,
+        m: &Mat,
+        s0: f32,
+        s1: f32,
+        ns: usize,
+        x0: &dyn Fn(f32) -> f32,
+        x1: &dyn Fn(f32) -> f32,
+        nx: usize,
+        nose: bool,
+    ) {
         // Normals come from the grid's parameter directions: make sure they point out.
         let k = (self.at)((s0 + s1) * 0.5);
         let ds = (self.at)(s1).le - (self.at)(s0).le;
@@ -495,20 +630,42 @@ impl Foil {
             let c = (self.at)(s).c;
             let mut row = Vec::new();
             for j in 0..=2 * nx {
-                let (side, w) = if j <= nx { (1.0, 1.0 - j as f32 / nx as f32) } else { (-1.0, (j - nx) as f32 / nx as f32) };
+                let (side, w) = if j <= nx {
+                    (1.0, 1.0 - j as f32 / nx as f32)
+                } else {
+                    (-1.0, (j - nx) as f32 / nx as f32)
+                };
                 let xc = a + (b - a) * (1.0 - (w * FRAC_PI_2).cos());
-                let wear = if nose { 0.2 * (1.0 - smoothstep(0.0, 0.08, xc - a)) } else { 1.0 - smoothstep(0.0, 0.1, xc) };
-                row.push((self.pt(s, xc, side, if nose { a } else { -1.0 }), [s, side * xc * c], wear));
+                let wear = if nose {
+                    0.2 * (1.0 - smoothstep(0.0, 0.08, xc - a))
+                } else {
+                    1.0 - smoothstep(0.0, 0.1, xc)
+                };
+                row.push((
+                    self.pt(s, xc, side, if nose { a } else { -1.0 }),
+                    [s, side * xc * c],
+                    wear,
+                ));
             }
             rows.push(row);
         }
         mesh.grid(m, &rows, false, flip);
     }
     /// The flat web closing an open skin at chord fraction x(s).
-    pub fn web(&self, mesh: &mut Mesh, m: &Mat, s0: f32, s1: f32, ns: usize, x: &dyn Fn(f32) -> f32) {
+    pub fn web(
+        &self,
+        mesh: &mut Mesh,
+        m: &Mat,
+        s0: f32,
+        s1: f32,
+        ns: usize,
+        x: &dyn Fn(f32) -> f32,
+    ) {
         mesh.patch(m, ns, 2, false, |a, b| {
             let s = s0 + (s1 - s0) * a;
-            let p = self.pt(s, x(s), 1.0, -1.0).lerp(self.pt(s, x(s), -1.0, -1.0), b);
+            let p = self
+                .pt(s, x(s), 1.0, -1.0)
+                .lerp(self.pt(s, x(s), -1.0, -1.0), b);
             (p, [s, b], 0.0)
         });
     }
@@ -517,7 +674,11 @@ impl Foil {
         let n = 16;
         let mut ring = Vec::new();
         for j in 0..=2 * n {
-            let (side, w) = if j <= n { (1.0, 1.0 - j as f32 / n as f32) } else { (-1.0, (j - n) as f32 / n as f32) };
+            let (side, w) = if j <= n {
+                (1.0, 1.0 - j as f32 / n as f32)
+            } else {
+                (-1.0, (j - n) as f32 / n as f32)
+            };
             let xc = a + (b - a) * (1.0 - (w * FRAC_PI_2).cos());
             ring.push(self.pt(s, xc, side, if nose { a } else { -1.0 }));
         }
@@ -626,9 +787,19 @@ pub struct Drive {
 }
 
 impl Drive {
-    pub const NONE: Drive = Drive { input: Input::Gear, curve: Curve::Lin, gain: 0.0, offset: 0.0 };
+    pub const NONE: Drive = Drive {
+        input: Input::Gear,
+        curve: Curve::Lin,
+        gain: 0.0,
+        offset: 0.0,
+    };
     pub const fn new(input: Input, gain: f32) -> Self {
-        Self { input, curve: Curve::Lin, gain, offset: 0.0 }
+        Self {
+            input,
+            curve: Curve::Lin,
+            gain,
+            offset: 0.0,
+        }
     }
     pub const fn smooth(mut self, a: f32, b: f32) -> Self {
         self.curve = Curve::Smooth(a, b);
@@ -681,19 +852,35 @@ pub enum Anim {
 impl Anim {
     /// Turns about the hinge by `d`.
     pub const fn hinge(d: Drive) -> Self {
-        Anim::Move(Motion { turn: [d, Drive::NONE], slide: Drive::NONE, dir: Vec3::ZERO })
+        Anim::Move(Motion {
+            turn: [d, Drive::NONE],
+            slide: Drive::NONE,
+            dir: Vec3::ZERO,
+        })
     }
     /// Turns about the hinge by the sum of two drives.
     pub const fn hinge2(a: Drive, b: Drive) -> Self {
-        Anim::Move(Motion { turn: [a, b], slide: Drive::NONE, dir: Vec3::ZERO })
+        Anim::Move(Motion {
+            turn: [a, b],
+            slide: Drive::NONE,
+            dir: Vec3::ZERO,
+        })
     }
     /// Slides along `dir` by `d` metres.
     pub const fn slide(d: Drive, dir: Vec3) -> Self {
-        Anim::Move(Motion { turn: [Drive::NONE, Drive::NONE], slide: d, dir })
+        Anim::Move(Motion {
+            turn: [Drive::NONE, Drive::NONE],
+            slide: d,
+            dir,
+        })
     }
     /// Turns by `t`, then slides along `dir` by `s`.
     pub const fn turn_slide(t: Drive, s: Drive, dir: Vec3) -> Self {
-        Anim::Move(Motion { turn: [t, Drive::NONE], slide: s, dir })
+        Anim::Move(Motion {
+            turn: [t, Drive::NONE],
+            slide: s,
+            dir,
+        })
     }
 }
 
@@ -766,19 +953,57 @@ pub struct Builder {
     pub pieces: Vec<Piece>,
 }
 impl Builder {
-    pub fn add(&mut self, name: &'static str, group: usize, mesh: Mesh, anim: Anim, pivot: Vec3, axis: Vec3, parent: Option<usize>) -> usize {
-        self.pieces.push(Piece { name, mesh, group, parent, pivot, axis: axis.normalize_or_zero(), anim, role: Role::Other, vis: Vis::Always, glass: false, occluder: true });
+    pub fn add(
+        &mut self,
+        name: &'static str,
+        group: usize,
+        mesh: Mesh,
+        anim: Anim,
+        pivot: Vec3,
+        axis: Vec3,
+        parent: Option<usize>,
+    ) -> usize {
+        self.pieces.push(Piece {
+            name,
+            mesh,
+            group,
+            parent,
+            pivot,
+            axis: axis.normalize_or_zero(),
+            anim,
+            role: Role::Other,
+            vis: Vis::Always,
+            glass: false,
+            occluder: true,
+        });
         self.pieces.len() - 1
     }
     pub fn fixed(&mut self, name: &'static str, group: usize, mesh: Mesh) -> usize {
         self.add(name, group, mesh, Anim::Fixed, Vec3::ZERO, Vec3::X, None)
     }
     /// Add a right-side piece and its mirror image on the left. Returns (left, right).
-    pub fn pair(&mut self, name: [&'static str; 2], group: [usize; 2], mesh: Mesh, anim: impl Fn(f32) -> Anim, pivot: Vec3, axis: Vec3, parent: [Option<usize>; 2]) -> (usize, usize) {
+    pub fn pair(
+        &mut self,
+        name: [&'static str; 2],
+        group: [usize; 2],
+        mesh: Mesh,
+        anim: impl Fn(f32) -> Anim,
+        pivot: Vec3,
+        axis: Vec3,
+        parent: [Option<usize>; 2],
+    ) -> (usize, usize) {
         let left = mesh.mirror_x();
         // Mirroring flips the sense of rotation: flip the axis back so equal
         // angles move both sides the same way.
-        let l = self.add(name[0], group[0], left, anim(-1.0), pivot * Vec3::new(-1.0, 1.0, 1.0), -(axis * Vec3::new(-1.0, 1.0, 1.0)), parent[0]);
+        let l = self.add(
+            name[0],
+            group[0],
+            left,
+            anim(-1.0),
+            pivot * Vec3::new(-1.0, 1.0, 1.0),
+            -(axis * Vec3::new(-1.0, 1.0, 1.0)),
+            parent[0],
+        );
         let r = self.add(name[1], group[1], mesh, anim(1.0), pivot, axis, parent[1]);
         (l, r)
     }
@@ -817,7 +1042,10 @@ impl Model {
                 }
                 let id = v.mat[3].round() as u32;
                 let at = Vec3::from(v.pos);
-                match acc.iter_mut().find(|(l, s, n)| l.piece == pi && l.id == id && (*s / *n).distance(at) < 0.6) {
+                match acc
+                    .iter_mut()
+                    .find(|(l, s, n)| l.piece == pi && l.id == id && (*s / *n).distance(at) < 0.6)
+                {
                     Some((_, s, n)) => {
                         *s += at;
                         *n += 1.0;
@@ -826,7 +1054,9 @@ impl Model {
                 }
             }
         }
-        acc.into_iter().map(|(l, s, n)| Lamp { at: s / n, ..l }).collect()
+        acc.into_iter()
+            .map(|(l, s, n)| Lamp { at: s / n, ..l })
+            .collect()
     }
 
     /// Finish a model: split the cut pieces and merge the groups.
@@ -842,11 +1072,18 @@ impl Model {
     }
     /// Centre and half size of everything solid in it (body frame, at rest).
     pub fn bounds(&self) -> (Vec3, Vec3) {
-        let (lo, hi) = self.pieces.iter().filter(|p| !p.glass && p.vis != Vis::Chute).flat_map(|p| p.mesh.v.iter()).fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(lo, hi), v| (lo.min(v.pos.into()), hi.max(v.pos.into())));
+        let (lo, hi) = self
+            .pieces
+            .iter()
+            .filter(|p| !p.glass && p.vis != Vis::Chute)
+            .flat_map(|p| p.mesh.v.iter())
+            .fold(
+                (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)),
+                |(lo, hi), v| (lo.min(v.pos.into()), hi.max(v.pos.into())),
+            );
         ((lo + hi) * 0.5, (hi - lo) * 0.5)
     }
 }
-
 
 /// Static pieces that mix surfaces with openings cut in them and plain ones
 /// are split, so the plain part can be drawn without discarding fragments
@@ -880,7 +1117,19 @@ pub fn split_cut(pieces: &mut Vec<Piece>) {
         let [cut, solid] = parts;
         let (name, group, occluder, role) = (p.name, p.group, p.occluder, p.role);
         p.mesh = cut;
-        pieces.push(Piece { name, mesh: solid, group, parent: None, pivot: Vec3::ZERO, axis: Vec3::X, anim: Anim::Fixed, role, vis: Vis::Always, glass: false, occluder });
+        pieces.push(Piece {
+            name,
+            mesh: solid,
+            group,
+            parent: None,
+            pivot: Vec3::ZERO,
+            axis: Vec3::X,
+            anim: Anim::Fixed,
+            role,
+            vis: Vis::Always,
+            glass: false,
+            occluder,
+        });
     }
 }
 
@@ -892,14 +1141,27 @@ pub fn inspection_plate(m: &mut Mesh, c: Vec3, n: Vec3, up: Vec3, r: f32, screws
     let (x, y) = (up.cross(n).normalize(), up);
     for k in 0..screws {
         let a = k as f32 / screws as f32 * TAU + 0.3;
-        m.screw(&SCREW_PAINT, c + (x * a.cos() + y * a.sin()) * (r - 0.011) + n * 0.0003, n, 0.0045, c.x * 9.0 + c.z * 3.0 + k as f32);
+        m.screw(
+            &SCREW_PAINT,
+            c + (x * a.cos() + y * a.sin()) * (r - 0.011) + n * 0.0003,
+            n,
+            0.0045,
+            c.x * 9.0 + c.z * 3.0 + k as f32,
+        );
     }
 }
 
 /// Spars and ribs inside a lifting surface. Never seen while the skin is
 /// whole; once a piece is torn off they are what the stump shows.
 /// `spars`: chord fractions; `ribs`: (station, from, to chord fraction).
-pub fn structure(f: &Foil, m: &mut Mesh, s0: f32, s1: f32, spars: &[f32], ribs: &[(f32, f32, f32)]) {
+pub fn structure(
+    f: &Foil,
+    m: &mut Mesh,
+    s0: f32,
+    s1: f32,
+    spars: &[f32],
+    ribs: &[(f32, f32, f32)],
+) {
     let ns = ((s1 - s0) / 0.15).ceil().max(2.0) as usize;
     let inset = |p: Vec3, mid: Vec3| p + (mid - p).normalize_or_zero() * 0.004;
     for &xc in spars {
@@ -911,7 +1173,13 @@ pub fn structure(f: &Foil, m: &mut Mesh, s0: f32, s1: f32, spars: &[f32], ribs: 
             (inset(t, mid).lerp(inset(b, mid), bb), [s, bb], 0.0)
         });
         for side in [1.0f32, -1.0] {
-            let pts: Vec<Vec3> = (0..=ns).map(|k| { let s = s0 + (s1 - s0) * k as f32 / ns as f32; let p = f.pt(s, xc, side, -1.0); inset(p, f.pt(s, xc, -side, -1.0)) }).collect();
+            let pts: Vec<Vec3> = (0..=ns)
+                .map(|k| {
+                    let s = s0 + (s1 - s0) * k as f32 / ns as f32;
+                    let p = f.pt(s, xc, side, -1.0);
+                    inset(p, f.pt(s, xc, -side, -1.0))
+                })
+                .collect();
             m.tube(&ALU, &pts, &|_| 0.011, 6, true);
         }
     }
@@ -919,7 +1187,11 @@ pub fn structure(f: &Foil, m: &mut Mesh, s0: f32, s1: f32, spars: &[f32], ribs: 
         let n = 14;
         let mut ring = Vec::new();
         for j in 0..=2 * n {
-            let (side, w) = if j <= n { (1.0, 1.0 - j as f32 / n as f32) } else { (-1.0, (j - n) as f32 / n as f32) };
+            let (side, w) = if j <= n {
+                (1.0, 1.0 - j as f32 / n as f32)
+            } else {
+                (-1.0, (j - n) as f32 / n as f32)
+            };
             let xc = a + (bb - a) * (1.0 - (w * FRAC_PI_2).cos());
             let p = f.pt(s, xc, side, -1.0);
             ring.push(inset(p, f.pt(s, xc, -side, -1.0)));
@@ -935,17 +1207,39 @@ pub fn structure(f: &Foil, m: &mut Mesh, s0: f32, s1: f32, spars: &[f32], ribs: 
 
 /// Tyre and wheel around axle `axis` through `c`.
 pub fn wheel(m: &mut Mesh, c: Vec3, axis: Vec3, r: f32, half_w: f32, rim: f32, brake: bool) {
-    let tyre: Vec<[f32; 2]> = [(0.45, -0.80), (0.58, -0.97), (0.74, -1.0), (0.87, -0.92), (0.96, -0.72), (1.0, -0.40), (1.0, 0.40), (0.96, 0.72), (0.87, 0.92), (0.74, 1.0), (0.58, 0.97), (0.45, 0.80)]
-        .iter()
-        .map(|&(a, b)| [rim + (r - rim) * ((a - 0.45) / 0.55), b * half_w])
-        .collect();
+    let tyre: Vec<[f32; 2]> = [
+        (0.45, -0.80),
+        (0.58, -0.97),
+        (0.74, -1.0),
+        (0.87, -0.92),
+        (0.96, -0.72),
+        (1.0, -0.40),
+        (1.0, 0.40),
+        (0.96, 0.72),
+        (0.87, 0.92),
+        (0.74, 1.0),
+        (0.58, 0.97),
+        (0.45, 0.80),
+    ]
+    .iter()
+    .map(|&(a, b)| [rim + (r - rim) * ((a - 0.45) / 0.55), b * half_w])
+    .collect();
     m.lathe(&RUBBER.pat(pat::TREAD), c, axis, &tyre, 48, true);
     let hub = mt(mat::SATIN, 0.55, 0.56, 0.57);
     for s in [-1.0f32, 1.0] {
-        let p: Vec<[f32; 2]> = [(rim + 0.008, 0.80), (rim + 0.008, 0.88), (rim - 0.004, 0.86), (rim * 0.8, 0.75), (rim * 0.62, 0.78), (rim * 0.40, 0.88), (rim * 0.22, 0.92), (0.0, 0.92)]
-            .iter()
-            .map(|&(a, b)| [a, b * half_w * s])
-            .collect();
+        let p: Vec<[f32; 2]> = [
+            (rim + 0.008, 0.80),
+            (rim + 0.008, 0.88),
+            (rim - 0.004, 0.86),
+            (rim * 0.8, 0.75),
+            (rim * 0.62, 0.78),
+            (rim * 0.40, 0.88),
+            (rim * 0.22, 0.92),
+            (0.0, 0.92),
+        ]
+        .iter()
+        .map(|&(a, b)| [a, b * half_w * s])
+        .collect();
         let mut p = p;
         if s < 0.0 {
             p.reverse();
@@ -963,7 +1257,20 @@ pub fn wheel(m: &mut Mesh, c: Vec3, axis: Vec3, r: f32, half_w: f32, rim: f32, b
     let q = c + u * rim * 0.72 + axis * half_w * 0.8;
     m.tube(&STEEL, &[q, q + axis * 0.02], &|_| 0.003, 6, true);
     if brake {
-        m.lathe(&mt(mat::STEEL, 0.4, 0.36, 0.33).x(2.0), c - axis * (half_w + 0.012), axis, &[[rim * 0.75, 0.0], [rim * 1.18, 0.0], [rim * 1.18, 0.006], [rim * 0.75, 0.006], [rim * 0.75, 0.0]], 40, false);
+        m.lathe(
+            &mt(mat::STEEL, 0.4, 0.36, 0.33).x(2.0),
+            c - axis * (half_w + 0.012),
+            axis,
+            &[
+                [rim * 0.75, 0.0],
+                [rim * 1.18, 0.0],
+                [rim * 1.18, 0.006],
+                [rim * 0.75, 0.006],
+                [rim * 0.75, 0.0],
+            ],
+            40,
+            false,
+        );
     }
 }
 
@@ -995,7 +1302,11 @@ pub fn bake_ao(pieces: &mut [Piece], cfg: &AoBake) {
     }
     let lo = lo - Vec3::splat(vox * 2.0);
     let size = hi - lo + Vec3::splat(vox * 2.0);
-    let dim = [(size.x / vox) as usize + 1, (size.y / vox) as usize + 1, (size.z / vox) as usize + 1];
+    let dim = [
+        (size.x / vox) as usize + 1,
+        (size.y / vox) as usize + 1,
+        (size.z / vox) as usize + 1,
+    ];
     let mut grid = vec![0u64; (dim[0] * dim[1] * dim[2]) / 64 + 1];
     let cell = |p: Vec3| -> Option<usize> {
         let q = (p - lo) / vox;
@@ -1008,13 +1319,17 @@ pub fn bake_ao(pieces: &mut [Piece], cfg: &AoBake) {
         }
         Some((z * dim[1] + y) * dim[0] + x)
     };
-    for p in pieces.iter().filter(|p| p.occluder && !p.glass && !matches!(p.role, Role::WingStructure(_) | Role::TailStructure)) {
+    for p in pieces.iter().filter(|p| {
+        p.occluder && !p.glass && !matches!(p.role, Role::WingStructure(_) | Role::TailStructure)
+    }) {
         let m = &p.mesh;
         for t in m.i.chunks(3) {
             let [a, b, c] = [t[0], t[1], t[2]].map(|i| Vec3::from(m.v[i as usize].pos));
             let pattern = m.v[t[0] as usize].mat[1];
             let cut = cut_by(pattern);
-            let n = (((b - a).length().max((c - a).length()).max((c - b).length())) / (vox * 0.5)).ceil().max(1.0) as usize;
+            let n = (((b - a).length().max((c - a).length()).max((c - b).length())) / (vox * 0.5))
+                .ceil()
+                .max(1.0) as usize;
             for i in 0..=n {
                 for j in 0..=n - i {
                     let q = a + (b - a) * (i as f32 / n as f32) + (c - a) * (j as f32 / n as f32);
@@ -1065,7 +1380,9 @@ pub fn bake_ao(pieces: &mut [Piece], cfg: &AoBake) {
         let hit = dirs.iter().filter(|d| occluded(o, q * **d)).count();
         1.0 - hit as f32 / rays as f32
     };
-    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
     for p in pieces.iter_mut() {
         if p.glass {
             continue;
@@ -1097,7 +1414,13 @@ pub fn bake_ao(pieces: &mut [Piece], cfg: &AoBake) {
 /// same way, so the per-vertex ray noise doesn't show as speckle.
 fn smooth_ao(verts: &mut [PartVertex], r: f32, threads: usize) {
     use std::collections::HashMap;
-    let key = |p: [f32; 3]| ((p[0] / r).floor() as i32, (p[1] / r).floor() as i32, (p[2] / r).floor() as i32);
+    let key = |p: [f32; 3]| {
+        (
+            (p[0] / r).floor() as i32,
+            (p[1] / r).floor() as i32,
+            (p[2] / r).floor() as i32,
+        )
+    };
     let mut cells: HashMap<(i32, i32, i32), Vec<u32>> = HashMap::new();
     for (i, v) in verts.iter().enumerate() {
         cells.entry(key(v.pos)).or_default().push(i as u32);
@@ -1120,7 +1443,11 @@ fn smooth_ao(verts: &mut [PartVertex], r: f32, threads: usize) {
                                 for dx in -1..=1 {
                                     for dy in -1..=1 {
                                         for dz in -1..=1 {
-                                            let Some(list) = cells.get(&(cx + dx, cy + dy, cz + dz)) else { continue };
+                                            let Some(list) =
+                                                cells.get(&(cx + dx, cy + dy, cz + dz))
+                                            else {
+                                                continue;
+                                            };
                                             for &j in list {
                                                 let o = &src[j as usize];
                                                 let d2 = (Vec3::from(o.pos) - p).length_squared();
@@ -1128,7 +1455,8 @@ fn smooth_ao(verts: &mut [PartVertex], r: f32, threads: usize) {
                                                 if d2 > r * r || nd < 0.8 {
                                                     continue;
                                                 }
-                                                let w = (-d2 / (r * r * 0.35)).exp() * (nd - 0.8) * 5.0;
+                                                let w =
+                                                    (-d2 / (r * r * 0.35)).exp() * (nd - 0.8) * 5.0;
                                                 sum += o.col[3] * w;
                                                 wsum += w;
                                             }

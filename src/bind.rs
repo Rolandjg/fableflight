@@ -25,7 +25,14 @@ pub enum AxisAct {
 }
 
 impl AxisAct {
-    pub const ALL: [AxisAct; 6] = [AxisAct::Pitch, AxisAct::Roll, AxisAct::Yaw, AxisAct::Throttle, AxisAct::BrakeLeft, AxisAct::BrakeRight];
+    pub const ALL: [AxisAct; 6] = [
+        AxisAct::Pitch,
+        AxisAct::Roll,
+        AxisAct::Yaw,
+        AxisAct::Throttle,
+        AxisAct::BrakeLeft,
+        AxisAct::BrakeRight,
+    ];
 
     pub fn id(self) -> &'static str {
         match self {
@@ -54,12 +61,30 @@ impl AxisAct {
     pub fn how(self) -> &'static str {
         use crate::i18n::t;
         match self {
-            AxisAct::Pitch => t!("Pull the stick back, nose up, all the way.", "Tirez le manche à fond vers vous (cabrer)."),
-            AxisAct::Roll => t!("Push the stick all the way right.", "Poussez le manche à fond vers la droite."),
-            AxisAct::Yaw => t!("Push the right rudder pedal all the way.", "Enfoncez à fond la pédale de droite."),
-            AxisAct::Throttle => t!("Push the throttle all the way forward.", "Poussez la manette des gaz à fond."),
-            AxisAct::BrakeLeft => t!("Press the left toe brake all the way.", "Appuyez à fond sur le frein gauche."),
-            AxisAct::BrakeRight => t!("Press the right toe brake all the way.", "Appuyez à fond sur le frein droit."),
+            AxisAct::Pitch => t!(
+                "Pull the stick back, nose up, all the way.",
+                "Tirez le manche à fond vers vous (cabrer)."
+            ),
+            AxisAct::Roll => t!(
+                "Push the stick all the way right.",
+                "Poussez le manche à fond vers la droite."
+            ),
+            AxisAct::Yaw => t!(
+                "Push the right rudder pedal all the way.",
+                "Enfoncez à fond la pédale de droite."
+            ),
+            AxisAct::Throttle => t!(
+                "Push the throttle all the way forward.",
+                "Poussez la manette des gaz à fond."
+            ),
+            AxisAct::BrakeLeft => t!(
+                "Press the left toe brake all the way.",
+                "Appuyez à fond sur le frein gauche."
+            ),
+            AxisAct::BrakeRight => t!(
+                "Press the right toe brake all the way.",
+                "Appuyez à fond sur le frein droit."
+            ),
         }
     }
 
@@ -92,12 +117,22 @@ pub struct Action {
 
 impl Action {
     pub fn label(&self) -> &'static str {
-        if crate::i18n::is_fr() { self.fr } else { self.en }
+        if crate::i18n::is_fr() {
+            self.fr
+        } else {
+            self.en
+        }
     }
 }
 
 const fn act(id: &'static str, key: KeyCode, en: &'static str, fr: &'static str) -> Action {
-    Action { id, key, keyboard: true, en, fr }
+    Action {
+        id,
+        key,
+        keyboard: true,
+        en,
+        fr,
+    }
 }
 
 pub const ACTIONS: &[Action] = &[
@@ -105,48 +140,230 @@ pub const ACTIONS: &[Action] = &[
     act("pitch_up", KeyCode::KeyS, "Pitch up", "Cabrer"),
     act("roll_left", KeyCode::KeyA, "Roll left", "Roulis à gauche"),
     act("roll_right", KeyCode::KeyD, "Roll right", "Roulis à droite"),
-    act("rudder_left", KeyCode::KeyQ, "Rudder left", "Palonnier à gauche"),
-    act("rudder_right", KeyCode::KeyE, "Rudder right", "Palonnier à droite"),
-    act("throttle_up", KeyCode::ShiftLeft, "Throttle up", "Plus de gaz"),
-    act("throttle_down", KeyCode::ControlLeft, "Throttle down", "Moins de gaz"),
-    act("trim_down", KeyCode::Numpad7, "Trim nose down", "Trim à piquer"),
+    act(
+        "rudder_left",
+        KeyCode::KeyQ,
+        "Rudder left",
+        "Palonnier à gauche",
+    ),
+    act(
+        "rudder_right",
+        KeyCode::KeyE,
+        "Rudder right",
+        "Palonnier à droite",
+    ),
+    act(
+        "throttle_up",
+        KeyCode::ShiftLeft,
+        "Throttle up",
+        "Plus de gaz",
+    ),
+    act(
+        "throttle_down",
+        KeyCode::ControlLeft,
+        "Throttle down",
+        "Moins de gaz",
+    ),
+    act(
+        "trim_down",
+        KeyCode::Numpad7,
+        "Trim nose down",
+        "Trim à piquer",
+    ),
     act("trim_up", KeyCode::Numpad1, "Trim nose up", "Trim à cabrer"),
     act("brakes", KeyCode::KeyB, "Wheel brakes", "Freins de roues"),
-    act("parking_brake", KeyCode::Period, "Parking brake", "Frein de parc"),
-    act("flaps_down", KeyCode::KeyF, "Flaps down a notch", "Volets : sortir d'un cran"),
-    act("flaps_up", KeyCode::KeyV, "Flaps up a notch", "Volets : rentrer d'un cran"),
-    act("gear", KeyCode::KeyL, "Landing gear", "Train d'atterrissage"),
+    act(
+        "parking_brake",
+        KeyCode::Period,
+        "Parking brake",
+        "Frein de parc",
+    ),
+    act(
+        "flaps_down",
+        KeyCode::KeyF,
+        "Flaps down a notch",
+        "Volets : sortir d'un cran",
+    ),
+    act(
+        "flaps_up",
+        KeyCode::KeyV,
+        "Flaps up a notch",
+        "Volets : rentrer d'un cran",
+    ),
+    act(
+        "gear",
+        KeyCode::KeyL,
+        "Landing gear",
+        "Train d'atterrissage",
+    ),
     act("speedbrake", KeyCode::Slash, "Speedbrake", "Aérofreins"),
-    act("reversers", KeyCode::KeyZ, "Thrust reversers (hold)", "Inverseurs de poussée (maintenir)"),
-    act("boost", KeyCode::Space, "Boost / afterburner", "Boost / postcombustion"),
-    act("engines", KeyCode::Digit1, "Rocket: which engines burn", "Fusée : choix des moteurs allumés"),
-    act("stage", KeyCode::Backspace, "Rocket: drop the booster", "Fusée : larguer le booster"),
-    act("autoland", KeyCode::Digit2, "Rocket: the ship lands itself", "Fusée : atterrissage automatique du vaisseau"),
-    act("engine_auto", KeyCode::F4, "Start / stop the engine", "Démarrer / couper le moteur"),
-    act("master", KeyCode::Insert, "Battery master switch", "Batterie (interrupteur général)"),
-    act("ignition", KeyCode::KeyI, "Magnetos (jets: fuel controls)", "Magnétos (jets : robinets carburant)"),
+    act(
+        "reversers",
+        KeyCode::KeyZ,
+        "Thrust reversers (hold)",
+        "Inverseurs de poussée (maintenir)",
+    ),
+    act(
+        "boost",
+        KeyCode::Space,
+        "Boost / afterburner",
+        "Boost / postcombustion",
+    ),
+    act(
+        "engines",
+        KeyCode::Digit1,
+        "Rocket: which engines burn",
+        "Fusée : choix des moteurs allumés",
+    ),
+    act(
+        "stage",
+        KeyCode::Backspace,
+        "Rocket: drop the booster",
+        "Fusée : larguer le booster",
+    ),
+    act(
+        "autoland",
+        KeyCode::Digit2,
+        "Rocket: the ship lands itself",
+        "Fusée : atterrissage automatique du vaisseau",
+    ),
+    act(
+        "engine_auto",
+        KeyCode::F4,
+        "Start / stop the engine",
+        "Démarrer / couper le moteur",
+    ),
+    act(
+        "master",
+        KeyCode::Insert,
+        "Battery master switch",
+        "Batterie (interrupteur général)",
+    ),
+    act(
+        "ignition",
+        KeyCode::KeyI,
+        "Magnetos (jets: fuel controls)",
+        "Magnétos (jets : robinets carburant)",
+    ),
     act("starter", KeyCode::KeyO, "Starter", "Démarreur"),
-    act("mixture_rich", KeyCode::PageUp, "Mixture richer", "Mélange plus riche"),
-    act("mixture_lean", KeyCode::PageDown, "Mixture leaner", "Mélange plus pauvre"),
-    act("nav_display", KeyCode::KeyJ, "Navigation instruments", "Instruments de navigation"),
-    act("obs_left", KeyCode::BracketLeft, "OBS course left", "OBS : course à gauche"),
-    act("obs_right", KeyCode::BracketRight, "OBS course right", "OBS : course à droite"),
-    act("baro_qnh", KeyCode::KeyX, "Altimeter to the QNH", "Caler l'altimètre au QNH"),
-    act("heading_sync", KeyCode::KeyK, "Heading indicator to compass", "Recaler le conservateur de cap"),
-    act("camera", KeyCode::KeyC, "Chase / cockpit camera", "Caméra extérieure / cockpit"),
-    act("hud", KeyCode::KeyH, "Hide / show the HUD", "Masquer / afficher le HUD"),
+    act(
+        "mixture_rich",
+        KeyCode::PageUp,
+        "Mixture richer",
+        "Mélange plus riche",
+    ),
+    act(
+        "mixture_lean",
+        KeyCode::PageDown,
+        "Mixture leaner",
+        "Mélange plus pauvre",
+    ),
+    act(
+        "nav_display",
+        KeyCode::KeyJ,
+        "Navigation instruments",
+        "Instruments de navigation",
+    ),
+    act(
+        "obs_left",
+        KeyCode::BracketLeft,
+        "OBS course left",
+        "OBS : course à gauche",
+    ),
+    act(
+        "obs_right",
+        KeyCode::BracketRight,
+        "OBS course right",
+        "OBS : course à droite",
+    ),
+    act(
+        "baro_qnh",
+        KeyCode::KeyX,
+        "Altimeter to the QNH",
+        "Caler l'altimètre au QNH",
+    ),
+    act(
+        "heading_sync",
+        KeyCode::KeyK,
+        "Heading indicator to compass",
+        "Recaler le conservateur de cap",
+    ),
+    act(
+        "camera",
+        KeyCode::KeyC,
+        "Chase / cockpit camera",
+        "Caméra extérieure / cockpit",
+    ),
+    act(
+        "hud",
+        KeyCode::KeyH,
+        "Hide / show the HUD",
+        "Masquer / afficher le HUD",
+    ),
     act("goto", KeyCode::KeyG, "Go to a place", "Aller à un lieu"),
-    act("respawn", KeyCode::KeyR, "Respawn in the air", "Réapparaître en vol"),
-    act("pause", KeyCode::KeyP, "Pause without the menu", "Pause sans le menu"),
-    act("sound", KeyCode::KeyU, "Sound on / off", "Son activé / coupé"),
-    act("time_forward", KeyCode::KeyT, "Time of day forward", "Avancer l'heure"),
-    act("time_back", KeyCode::KeyY, "Time of day back", "Reculer l'heure"),
-    act("clouds_more", KeyCode::KeyN, "More clouds", "Plus de nuages"),
-    act("clouds_less", KeyCode::KeyM, "Fewer clouds", "Moins de nuages"),
-    act("taa", KeyCode::F2, "Anti-aliasing on / off", "Anticrénelage activé / désactivé"),
+    act(
+        "respawn",
+        KeyCode::KeyR,
+        "Respawn in the air",
+        "Réapparaître en vol",
+    ),
+    act(
+        "pause",
+        KeyCode::KeyP,
+        "Pause without the menu",
+        "Pause sans le menu",
+    ),
+    act(
+        "sound",
+        KeyCode::KeyU,
+        "Sound on / off",
+        "Son activé / coupé",
+    ),
+    act(
+        "time_forward",
+        KeyCode::KeyT,
+        "Time of day forward",
+        "Avancer l'heure",
+    ),
+    act(
+        "time_back",
+        KeyCode::KeyY,
+        "Time of day back",
+        "Reculer l'heure",
+    ),
+    act(
+        "clouds_more",
+        KeyCode::KeyN,
+        "More clouds",
+        "Plus de nuages",
+    ),
+    act(
+        "clouds_less",
+        KeyCode::KeyM,
+        "Fewer clouds",
+        "Moins de nuages",
+    ),
+    act(
+        "taa",
+        KeyCode::F2,
+        "Anti-aliasing on / off",
+        "Anticrénelage activé / désactivé",
+    ),
     act("screenshot", KeyCode::F12, "Screenshot", "Capture d'écran"),
-    Action { id: "pause_menu", key: KeyCode::Escape, keyboard: false, en: "Pause menu", fr: "Menu pause" },
-    Action { id: "flight_panel", key: KeyCode::Tab, keyboard: false, en: "Flight panel", fr: "Panneau de vol" },
+    Action {
+        id: "pause_menu",
+        key: KeyCode::Escape,
+        keyboard: false,
+        en: "Pause menu",
+        fr: "Menu pause",
+    },
+    Action {
+        id: "flight_panel",
+        key: KeyCode::Tab,
+        keyboard: false,
+        en: "Flight panel",
+        fr: "Panneau de vol",
+    },
 ];
 
 fn action(id: &str) -> Option<&'static Action> {
@@ -237,7 +454,8 @@ impl Bindings {
 
     /// Drops what is back to its default, and works the translation out again.
     fn tidy(&mut self) {
-        self.keys.retain(|id, k| action(id).is_some_and(|a| *k != Some(a.key)));
+        self.keys
+            .retain(|id, k| action(id).is_some_and(|a| *k != Some(a.key)));
         self.remap.clear();
         for a in ACTIONS.iter().filter(|a| a.keyboard) {
             if self.keys.contains_key(a.id) {
@@ -267,7 +485,16 @@ impl Bindings {
             let d = v - base;
             if d.abs() > 0.6 {
                 self.axes.retain(|_, b| !(b.dev == dev && b.code == code));
-                self.axes.insert(a, AxisBind { dev, name: name.to_string(), code, sign: d.signum(), dead: a.default_dead() });
+                self.axes.insert(
+                    a,
+                    AxisBind {
+                        dev,
+                        name: name.to_string(),
+                        code,
+                        sign: d.signum(),
+                        dead: a.default_dead(),
+                    },
+                );
                 self.capture = None;
             }
         }
@@ -278,8 +505,16 @@ impl Bindings {
         self.button_now.insert((dev, code), down);
         if down {
             if let Some(Capture::Button(id)) = self.capture.clone() {
-                self.buttons.retain(|_, b| !(b.dev == dev && b.code == code));
-                self.buttons.insert(id, ButtonBind { dev, name: name.to_string(), code });
+                self.buttons
+                    .retain(|_, b| !(b.dev == dev && b.code == code));
+                self.buttons.insert(
+                    id,
+                    ButtonBind {
+                        dev,
+                        name: name.to_string(),
+                        code,
+                    },
+                );
                 self.capture = None;
                 return;
             }
@@ -308,7 +543,11 @@ impl Bindings {
         // The dead zone, the rest of the travel stretched so there is no step out of it.
         let d = (b.dead as f64).clamp(0.0, 0.5);
         Some(if a.centred() {
-            if v.abs() < d { 0.0 } else { v.signum() * (v.abs() - d) / (1.0 - d) }
+            if v.abs() < d {
+                0.0
+            } else {
+                v.signum() * (v.abs() - d) / (1.0 - d)
+            }
         } else {
             let f = ((v + 1.0) * 0.5).clamp(0.0, 1.0);
             if f < d { 0.0 } else { (f - d) / (1.0 - d) }
@@ -317,11 +556,25 @@ impl Bindings {
 
     /// What a binding reads as, for the bindings page.
     pub fn describe_axis(&self, a: AxisAct) -> Option<String> {
-        self.axes.get(&a).map(|b| crate::i18n::t!("{} · axis {}", "{} · axe {}", short(&b.name), axis_name(b.code)))
+        self.axes.get(&a).map(|b| {
+            crate::i18n::t!(
+                "{} · axis {}",
+                "{} · axe {}",
+                short(&b.name),
+                axis_name(b.code)
+            )
+        })
     }
 
     pub fn describe_button(&self, id: &str) -> Option<String> {
-        self.buttons.get(id).map(|b| crate::i18n::t!("{} · button {}", "{} · bouton {}", short(&b.name), button_name(b.code)))
+        self.buttons.get(id).map(|b| {
+            crate::i18n::t!(
+                "{} · button {}",
+                "{} · bouton {}",
+                short(&b.name),
+                button_name(b.code)
+            )
+        })
     }
 
     // ------------------------------------------------------------ the file
@@ -332,7 +585,10 @@ impl Bindings {
 
     pub fn load() -> Self {
         let mut b = Self::default();
-        if let Some(j) = Self::path().and_then(|p| std::fs::read(p).ok()).and_then(|d| serde_json::from_slice::<serde_json::Value>(&d).ok()) {
+        if let Some(j) = Self::path()
+            .and_then(|p| std::fs::read(p).ok())
+            .and_then(|d| serde_json::from_slice::<serde_json::Value>(&d).ok())
+        {
             b.read(&j);
         }
         b
@@ -347,17 +603,41 @@ impl Bindings {
             }
         }
         let dev = |v: &serde_json::Value| -> Option<(Uuid, String, u32)> {
-            Some((uuid_from_hex(v["device"].as_str()?)?, v["name"].as_str().unwrap_or("").to_string(), v["code"].as_u64()? as u32))
+            Some((
+                uuid_from_hex(v["device"].as_str()?)?,
+                v["name"].as_str().unwrap_or("").to_string(),
+                v["code"].as_u64()? as u32,
+            ))
         };
         for v in j["axes"].as_array().into_iter().flatten() {
-            if let (Some(a), Some((dev, name, code))) = (v["action"].as_str().and_then(AxisAct::parse), dev(v)) {
-                let sign = if v["sign"].as_f64().unwrap_or(1.0) < 0.0 { -1.0 } else { 1.0 };
-                let dead = v["dead"].as_f64().map(|d| d.clamp(0.0, 0.5) as f32).unwrap_or(a.default_dead());
-                self.axes.insert(a, AxisBind { dev, name, code, sign, dead });
+            if let (Some(a), Some((dev, name, code))) =
+                (v["action"].as_str().and_then(AxisAct::parse), dev(v))
+            {
+                let sign = if v["sign"].as_f64().unwrap_or(1.0) < 0.0 {
+                    -1.0
+                } else {
+                    1.0
+                };
+                let dead = v["dead"]
+                    .as_f64()
+                    .map(|d| d.clamp(0.0, 0.5) as f32)
+                    .unwrap_or(a.default_dead());
+                self.axes.insert(
+                    a,
+                    AxisBind {
+                        dev,
+                        name,
+                        code,
+                        sign,
+                        dead,
+                    },
+                );
             }
         }
         for v in j["buttons"].as_array().into_iter().flatten() {
-            if let (Some(a), Some((dev, name, code))) = (v["action"].as_str().and_then(action), dev(v)) {
+            if let (Some(a), Some((dev, name, code))) =
+                (v["action"].as_str().and_then(action), dev(v))
+            {
                 self.buttons.insert(a.id, ButtonBind { dev, name, code });
             }
         }
@@ -373,7 +653,11 @@ impl Bindings {
         let hex = |u: &Uuid| u.iter().map(|b| format!("{b:02x}")).collect::<String>();
         let mut keys = serde_json::Map::new();
         for (id, k) in &self.keys {
-            keys.insert(id.to_string(), k.map(|k| serde_json::Value::String(format!("{k:?}"))).unwrap_or(serde_json::Value::Null));
+            keys.insert(
+                id.to_string(),
+                k.map(|k| serde_json::Value::String(format!("{k:?}")))
+                    .unwrap_or(serde_json::Value::Null),
+            );
         }
         let mut axes: Vec<_> = self.axes.iter().map(|(a, b)| serde_json::json!({ "action": a.id(), "device": hex(&b.dev), "name": b.name, "code": b.code, "sign": b.sign, "dead": b.dead })).collect();
         let mut buttons: Vec<_> = self.buttons.iter().map(|(id, b)| serde_json::json!({ "action": id, "device": hex(&b.dev), "name": b.name, "code": b.code })).collect();
@@ -433,7 +717,11 @@ pub struct Preset {
 
 impl Preset {
     pub fn label(&self) -> &'static str {
-        if crate::i18n::is_fr() { self.fr } else { self.en }
+        if crate::i18n::is_fr() {
+            self.fr
+        } else {
+            self.en
+        }
     }
 }
 
@@ -444,8 +732,19 @@ pub const PRESETS: &[Preset] = &[
         en: "Turtle Beach VelocityOne Flightstick",
         fr: "Turtle Beach VelocityOne Flightstick",
         names: &["velocityone flightstick"],
-        axes: &[(AxisAct::Pitch, ABS_Y, 1.0, 0.05), (AxisAct::Roll, ABS_X, -1.0, 0.05), (AxisAct::Yaw, ABS_Z, 1.0, 0.08), (AxisAct::Throttle, ABS_RZ, 1.0, 0.02)],
-        buttons: &[("brakes", BTN_TRIGGER), ("camera", BTN_THUMB), ("flaps_down", BTN_THUMB2), ("flaps_up", BTN_TOP), ("gear", BTN_TOP2)],
+        axes: &[
+            (AxisAct::Pitch, ABS_Y, 1.0, 0.05),
+            (AxisAct::Roll, ABS_X, -1.0, 0.05),
+            (AxisAct::Yaw, ABS_Z, 1.0, 0.08),
+            (AxisAct::Throttle, ABS_RZ, 1.0, 0.02),
+        ],
+        buttons: &[
+            ("brakes", BTN_TRIGGER),
+            ("camera", BTN_THUMB),
+            ("flaps_down", BTN_THUMB2),
+            ("flaps_up", BTN_TOP),
+            ("gear", BTN_TOP2),
+        ],
     },
     // The usual HID layout (Logitech Extreme 3D, Thrustmaster T.16000M and
     // the like): X roll, Y pitch, the twist on Rz, a throttle that reads
@@ -454,8 +753,19 @@ pub const PRESETS: &[Preset] = &[
         en: "Standard joystick (X/Y, twist, throttle)",
         fr: "Joystick standard (X/Y, torsion, manette des gaz)",
         names: &[],
-        axes: &[(AxisAct::Pitch, ABS_Y, 1.0, 0.05), (AxisAct::Roll, ABS_X, 1.0, 0.05), (AxisAct::Yaw, ABS_RZ, 1.0, 0.08), (AxisAct::Throttle, ABS_THROTTLE, -1.0, 0.02)],
-        buttons: &[("brakes", BTN_TRIGGER), ("camera", BTN_THUMB), ("flaps_down", BTN_THUMB2), ("flaps_up", BTN_TOP), ("gear", BTN_TOP2)],
+        axes: &[
+            (AxisAct::Pitch, ABS_Y, 1.0, 0.05),
+            (AxisAct::Roll, ABS_X, 1.0, 0.05),
+            (AxisAct::Yaw, ABS_RZ, 1.0, 0.08),
+            (AxisAct::Throttle, ABS_THROTTLE, -1.0, 0.02),
+        ],
+        buttons: &[
+            ("brakes", BTN_TRIGGER),
+            ("camera", BTN_THUMB),
+            ("flaps_down", BTN_THUMB2),
+            ("flaps_up", BTN_TOP),
+            ("gear", BTN_TOP2),
+        ],
     },
     // Rudder pedals (Logitech/Saitek, Thrustmaster TFRP…): rudder on Rz,
     // the toe brakes on X and Y.
@@ -463,7 +773,11 @@ pub const PRESETS: &[Preset] = &[
         en: "Rudder pedals (rudder, toe brakes)",
         fr: "Palonnier (direction, freins aux pieds)",
         names: &["rudder", "pedal"],
-        axes: &[(AxisAct::Yaw, ABS_RZ, 1.0, 0.03), (AxisAct::BrakeLeft, ABS_X, 1.0, 0.05), (AxisAct::BrakeRight, ABS_Y, 1.0, 0.05)],
+        axes: &[
+            (AxisAct::Yaw, ABS_RZ, 1.0, 0.03),
+            (AxisAct::BrakeLeft, ABS_X, 1.0, 0.05),
+            (AxisAct::BrakeRight, ABS_Y, 1.0, 0.05),
+        ],
         buttons: &[],
     },
 ];
@@ -471,7 +785,9 @@ pub const PRESETS: &[Preset] = &[
 /// The preset that goes on a device by its name, if any.
 pub fn preset_for(name: &str) -> Option<&'static Preset> {
     let n = name.to_lowercase();
-    PRESETS.iter().find(|p| p.names.iter().any(|m| n.contains(m)))
+    PRESETS
+        .iter()
+        .find(|p| p.names.iter().any(|m| n.contains(m)))
 }
 
 impl Bindings {
@@ -480,14 +796,31 @@ impl Bindings {
     pub fn apply_preset(&mut self, p: &Preset, dev: Uuid, name: &str, over: bool) {
         for &(a, code, sign, dead) in p.axes {
             if over || !self.axes.contains_key(&a) {
-                self.axes.insert(a, AxisBind { dev, name: name.to_string(), code, sign, dead });
+                self.axes.insert(
+                    a,
+                    AxisBind {
+                        dev,
+                        name: name.to_string(),
+                        code,
+                        sign,
+                        dead,
+                    },
+                );
             }
         }
         for &(id, code) in p.buttons {
             if let Some(a) = action(id) {
                 if over || !self.buttons.contains_key(a.id) {
-                    self.buttons.retain(|_, b| !(b.dev == dev && b.code == code));
-                    self.buttons.insert(a.id, ButtonBind { dev, name: name.to_string(), code });
+                    self.buttons
+                        .retain(|_, b| !(b.dev == dev && b.code == code));
+                    self.buttons.insert(
+                        a.id,
+                        ButtonBind {
+                            dev,
+                            name: name.to_string(),
+                            code,
+                        },
+                    );
                 }
             }
         }
@@ -522,7 +855,9 @@ fn uuid_from_hex(hex: &str) -> Option<Uuid> {
 
 /// An axis by its evdev name ("Y", "Rz", "Throttle"), else its number.
 fn axis_name(code: u32) -> String {
-    const N: [&str; 11] = ["X", "Y", "Z", "Rx", "Ry", "Rz", "Throttle", "Rudder", "Wheel", "Gas", "Brake"];
+    const N: [&str; 11] = [
+        "X", "Y", "Z", "Rx", "Ry", "Rz", "Throttle", "Rudder", "Wheel", "Gas", "Brake",
+    ];
     match (code >> 16, code & 0xffff) {
         (3, c) if (c as usize) < N.len() => N[c as usize].to_string(),
         (_, c) => c.to_string(),
@@ -531,7 +866,9 @@ fn axis_name(code: u32) -> String {
 
 /// A button by its number on a joystick (1 = trigger), or its gamepad name.
 fn button_name(code: u32) -> String {
-    const PAD: [&str; 15] = ["A", "B", "C", "X", "Y", "Z", "LB", "RB", "LT", "RT", "Select", "Start", "Mode", "L3", "R3"];
+    const PAD: [&str; 15] = [
+        "A", "B", "C", "X", "Y", "Z", "LB", "RB", "LT", "RT", "Select", "Start", "Mode", "L3", "R3",
+    ];
     match code & 0xffff {
         c @ 0x120..=0x12f => (c - 0x120 + 1).to_string(),
         c @ 0x130..=0x13e => PAD[(c - 0x130) as usize].to_string(),
@@ -550,13 +887,97 @@ fn short(name: &str) -> String {
 const KEYS: &[KeyCode] = {
     use KeyCode::*;
     &[
-        KeyA, KeyB, KeyC, KeyD, KeyE, KeyF, KeyG, KeyH, KeyI, KeyJ, KeyK, KeyL, KeyM, KeyN, KeyO, KeyP, KeyQ, KeyR, KeyS, KeyT, KeyU, KeyV, KeyW, KeyX, KeyY, KeyZ,
-        Digit0, Digit1, Digit2, Digit3, Digit4, Digit5, Digit6, Digit7, Digit8, Digit9,
-        Numpad0, Numpad1, Numpad2, Numpad3, Numpad4, Numpad5, Numpad6, Numpad7, Numpad8, Numpad9, NumpadAdd, NumpadSubtract, NumpadMultiply, NumpadDivide, NumpadDecimal,
-        F2, F4, F5, F6, F7, F8, F9, F10, F11, F12,
-        ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, End, PageUp, PageDown, Insert, Delete,
-        ShiftLeft, ShiftRight, ControlLeft, ControlRight, AltLeft, AltRight, Space, Backspace,
-        Comma, Period, Slash, Semicolon, Quote, BracketLeft, BracketRight, Backslash, Minus, Equal, Backquote, IntlBackslash,
+        KeyA,
+        KeyB,
+        KeyC,
+        KeyD,
+        KeyE,
+        KeyF,
+        KeyG,
+        KeyH,
+        KeyI,
+        KeyJ,
+        KeyK,
+        KeyL,
+        KeyM,
+        KeyN,
+        KeyO,
+        KeyP,
+        KeyQ,
+        KeyR,
+        KeyS,
+        KeyT,
+        KeyU,
+        KeyV,
+        KeyW,
+        KeyX,
+        KeyY,
+        KeyZ,
+        Digit0,
+        Digit1,
+        Digit2,
+        Digit3,
+        Digit4,
+        Digit5,
+        Digit6,
+        Digit7,
+        Digit8,
+        Digit9,
+        Numpad0,
+        Numpad1,
+        Numpad2,
+        Numpad3,
+        Numpad4,
+        Numpad5,
+        Numpad6,
+        Numpad7,
+        Numpad8,
+        Numpad9,
+        NumpadAdd,
+        NumpadSubtract,
+        NumpadMultiply,
+        NumpadDivide,
+        NumpadDecimal,
+        F2,
+        F4,
+        F5,
+        F6,
+        F7,
+        F8,
+        F9,
+        F10,
+        F11,
+        F12,
+        ArrowUp,
+        ArrowDown,
+        ArrowLeft,
+        ArrowRight,
+        Home,
+        End,
+        PageUp,
+        PageDown,
+        Insert,
+        Delete,
+        ShiftLeft,
+        ShiftRight,
+        ControlLeft,
+        ControlRight,
+        AltLeft,
+        AltRight,
+        Space,
+        Backspace,
+        Comma,
+        Period,
+        Slash,
+        Semicolon,
+        Quote,
+        BracketLeft,
+        BracketRight,
+        Backslash,
+        Minus,
+        Equal,
+        Backquote,
+        IntlBackslash,
     ]
 };
 
@@ -580,13 +1001,43 @@ pub fn key_name(k: KeyCode) -> String {
         return format!("{} {c}", if fr { "Pavé num." } else { "Num" });
     }
     let named = match k {
-        KeyCode::ShiftLeft => if fr { "Maj gauche" } else { "Left Shift" },
-        KeyCode::ShiftRight => if fr { "Maj droite" } else { "Right Shift" },
-        KeyCode::ControlLeft => if fr { "Ctrl gauche" } else { "Left Ctrl" },
-        KeyCode::ControlRight => if fr { "Ctrl droite" } else { "Right Ctrl" },
+        KeyCode::ShiftLeft => {
+            if fr {
+                "Maj gauche"
+            } else {
+                "Left Shift"
+            }
+        }
+        KeyCode::ShiftRight => {
+            if fr {
+                "Maj droite"
+            } else {
+                "Right Shift"
+            }
+        }
+        KeyCode::ControlLeft => {
+            if fr {
+                "Ctrl gauche"
+            } else {
+                "Left Ctrl"
+            }
+        }
+        KeyCode::ControlRight => {
+            if fr {
+                "Ctrl droite"
+            } else {
+                "Right Ctrl"
+            }
+        }
         KeyCode::AltLeft => "Alt",
         KeyCode::AltRight => "Alt Gr",
-        KeyCode::Space => if fr { "Espace" } else { "Space" },
+        KeyCode::Space => {
+            if fr {
+                "Espace"
+            } else {
+                "Space"
+            }
+        }
         KeyCode::Period => ".",
         KeyCode::Comma => ",",
         KeyCode::Slash => "/",
@@ -598,12 +1049,34 @@ pub fn key_name(k: KeyCode) -> String {
         KeyCode::ArrowDown => "↓",
         KeyCode::ArrowLeft => "←",
         KeyCode::ArrowRight => "→",
-        KeyCode::PageUp => if fr { "Page préc." } else { "Page Up" },
-        KeyCode::PageDown => if fr { "Page suiv." } else { "Page Down" },
-        KeyCode::Escape => if fr { "Échap" } else { "Esc" },
+        KeyCode::PageUp => {
+            if fr {
+                "Page préc."
+            } else {
+                "Page Up"
+            }
+        }
+        KeyCode::PageDown => {
+            if fr {
+                "Page suiv."
+            } else {
+                "Page Down"
+            }
+        }
+        KeyCode::Escape => {
+            if fr {
+                "Échap"
+            } else {
+                "Esc"
+            }
+        }
         _ => "",
     };
-    if named.is_empty() { s } else { named.to_string() }
+    if named.is_empty() {
+        s
+    } else {
+        named.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -628,7 +1101,10 @@ mod tests {
         // Back to the defaults.
         b.reset_key("pitch_down");
         b.reset_key("pitch_up");
-        assert_eq!((b.key_of(pitch_down), b.key_of(pitch_up)), (Some(KeyCode::KeyW), Some(KeyCode::KeyS)));
+        assert_eq!(
+            (b.key_of(pitch_down), b.key_of(pitch_up)),
+            (Some(KeyCode::KeyW), Some(KeyCode::KeyS))
+        );
         assert_eq!(b.map_key(KeyCode::KeyS), Some(KeyCode::KeyS));
         assert!(b.keys.is_empty());
     }
@@ -664,25 +1140,63 @@ mod tests {
         b.button_event(dev, "Throttle quadrant", 290, true);
         assert_eq!(b.take_edges(), vec![("gear", false), ("gear", true)]);
         b.set_key("gear", KeyCode::KeyJ);
-        b.axes.insert(AxisAct::Yaw, AxisBind { dev, name: "Pedals".into(), code: 5, sign: -1.0, dead: 0.1 });
+        b.axes.insert(
+            AxisAct::Yaw,
+            AxisBind {
+                dev,
+                name: "Pedals".into(),
+                code: 5,
+                sign: -1.0,
+                dead: 0.1,
+            },
+        );
         let mut c = Bindings::default();
         c.read(&b.json());
         assert_eq!(c.buttons, b.buttons);
         assert_eq!(c.axes, b.axes);
         assert_eq!(c.map_key(KeyCode::KeyJ), Some(KeyCode::KeyL));
         assert!(c.uses(&dev));
-        assert_eq!((axis_name(ABS_Y), axis_name(ABS_RZ), button_name(BTN_TRIGGER), button_name(BTN + 0x2c5)), ("Y".into(), "Rz".into(), "1".into(), "22".into()));
+        assert_eq!(
+            (
+                axis_name(ABS_Y),
+                axis_name(ABS_RZ),
+                button_name(BTN_TRIGGER),
+                button_name(BTN + 0x2c5)
+            ),
+            ("Y".into(), "Rz".into(), "1".into(), "22".into())
+        );
     }
 
     #[test]
     fn dead_zones() {
         let mut b = Bindings::default();
         let dev = [1u8; 16];
-        b.axes.insert(AxisAct::Roll, AxisBind { dev, name: "S".into(), code: 0, sign: 1.0, dead: 0.2 });
-        b.axes.insert(AxisAct::Throttle, AxisBind { dev, name: "S".into(), code: 6, sign: 1.0, dead: 0.1 });
+        b.axes.insert(
+            AxisAct::Roll,
+            AxisBind {
+                dev,
+                name: "S".into(),
+                code: 0,
+                sign: 1.0,
+                dead: 0.2,
+            },
+        );
+        b.axes.insert(
+            AxisAct::Throttle,
+            AxisBind {
+                dev,
+                name: "S".into(),
+                code: 6,
+                sign: 1.0,
+                dead: 0.1,
+            },
+        );
         b.axis_event(dev, "S", 0, 0.15);
         b.axis_event(dev, "S", 6, -0.85);
-        assert_eq!((b.axis(AxisAct::Roll), b.axis(AxisAct::Throttle)), (Some(0.0), Some(0.0)));
+        assert_eq!(
+            (b.axis(AxisAct::Roll), b.axis(AxisAct::Throttle)),
+            (Some(0.0), Some(0.0))
+        );
         b.axis_event(dev, "S", 0, 0.6);
         b.axis_event(dev, "S", 6, 1.0);
         assert!((b.axis(AxisAct::Roll).unwrap() - 0.5).abs() < 1e-6);
@@ -694,11 +1208,17 @@ mod tests {
         let mut b = Bindings::default();
         let stick = [2u8; 16];
         // A VelocityOne seen for the first time gets its preset, once.
-        assert!(b.auto_preset(stick, "Turtle Beach VelocityOne Flightstick").is_some());
+        assert!(
+            b.auto_preset(stick, "Turtle Beach VelocityOne Flightstick")
+                .is_some()
+        );
         assert_eq!(b.axes[&AxisAct::Yaw].code, ABS_Z);
         assert_eq!(b.buttons["gear"].code, BTN_TOP2);
         b.clear_device(&stick);
-        assert!(b.auto_preset(stick, "Turtle Beach VelocityOne Flightstick").is_none());
+        assert!(
+            b.auto_preset(stick, "Turtle Beach VelocityOne Flightstick")
+                .is_none()
+        );
         assert!(b.axes.is_empty());
         // Pedals fill in only what is free; an unknown device is left alone.
         let pedals = [3u8; 16];
@@ -710,7 +1230,10 @@ mod tests {
         // And it is all remembered.
         let mut c = Bindings::default();
         c.read(&b.json());
-        assert!(c.auto_preset(stick, "Turtle Beach VelocityOne Flightstick").is_none());
+        assert!(
+            c.auto_preset(stick, "Turtle Beach VelocityOne Flightstick")
+                .is_none()
+        );
         assert_eq!(c.axes, b.axes);
     }
 }

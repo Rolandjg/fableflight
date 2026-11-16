@@ -20,7 +20,16 @@ use crate::airframe::{Model, Sect};
 use glam::{DVec3, Vec3};
 
 /// Every type, in the order the menu lists them.
-pub static ALL: [&Spec; 8] = [&c172::SPEC, &b747::SPEC, &fa18::SPEC, &f4::SPEC, &f22::SPEC, &starship::SPEC, &concorde::SPEC, &sr71::SPEC];
+pub static ALL: [&Spec; 8] = [
+    &c172::SPEC,
+    &b747::SPEC,
+    &fa18::SPEC,
+    &f4::SPEC,
+    &f22::SPEC,
+    &starship::SPEC,
+    &concorde::SPEC,
+    &sr71::SPEC,
+];
 
 /// A type by its short name (`c172`, `747`, ...), as typed on the command line.
 pub fn by_key(key: &str) -> Option<&'static Spec> {
@@ -263,7 +272,9 @@ pub struct Lever {
 
 impl Lever {
     pub fn notch(&self, k: u8) -> &'static str {
-        self.notches.get(k as usize).map_or("", |n| n[crate::i18n::is_fr() as usize])
+        self.notches
+            .get(k as usize)
+            .map_or("", |n| n[crate::i18n::is_fr() as usize])
     }
 }
 
@@ -465,7 +476,10 @@ impl Spec {
     /// The flap notch fraction (of full travel) for a lever notch.
     pub fn flap_frac(&self, notch: u8) -> f64 {
         let full = *self.flaps.last().unwrap_or(&1.0);
-        self.flaps.get(notch as usize).map(|d| d / full.max(1e-6)).unwrap_or(1.0)
+        self.flaps
+            .get(notch as usize)
+            .map(|d| d / full.max(1e-6))
+            .unwrap_or(1.0)
     }
     pub fn max_notch(&self) -> u8 {
         (self.flaps.len().max(1) - 1) as u8

@@ -54,7 +54,8 @@ pub struct Gauges {
 
 /// Small deterministic noise (a few octaves of sines), -1..1.
 fn wobble(t: f64, s: f64) -> f64 {
-    ((t * 1.7 + s).sin() * 0.5 + (t * 3.1 + s * 2.3).sin() * 0.3 + (t * 7.3 + s * 5.1).sin() * 0.2).clamp(-1.0, 1.0)
+    ((t * 1.7 + s).sin() * 0.5 + (t * 3.1 + s * 2.3).sin() * 0.3 + (t * 7.3 + s * 5.1).sin() * 0.2)
+        .clamp(-1.0, 1.0)
 }
 fn lag(v: f64, to: f64, tau: f64, dt: f64) -> f64 {
     v + (to - v) * (1.0 - (-dt / tau.max(1e-3)).exp())
@@ -99,7 +100,11 @@ fn truth(p: &Plane) -> Truth {
         oil_p: (22.0 + 58.0 * smooth(500.0, 2300.0, rpm)) * eng.sqrt() * running,
         egt: (0.45 + 0.3 * thr) * running,
         // The engine-driven vacuum pump: about 5 in. Hg from a fast idle up.
-        suction: if p.sys.fail.vacuum { 0.0 } else { 5.2 * smooth(250.0, 1000.0, rpm).sqrt() * (0.4 + 0.6 * eng) },
+        suction: if p.sys.fail.vacuum {
+            0.0
+        } else {
+            5.2 * smooth(250.0, 1000.0, rpm).sqrt() * (0.4 + 0.6 * eng)
+        },
     }
 }
 fn smooth(a: f64, b: f64, x: f64) -> f64 {
@@ -186,7 +191,12 @@ impl Gauges {
         // Vacuum system and the attitude gyro.
         self.suction = lag(self.suction, tr.suction, 0.8, dt);
         let want_spin = (self.suction / 3.8).clamp(0.0, 1.0);
-        self.spin = lag(self.spin, want_spin, if want_spin > self.spin { 40.0 } else { 200.0 }, dt);
+        self.spin = lag(
+            self.spin,
+            want_spin,
+            if want_spin > self.spin { 40.0 } else { 200.0 },
+            dt,
+        );
         // The erecting vanes pull the gyro toward the apparent vertical (about
         // 3 degrees a minute at full speed); they only work with air through them.
         let appar = sf_w / g;
@@ -210,7 +220,9 @@ impl Gauges {
         }
 
         // Heading indicator: a free gyro wandering off, worse as the suction fails.
-        self.dg_off = wrap(self.dg_off + (self.dg_drift + (1.0 - self.spin) * 0.15 * wobble(t * 0.05, 7.0)) * dt);
+        self.dg_off = wrap(
+            self.dg_off + (self.dg_drift + (1.0 - self.spin) * 0.15 * wobble(t * 0.05, 7.0)) * dt,
+        );
 
         // The compass card hangs square to the apparent gravity and points along
         // the field's component in its own plane; it reads true here (no
@@ -226,7 +238,8 @@ impl Gauges {
             let reading = fp.dot(ee).atan2(fp.dot(bp)).to_degrees();
             // A damped pendulum in fluid: it swings and overshoots a little.
             let (w0, zeta) = (2.2, 0.32);
-            self.card_v += (w0 * w0 * wrap(reading - self.card) - 2.0 * zeta * w0 * self.card_v) * dt;
+            self.card_v +=
+                (w0 * w0 * wrap(reading - self.card) - 2.0 * zeta * w0 * self.card_v) * dt;
             self.card = (self.card + self.card_v * dt).rem_euclid(360.0);
         }
 
@@ -236,7 +249,11 @@ impl Gauges {
         let roll_r = -p.omega.z;
         let rate = (yaw_r * 0.866 + roll_r * 0.5).to_degrees() / 0.866;
         // (The turn coordinator's gyro is electric: without power it runs down.)
-        self.tc = if p.sys.powered() { lag(self.tc, rate, 0.12, dt) } else { lag(self.tc, 0.0, 20.0, dt) };
+        self.tc = if p.sys.powered() {
+            lag(self.tc, rate, 0.12, dt)
+        } else {
+            lag(self.tc, 0.0, 20.0, dt)
+        };
         // The ball rolls to where the apparent gravity is, damped by its fluid.
         let ball_to = (-p.sf.x).atan2(p.sf.y.max(0.5)) / 0.14;
         let (w0, zeta) = (9.0, 0.65);
@@ -251,9 +268,16 @@ impl Gauges {
         let vert = p.sf.y / 9.81 - 1.0;
         // The fuel on board, in US gallons a tank (avgas, 0.72 kg/l).
         // (Electric gauges: without power they drop to empty.)
-        let gal = if p.sys.powered() { p.fuel / 0.72 / 3.785 / 2.0 } else { 0.0 };
+        let gal = if p.sys.powered() {
+            p.fuel / 0.72 / 3.785 / 2.0
+        } else {
+            0.0
+        };
         let (left, right) = (gal * 1.02, gal * 0.98);
-        let slosh = |s: f64, k: f64| s * (1.0 + 0.22 * side * k - 0.08 * vert) + 0.25 * wobble(t * 0.9, k * 3.0) * p.air.sigma_w.min(3.0) / 3.0;
+        let slosh = |s: f64, k: f64| {
+            s * (1.0 + 0.22 * side * k - 0.08 * vert)
+                + 0.25 * wobble(t * 0.9, k * 3.0) * p.air.sigma_w.min(3.0) / 3.0
+        };
         self.fuel[0] = lag(self.fuel[0], slosh(left, -1.0), 1.4, dt);
         self.fuel[1] = lag(self.fuel[1], slosh(right, 1.0), 1.4, dt);
 
@@ -282,10 +306,30 @@ impl Gauges {
         let jitter = wobble(self.t * 23.0, 1.3) * 6.0 * smooth(300.0, 800.0, self.rpm);
         (
             [
-                [self.asi as f32, self.alt as f32, self.vsi as f32, (tr.hdg + self.dg_off).rem_euclid(360.0) as f32],
-                [pitch as f32, bank as f32, self.tc as f32, self.ball.clamp(-1.0, 1.0) as f32],
-                [(self.rpm + jitter).max(0.0) as f32, self.mp as f32, self.fuel[0].max(0.0) as f32, self.fuel[1].max(0.0) as f32],
-                [self.oil_t as f32, self.oil_p as f32, self.egt as f32, self.amps as f32],
+                [
+                    self.asi as f32,
+                    self.alt as f32,
+                    self.vsi as f32,
+                    (tr.hdg + self.dg_off).rem_euclid(360.0) as f32,
+                ],
+                [
+                    pitch as f32,
+                    bank as f32,
+                    self.tc as f32,
+                    self.ball.clamp(-1.0, 1.0) as f32,
+                ],
+                [
+                    (self.rpm + jitter).max(0.0) as f32,
+                    self.mp as f32,
+                    self.fuel[0].max(0.0) as f32,
+                    self.fuel[1].max(0.0) as f32,
+                ],
+                [
+                    self.oil_t as f32,
+                    self.oil_p as f32,
+                    self.egt as f32,
+                    self.amps as f32,
+                ],
                 [self.suction as f32, 0.0, 0.0, 0.0],
             ],
             self.card as f32,
@@ -298,7 +342,14 @@ mod tests {
     use super::*;
 
     fn level(hdg: f64) -> Plane {
-        Plane::spawn(&crate::aircraft::c172::SPEC, 37.8f64.to_radians(), -122.4f64.to_radians(), 1000.0, hdg.to_radians(), 50.0)
+        Plane::spawn(
+            &crate::aircraft::c172::SPEC,
+            37.8f64.to_radians(),
+            -122.4f64.to_radians(),
+            1000.0,
+            hdg.to_radians(),
+            50.0,
+        )
     }
 
     #[test]
@@ -325,7 +376,11 @@ mod tests {
         for _ in 0..200 {
             g.update(0.05, &p, 0.0);
         }
-        assert!(after_half < g.vsi * 0.4, "VSI jumped to {after_half} of {}", g.vsi);
+        assert!(
+            after_half < g.vsi * 0.4,
+            "VSI jumped to {after_half} of {}",
+            g.vsi
+        );
         assert!((g.vsi - 984.0).abs() < 60.0);
     }
 }

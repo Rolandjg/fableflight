@@ -93,12 +93,17 @@ pub fn wing_sect(x: f32) -> Sect {
     let x = x.max(0.0);
     let d = (x - W_X0).max(0.0);
     let c = W_C0 + (W_C1 - W_C0) * (d / (W_X1 - W_X0)).min(1.0);
-    Sect { le: Vec3::new(x, W_Z0 - W_ANH * d, -(W_LE0 - W_SWEEP * d)), c, cdir: Vec3::Z, up: Vec3::new(W_ANH, 1.0, 0.0).normalize(), tf: 1.0 }
+    Sect {
+        le: Vec3::new(x, W_Z0 - W_ANH * d, -(W_LE0 - W_SWEEP * d)),
+        c,
+        cdir: Vec3::Z,
+        up: Vec3::new(W_ANH, 1.0, 0.0).normalize(),
+        tf: 1.0,
+    }
 }
 
 /// The pilot's eye, under the canopy's highest point.
 const EYE: Vec3 = Vec3::new(0.0, 1.0, -4.55);
-
 
 // ---------------------------------------------------------------- the model
 
@@ -134,7 +139,9 @@ impl Reader<'_> {
 /// The pieces exported from Blender (a gzipped model file of `what`), by name.
 pub(crate) fn load(gz: &[u8], what: &str) -> HashMap<String, Obj> {
     let mut raw = Vec::new();
-    flate2::read::GzDecoder::new(gz).read_to_end(&mut raw).unwrap_or_else(|_| panic!("{what} model"));
+    flate2::read::GzDecoder::new(gz)
+        .read_to_end(&mut raw)
+        .unwrap_or_else(|_| panic!("{what} model"));
     let mut r = Reader { b: &raw, at: 0 };
     assert_eq!(r.take(4), b"FFAC", "{what} model: not a model file");
     assert_eq!(r.u32(), 1, "{what} model: unknown version");
@@ -152,11 +159,25 @@ pub(crate) fn load(gz: &[u8], what: &str) -> HashMap<String, Obj> {
             for x in f.iter_mut() {
                 *x = r.f32();
             }
-            mesh.v.push(PartVertex { pos: [f[0], f[1], f[2]], nrm: [f[3], f[4], f[5]], col: [f[6], f[7], f[8], 1.0], uv: [0.0, 0.0], mat: [f[9], f[10], f[11], f[12]] });
+            mesh.v.push(PartVertex {
+                pos: [f[0], f[1], f[2]],
+                nrm: [f[3], f[4], f[5]],
+                col: [f[6], f[7], f[8], 1.0],
+                uv: [0.0, 0.0],
+                mat: [f[9], f[10], f[11], f[12]],
+            });
         }
         let ni = r.u32() as usize;
         mesh.i = (0..ni).map(|_| r.u32()).collect();
-        out.insert(name, Obj { pivot, axis, angle, mesh });
+        out.insert(
+            name,
+            Obj {
+                pivot,
+                axis,
+                angle,
+                mesh,
+            },
+        );
     }
     out
 }
@@ -201,11 +222,31 @@ const PIECES: &[(&str, usize, Role, Option<&str>)] = &[
     ("nose fork", G_GEAR, Role::Gear(0), Some("nose leg")),
     ("nose wheel", G_GEAR, Role::Gear(0), Some("nose fork")),
     ("left main leg", G_GEAR, Role::Gear(1), None),
-    ("left main strut", G_GEAR, Role::Gear(1), Some("left main leg")),
-    ("left main wheel", G_GEAR, Role::Gear(1), Some("left main strut")),
+    (
+        "left main strut",
+        G_GEAR,
+        Role::Gear(1),
+        Some("left main leg"),
+    ),
+    (
+        "left main wheel",
+        G_GEAR,
+        Role::Gear(1),
+        Some("left main strut"),
+    ),
     ("right main leg", G_GEAR, Role::Gear(2), None),
-    ("right main strut", G_GEAR, Role::Gear(2), Some("right main leg")),
-    ("right main wheel", G_GEAR, Role::Gear(2), Some("right main strut")),
+    (
+        "right main strut",
+        G_GEAR,
+        Role::Gear(2),
+        Some("right main leg"),
+    ),
+    (
+        "right main wheel",
+        G_GEAR,
+        Role::Gear(2),
+        Some("right main strut"),
+    ),
     ("left nose door", G_ENGINE, Role::Other, None),
     ("right nose door", G_ENGINE, Role::Other, None),
     ("left strut door", G_FUSE, Role::Other, None),
@@ -224,8 +265,20 @@ const PIECES: &[(&str, usize, Role, Option<&str>)] = &[
 fn anim(name: &str, stow: f32) -> Anim {
     let left = name.starts_with("left");
     let s = if left { -1.0 } else { 1.0 };
-    let leg = if name.starts_with("nose") { 0 } else if left { 1 } else { 2 };
-    let gear = || Anim::hinge(Drive::new(Input::Gear, -stow).smooth(0.15, 0.85).offset(stow));
+    let leg = if name.starts_with("nose") {
+        0
+    } else if left {
+        1
+    } else {
+        2
+    };
+    let gear = || {
+        Anim::hinge(
+            Drive::new(Input::Gear, -stow)
+                .smooth(0.15, 0.85)
+                .offset(stow),
+        )
+    };
     if name.ends_with("le flap") {
         // leading-edge flaps droop with the trailing-edge flaps
         Anim::hinge(Drive::new(Input::Slats, -0.55))
@@ -235,7 +288,10 @@ fn anim(name: &str, stow: f32) -> Anim {
         Anim::hinge(Drive::new(Input::Aileron(s), 0.40))
     } else if name.ends_with("stabilator") {
         // all-moving tailplanes: together for pitch, apart to help the ailerons roll
-        Anim::hinge2(Drive::new(Input::Elevator, 0.42), Drive::new(Input::Aileron(s), 0.10))
+        Anim::hinge2(
+            Drive::new(Input::Elevator, 0.42),
+            Drive::new(Input::Aileron(s), 0.10),
+        )
     } else if name.ends_with("rudder") {
         Anim::hinge(Drive::new(Input::Rudder, 0.52))
     } else if name == "speedbrake" {
@@ -244,16 +300,28 @@ fn anim(name: &str, stow: f32) -> Anim {
         gear()
     } else if name.ends_with("main door") {
         // open for the leg to pass, shut again behind it either way
-        Anim::hinge(Drive::new(Input::Gear, -stow).pulse(0.0, 0.18, 0.88, 1.0).offset(stow))
+        Anim::hinge(
+            Drive::new(Input::Gear, -stow)
+                .pulse(0.0, 0.18, 0.88, 1.0)
+                .offset(stow),
+        )
     } else if name.ends_with(" door") {
         // open before the legs come down, shut once they are up
         Anim::hinge(Drive::new(Input::Gear, -stow).smooth(0.0, 0.2).offset(stow))
     } else if name == "nose fork" {
-        Anim::turn_slide(Drive::new(Input::Steer, 1.0), Drive::new(Input::Compress(0), 1.0), Vec3::Y)
+        Anim::turn_slide(
+            Drive::new(Input::Steer, 1.0),
+            Drive::new(Input::Compress(0), 1.0),
+            Vec3::Y,
+        )
     } else if name == "nose wheel" {
         Anim::hinge(Drive::new(Input::Wheel(0), -1.0))
     } else if name.ends_with("main wheel") {
-        Anim::turn_slide(Drive::new(Input::Wheel(leg), -1.0), Drive::new(Input::Compress(leg), 1.0), Vec3::Y)
+        Anim::turn_slide(
+            Drive::new(Input::Wheel(leg), -1.0),
+            Drive::new(Input::Compress(leg), 1.0),
+            Vec3::Y,
+        )
     } else {
         Anim::Fixed
     }
@@ -264,15 +332,33 @@ pub fn build() -> Model {
     let mut b = Builder::default();
     let mut at: HashMap<&str, usize> = HashMap::new();
     for &(name, group, role, parent) in PIECES {
-        let o = objs.get(name).unwrap_or_else(|| panic!("fa18 model has no piece called {name:?}"));
-        let k = b.add(name, group, o.mesh.clone(), anim(name, o.angle), o.pivot, o.axis, parent.map(|p| at[p]));
+        let o = objs
+            .get(name)
+            .unwrap_or_else(|| panic!("fa18 model has no piece called {name:?}"));
+        let k = b.add(
+            name,
+            group,
+            o.mesh.clone(),
+            anim(name, o.angle),
+            o.pivot,
+            o.axis,
+            parent.map(|p| at[p]),
+        );
         b.role(k, role);
         if name == "canopy" || name == "afterburner" {
             b.pieces[k].glass = true;
         }
         at.insert(name, k);
     }
-    bake_ao(&mut b.pieces, &AoBake { vox: 0.06, reach: 3.0, rays: 24, open: &|_, _| false });
+    bake_ao(
+        &mut b.pieces,
+        &AoBake {
+            vox: 0.06,
+            reach: 3.0,
+            rays: 24,
+            open: &|_, _| false,
+        },
+    );
     // The cockpit gets its own, much finer bake, shut in by the nose's skin
     // and the canopy's frame; the light comes in through the glass.
     let mut c = Builder::default();
@@ -281,11 +367,30 @@ pub fn build() -> Model {
     for name in ["nose section", "canopy frame"] {
         if let Some(k) = b.pieces.iter().position(|p| p.name == name) {
             let mut skin = b.pieces[k].mesh.clone();
-            skin.i = skin.i.chunks(3).filter(|t| t.iter().all(|&i| { let z = skin.v[i as usize].pos[2]; z > -6.6 && z < -2.6 })).flatten().copied().collect();
+            skin.i = skin
+                .i
+                .chunks(3)
+                .filter(|t| {
+                    t.iter().all(|&i| {
+                        let z = skin.v[i as usize].pos[2];
+                        z > -6.6 && z < -2.6
+                    })
+                })
+                .flatten()
+                .copied()
+                .collect();
             c.fixed("skin (occluder)", G_ENGINE, skin);
         }
     }
-    bake_ao(&mut c.pieces, &AoBake { vox: 0.012, reach: 1.6, rays: 48, open: &|_, _| false });
+    bake_ao(
+        &mut c.pieces,
+        &AoBake {
+            vox: 0.012,
+            reach: 1.6,
+            rays: 48,
+            open: &|_, _| false,
+        },
+    );
     let off = b.pieces.len();
     for mut p in c.pieces.into_iter().take(n_pit) {
         p.parent = p.parent.map(|i| i + off);
@@ -325,9 +430,25 @@ pub static SPEC: Spec = Spec {
     keys: &["fa18", "f18", "fa-18", "f/a-18", "hornet"],
     blurb: "Twin-engine carrier fighter, 15.5 t. Fly-by-wire holds it to 7.5 g; Space for afterburner, / speedbrake. 135 kt approach.",
     still: include_bytes!("../../../assets/aircraft/fa18.png"),
-    paint: Some(Paint { jpg: include_bytes!("../../../assets/fa18_paint.jpg"), views: 3, span: 13.2, length: 19.8, centre: [0.4, 1.0], relief: 1.0, sheen: 0.0 }),
+    paint: Some(Paint {
+        jpg: include_bytes!("../../../assets/fa18_paint.jpg"),
+        views: 3,
+        span: 13.2,
+        length: 19.8,
+        centre: [0.4, 1.0],
+        relief: 1.0,
+        sheen: 0.0,
+    }),
     build,
-    groups: [("fuselage", 6_500.0), ("tail", 900.0), ("left wing", 1_200.0), ("right wing", 1_200.0), ("nose section", 900.0), ("radome", 60.0), ("gear", 500.0)],
+    groups: [
+        ("fuselage", 6_500.0),
+        ("tail", 900.0),
+        ("left wing", 1_200.0),
+        ("right wing", 1_200.0),
+        ("nose section", 900.0),
+        ("radome", 60.0),
+        ("gear", 500.0),
+    ],
     span: W_X1,
     wing_sect,
     fuse,
@@ -368,7 +489,12 @@ pub static SPEC: Spec = Spec {
         ([0.0, 0.85, -2.5], Part::Roof),
         ([0.0, 0.66, 1.0], Part::Roof),
     ],
-    tail_pts: &[[0.0, -0.64, 5.2], [0.0, -0.52, 6.7], [-0.52, -0.48, 8.0], [0.52, -0.48, 8.0]],
+    tail_pts: &[
+        [0.0, -0.64, 5.2],
+        [0.0, -0.52, 6.7],
+        [-0.52, -0.48, 8.0],
+        [0.52, -0.48, 8.0],
+    ],
     wing_st: [1.6 / W_X1, 2.6 / W_X1, 3.6 / W_X1, 4.6 / W_X1, 5.4 / W_X1],
     hard: [
         DVec3::new(0.0, -0.03, -8.9),
@@ -402,8 +528,19 @@ pub static SPEC: Spec = Spec {
         main_leg(-1.57, "LEFT MAIN GEAR", 0.2),
         main_leg(1.57, "RIGHT MAIN GEAR", -0.2),
     ],
-    hull: Hull { k: 1.2e6, c: 1.6e5, nf_max: 2.5e6, drag: 5.0e4 },
-    hole: Hole { fus: [1.1, 0.72, -0.05, 0.4], wing: [0.12, -W_ANH, 0.10, 0.04], stab: [-0.15, 0.06, 3.3], fin: [0.25, 2.6, 0.06, 0.025], pods: [[0.0; 3]; 2] },
+    hull: Hull {
+        k: 1.2e6,
+        c: 1.6e5,
+        nf_max: 2.5e6,
+        drag: 5.0e4,
+    },
+    hole: Hole {
+        fus: [1.1, 0.72, -0.05, 0.4],
+        wing: [0.12, -W_ANH, 0.10, 0.04],
+        stab: [-0.15, 0.06, 3.3],
+        fin: [0.25, 2.6, 0.06, 0.025],
+        pods: [[0.0; 3]; 2],
+    },
     // About 15.5 t: full internal fuel and a pair of Sidewinders (empty 10.4 t, maximum 23.4 t).
     mass: 15_500.0,
     // 4,900 kg inside; two F404s: about 0.2 kg/s idling, 2.4 at military power, 12 in full afterburner
@@ -455,7 +592,20 @@ pub static SPEC: Spec = Spec {
     steer_fade: 15.0,
     // Two F404-GE-402s: 79.2 kN each in afterburner (Space); the dry figure is a
     // little under the book 48.9 kN so it does not supercruise down low.
-    engine: Engine::Fan(Fan { n: 2, thrust: 44_000.0, idle: 0.62, idle_thrust: 0.06, n1_rpm: 13_200.0, spool_up: 1.0, spool_down: 0.8, reverse: 0.0, reverser_time: 1.0, boost: 1.8, mach_lapse: [0.25, 0.45], nozzle_z: 8.0 }),
+    engine: Engine::Fan(Fan {
+        n: 2,
+        thrust: 44_000.0,
+        idle: 0.62,
+        idle_thrust: 0.06,
+        n1_rpm: 13_200.0,
+        spool_up: 1.0,
+        spool_down: 0.8,
+        reverse: 0.0,
+        reverser_time: 1.0,
+        boost: 1.8,
+        mach_lapse: [0.25, 0.45],
+        nozzle_z: 8.0,
+    }),
     handling: Handling {
         q_ref: 8_000.0,
         a_max: 3.5,
@@ -496,12 +646,22 @@ mod tests {
         let m = build();
         let (c, h) = m.bounds();
         for p in &m.pieces {
-            assert!(p.mesh.v.iter().all(|v| v.pos.iter().chain(v.nrm.iter()).all(|x| x.is_finite())), "{} has NaNs", p.name);
+            assert!(
+                p.mesh
+                    .v
+                    .iter()
+                    .all(|v| v.pos.iter().chain(v.nrm.iter()).all(|x| x.is_finite())),
+                "{} has NaNs",
+                p.name
+            );
             assert!(!p.mesh.i.is_empty(), "{} is empty", p.name);
         }
         // 17.07 m long, 12.31 m across the wingtip missiles, 4.66 m tall on its wheels.
         let (len, span, top) = (h.z * 2.0, h.x * 2.0, c.y + h.y + 1.95);
-        println!("{} pieces, length {len:.2} m, span {span:.2} m, height {top:.2} m", m.pieces.len());
+        println!(
+            "{} pieces, length {len:.2} m, span {span:.2} m, height {top:.2} m",
+            m.pieces.len()
+        );
         assert!((len - 17.07).abs() < 0.3, "{len}");
         assert!((span - 12.31).abs() < 0.3, "{span}");
         assert!((top - 4.66).abs() < 0.3, "{top}");
@@ -513,12 +673,21 @@ mod tests {
         let mut p = crate::plane::Plane::spawn(&SPEC, 0.6, -2.1, 1000.0, 0.0, 120.0);
         p.gear = 0.0;
         let pose = p.pose(&m.pieces);
-        for (i, pc) in m.pieces.iter().enumerate().filter(|(_, pc)| pc.name.ends_with("wheel")) {
+        for (i, pc) in m
+            .pieces
+            .iter()
+            .enumerate()
+            .filter(|(_, pc)| pc.name.ends_with("wheel"))
+        {
             let c = pose[i].transform_point3(pc.pivot);
             let (top, _, bot) = fuse(c.z);
             let hw = fuse_at(-c.z)[1].max(if c.z.abs() < 3.0 { 1.36 } else { 0.0 });
             println!("{} stowed at {c:?}", pc.name);
-            assert!(c.y > bot && c.y < top && c.x.abs() < hw, "{} sticks out: {c:?}", pc.name);
+            assert!(
+                c.y > bot && c.y < top && c.x.abs() < hw,
+                "{} sticks out: {c:?}",
+                pc.name
+            );
         }
     }
 }

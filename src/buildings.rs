@@ -7,7 +7,10 @@
 //! their own modules.
 use crate::geo::{self, TileId};
 use crate::render::{RoadVertex, TreeInst};
-use crate::sources::{mip_chain, ElevTile, Sources, VecTile, DATA_ZOOM, LU_COMMERCIAL, LU_INDUSTRIAL, LU_OPEN, LU_RESIDENTIAL};
+use crate::sources::{
+    DATA_ZOOM, ElevTile, LU_COMMERCIAL, LU_INDUSTRIAL, LU_OPEN, LU_RESIDENTIAL, Sources, VecTile,
+    mip_chain,
+};
 use anyhow::Result;
 use bytemuck::{Pod, Zeroable};
 use glam::{DVec3, Vec2, Vec3};
@@ -124,7 +127,9 @@ pub fn point_in_ring(p: [f32; 2], r: &[[f32; 2]]) -> bool {
     let mut j = r.len() - 1;
     for i in 0..r.len() {
         let (a, b) = (r[i], r[j]);
-        if (a[1] > p[1]) != (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0] {
+        if (a[1] > p[1]) != (b[1] > p[1])
+            && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]
+        {
             inside = !inside;
         }
         j = i;
@@ -158,7 +163,11 @@ pub enum Region {
 /// Very coarse cultural region from degrees; enough to pick building habits.
 pub fn region(lat: f64, lon: f64) -> Region {
     if lon < -30.0 {
-        if lat > 30.0 { Region::NAm } else { Region::LatAm }
+        if lat > 30.0 {
+            Region::NAm
+        } else {
+            Region::LatAm
+        }
     } else if lon < 60.0 {
         if lat > 46.0 {
             Region::NEur
@@ -174,7 +183,11 @@ pub fn region(lat: f64, lon: f64) -> Region {
     } else if lat > 50.0 {
         Region::NEur
     } else if lon < 93.0 {
-        if lat > 36.0 { Region::Mena } else { Region::SAsia }
+        if lat > 36.0 {
+            Region::Mena
+        } else {
+            Region::SAsia
+        }
     } else if lat < 24.0 {
         Region::SeAsia
     } else {
@@ -196,18 +209,29 @@ pub struct Ctx {
 }
 impl Ctx {
     pub fn ground(&self, p: [f32; 2]) -> f32 {
-        self.elev.as_ref().map(|e| e.sample((p[0] / self.ext) as f64, (p[1] / self.ext) as f64)).unwrap_or(0.0)
+        self.elev
+            .as_ref()
+            .map(|e| e.sample((p[0] / self.ext) as f64, (p[1] / self.ext) as f64))
+            .unwrap_or(0.0)
     }
     pub fn pos(&self, p: [f32; 2], alt: f32) -> Vec3 {
-        let (lat, lon) = self.id.lat_lon((p[0] / self.ext) as f64, (p[1] / self.ext) as f64);
+        let (lat, lon) = self
+            .id
+            .lat_lon((p[0] / self.ext) as f64, (p[1] / self.ext) as f64);
         (geo::lla_to_pos(lat, lon, alt as f64) - self.center).as_vec3()
     }
     /// Metres (east, south) from the tile centre -> tile units.
     pub fn units(&self, m: Vec2) -> [f32; 2] {
-        [m.x / self.unit_m + self.ext * 0.5, m.y / self.unit_m + self.ext * 0.5]
+        [
+            m.x / self.unit_m + self.ext * 0.5,
+            m.y / self.unit_m + self.ext * 0.5,
+        ]
     }
     pub fn metres(&self, p: [f32; 2]) -> Vec2 {
-        Vec2::new((p[0] - self.ext * 0.5) * self.unit_m, (p[1] - self.ext * 0.5) * self.unit_m)
+        Vec2::new(
+            (p[0] - self.ext * 0.5) * self.unit_m,
+            (p[1] - self.ext * 0.5) * self.unit_m,
+        )
     }
     pub fn pos_m(&self, m: Vec2, alt: f32) -> Vec3 {
         self.pos(self.units(m), alt)
@@ -256,7 +280,10 @@ pub const FINE_FADE: f32 = 680.0 * 0.6;
 /// shows at a kilometre, a 150 m tower shows at three.
 pub const HCLASS: [(f32, f32); 4] = [(150.0, 3.0), (100.0, 2.0), (65.0, 1.5), (0.0, 1.0)];
 pub fn hclass(h: f32) -> usize {
-    HCLASS.iter().position(|c| h >= c.0).unwrap_or(HCLASS.len() - 1)
+    HCLASS
+        .iter()
+        .position(|c| h >= c.0)
+        .unwrap_or(HCLASS.len() - 1)
 }
 /// Most vertices a tile may spend on its finest level of detail.
 const FINE_BUDGET: usize = 450_000;
@@ -277,7 +304,14 @@ impl Mesh {
         self.fine_verts < FINE_BUDGET
     }
     /// Convex polygon as a fan. `up` (if given) forces the normal to that side.
-    pub fn poly(&mut self, lvl: impl Into<Lvl>, pts: &[(Vec3, [f32; 2])], col: [u8; 4], sty: [u8; 4], up: Option<Vec3>) {
+    pub fn poly(
+        &mut self,
+        lvl: impl Into<Lvl>,
+        pts: &[(Vec3, [f32; 2])],
+        col: [u8; 4],
+        sty: [u8; 4],
+        up: Option<Vec3>,
+    ) {
         let lvl = lvl.into();
         if pts.len() < 3 {
             return;
@@ -295,7 +329,13 @@ impl Mesh {
         let v0 = self.v.len() as u32;
         for (p, uv) in pts {
             self.radius = self.radius.max(p.length());
-            self.v.push(BVertex { pos: (*p).into(), nrm: n.into(), uv: *uv, col, sty });
+            self.v.push(BVertex {
+                pos: (*p).into(),
+                nrm: n.into(),
+                uv: *uv,
+                col,
+                sty,
+            });
         }
         if lvl == FINE {
             self.fine_verts += pts.len();
@@ -313,7 +353,19 @@ impl Mesh {
     /// Box standing on a rectangle given by centre, two half-axes (metres, in the
     /// tile's metric frame) between two altitudes. No bottom face.
     #[allow(clippy::too_many_arguments)]
-    pub fn boxm(&mut self, cx: &Ctx, lvl: impl Into<Lvl>, c: Vec2, a: Vec2, b: Vec2, z0: f32, z1: f32, col: [u8; 4], sty: [u8; 4], top: Option<[u8; 4]>) {
+    pub fn boxm(
+        &mut self,
+        cx: &Ctx,
+        lvl: impl Into<Lvl>,
+        c: Vec2,
+        a: Vec2,
+        b: Vec2,
+        z0: f32,
+        z1: f32,
+        col: [u8; 4],
+        sty: [u8; 4],
+        top: Option<[u8; 4]>,
+    ) {
         let lvl = lvl.into();
         let cn = [c - a - b, c + a - b, c + a + b, c - a + b];
         let lo: Vec<Vec3> = cn.iter().map(|p| cx.pos_m(*p, z0)).collect();
@@ -322,24 +374,71 @@ impl Mesh {
         for k in 0..4 {
             let j = (k + 1) % 4;
             let l = if k % 2 == 0 { la } else { lb };
-            self.poly(lvl, &[(lo[k], [0.0, 0.0]), (lo[j], [l, 0.0]), (hi[j], [l, z1 - z0]), (hi[k], [0.0, z1 - z0])], col, sty, None);
+            self.poly(
+                lvl,
+                &[
+                    (lo[k], [0.0, 0.0]),
+                    (lo[j], [l, 0.0]),
+                    (hi[j], [l, z1 - z0]),
+                    (hi[k], [0.0, z1 - z0]),
+                ],
+                col,
+                sty,
+                None,
+            );
         }
         let upv = (hi[0] + cx.center.as_vec3()).normalize();
-        self.poly(lvl, &[(hi[0], [0.0, 0.0]), (hi[1], [la, 0.0]), (hi[2], [la, lb]), (hi[3], [0.0, lb])], top.unwrap_or(col), sty, Some(upv));
+        self.poly(
+            lvl,
+            &[
+                (hi[0], [0.0, 0.0]),
+                (hi[1], [la, 0.0]),
+                (hi[2], [la, lb]),
+                (hi[3], [0.0, lb]),
+            ],
+            top.unwrap_or(col),
+            sty,
+            Some(upv),
+        );
     }
     /// Upright prism with `n` sides (a tank, a drum) standing on a circle.
     #[allow(clippy::too_many_arguments)]
-    pub fn prism(&mut self, cx: &Ctx, lvl: impl Into<Lvl>, c: Vec2, r: f32, n: usize, z0: f32, z1: f32, col: [u8; 4], sty: [u8; 4], top: Option<[u8; 4]>) {
+    pub fn prism(
+        &mut self,
+        cx: &Ctx,
+        lvl: impl Into<Lvl>,
+        c: Vec2,
+        r: f32,
+        n: usize,
+        z0: f32,
+        z1: f32,
+        col: [u8; 4],
+        sty: [u8; 4],
+        top: Option<[u8; 4]>,
+    ) {
         let lvl = lvl.into();
         let pt = |k: usize| c + Vec2::from_angle(k as f32 / n as f32 * std::f32::consts::TAU) * r;
         let side = std::f32::consts::TAU * r / n as f32;
         for k in 0..n {
             let (a, b) = (pt(k), pt(k + 1));
             let (s0, s1) = (k as f32 * side, (k + 1) as f32 * side);
-            self.poly(lvl, &[(cx.pos_m(a, z0), [s0, 0.0]), (cx.pos_m(b, z0), [s1, 0.0]), (cx.pos_m(b, z1), [s1, z1 - z0]), (cx.pos_m(a, z1), [s0, z1 - z0])], col, sty, None);
+            self.poly(
+                lvl,
+                &[
+                    (cx.pos_m(a, z0), [s0, 0.0]),
+                    (cx.pos_m(b, z0), [s1, 0.0]),
+                    (cx.pos_m(b, z1), [s1, z1 - z0]),
+                    (cx.pos_m(a, z1), [s0, z1 - z0]),
+                ],
+                col,
+                sty,
+                None,
+            );
         }
         let upv = (cx.pos_m(c, z1) + cx.center.as_vec3()).normalize();
-        let cap: Vec<(Vec3, [f32; 2])> = (0..n).map(|k| (cx.pos_m(pt(k), z1), [(pt(k) - c).x, (pt(k) - c).y])).collect();
+        let cap: Vec<(Vec3, [f32; 2])> = (0..n)
+            .map(|k| (cx.pos_m(pt(k), z1), [(pt(k) - c).x, (pt(k) - c).y]))
+            .collect();
         self.poly(lvl, &cap, top.unwrap_or(col), sty, Some(upv));
     }
 }
@@ -368,7 +467,11 @@ impl Roof {
         match *self {
             Roof::Flat => 0.0,
             Roof::Gable(r, off) => {
-                if v >= off { r * (hw - v) / (hw - off) } else { r * (hw + v) / (hw + off) }
+                if v >= off {
+                    r * (hw - v) / (hw - off)
+                } else {
+                    r * (hw + v) / (hw + off)
+                }
             }
             Roof::Hip(p) => p * (hw - v.abs()).min(hl - u.abs()),
             Roof::Shed(p) => p * (v + hw),
@@ -385,12 +488,29 @@ impl Roof {
         match *self {
             Roof::Flat | Roof::Shed(_) => vec![],
             Roof::Gable(_, off) => vec![(0.0, 1.0, off)],
-            Roof::Hip(_) => vec![(0.0, 1.0, 0.0), (1.0, -1.0, d), (1.0, -1.0, -d), (1.0, 1.0, d), (1.0, 1.0, -d)],
+            Roof::Hip(_) => vec![
+                (0.0, 1.0, 0.0),
+                (1.0, -1.0, d),
+                (1.0, -1.0, -d),
+                (1.0, 1.0, d),
+                (1.0, 1.0, -d),
+            ],
             Roof::Mansard(p, cap) => {
                 let c = cap / p;
-                vec![(1.0, -1.0, d), (1.0, -1.0, -d), (1.0, 1.0, d), (1.0, 1.0, -d), (0.0, 1.0, hw - c), (0.0, 1.0, c - hw), (1.0, 0.0, hl - c), (1.0, 0.0, c - hl)]
+                vec![
+                    (1.0, -1.0, d),
+                    (1.0, -1.0, -d),
+                    (1.0, 1.0, d),
+                    (1.0, 1.0, -d),
+                    (0.0, 1.0, hw - c),
+                    (0.0, 1.0, c - hw),
+                    (1.0, 0.0, hl - c),
+                    (1.0, 0.0, c - hl),
+                ]
             }
-            Roof::Multi(bays, _) => (1..2 * bays).map(|i| (0.0, 1.0, -hw + i as f32 * hw / bays as f32)).collect(),
+            Roof::Multi(bays, _) => (1..2 * bays)
+                .map(|i| (0.0, 1.0, -hw + i as f32 * hw / bays as f32))
+                .collect(),
         }
     }
     fn max_h(&self, hl: f32, hw: f32) -> f32 {
@@ -408,15 +528,24 @@ fn split_tris(tris: Vec<[Vec2; 3]>, line: (f32, f32, f32)) -> Vec<[Vec2; 3]> {
     let mut out = Vec::with_capacity(tris.len() + 8);
     let eps = 1e-3;
     for t in tris {
-        let s = [line.0 * t[0].x + line.1 * t[0].y - line.2, line.0 * t[1].x + line.1 * t[1].y - line.2, line.0 * t[2].x + line.1 * t[2].y - line.2];
+        let s = [
+            line.0 * t[0].x + line.1 * t[0].y - line.2,
+            line.0 * t[1].x + line.1 * t[1].y - line.2,
+            line.0 * t[2].x + line.1 * t[2].y - line.2,
+        ];
         if s.iter().all(|v| *v >= -eps) || s.iter().all(|v| *v <= eps) {
             out.push(t);
             continue;
         }
         // The vertex alone on its side of the line.
-        let i0 = (0..3).find(|&i| s[i].abs() > eps && s[(i + 1) % 3] * s[i] <= 0.0 && s[(i + 2) % 3] * s[i] <= 0.0).unwrap_or(0);
+        let i0 = (0..3)
+            .find(|&i| {
+                s[i].abs() > eps && s[(i + 1) % 3] * s[i] <= 0.0 && s[(i + 2) % 3] * s[i] <= 0.0
+            })
+            .unwrap_or(0);
         let (i1, i2) = ((i0 + 1) % 3, (i0 + 2) % 3);
-        let cut = |a: usize, b: usize| t[a] + (t[b] - t[a]) * (s[a] / (s[a] - s[b])).clamp(0.0, 1.0);
+        let cut =
+            |a: usize, b: usize| t[a] + (t[b] - t[a]) * (s[a] / (s[a] - s[b])).clamp(0.0, 1.0);
         let (p01, p02) = (cut(i0, i1), cut(i0, i2));
         for n in [[t[i0], p01, p02], [p01, t[i1], t[i2]], [p01, t[i2], p02]] {
             if (n[1] - n[0]).perp_dot(n[2] - n[0]).abs() > 1e-4 {
@@ -449,7 +578,11 @@ fn obb(pts: &[Vec2]) -> (Vec2, Vec2, f32, f32) {
         let area = (a1 - a0) * (b1 - b0);
         if area < best.0 {
             let c = d * (a0 + a1) * 0.5 + p * (b0 + b1) * 0.5;
-            best = if a1 - a0 >= b1 - b0 { (area, c, d, (a1 - a0) * 0.5, (b1 - b0) * 0.5) } else { (area, c, p, (b1 - b0) * 0.5, (a1 - a0) * 0.5) };
+            best = if a1 - a0 >= b1 - b0 {
+                (area, c, d, (a1 - a0) * 0.5, (b1 - b0) * 0.5)
+            } else {
+                (area, c, p, (b1 - b0) * 0.5, (a1 - a0) * 0.5)
+            };
         }
     }
     (best.1, best.2, best.3.max(0.5), best.4.max(0.5))
@@ -461,7 +594,10 @@ pub fn inset(ring: &[Vec2], d: f32) -> Option<Vec<Vec2>> {
     if n < 3 {
         return None;
     }
-    let area: f32 = (0..n).map(|i| ring[i].perp_dot(ring[(i + 1) % n])).sum::<f32>() * 0.5;
+    let area: f32 = (0..n)
+        .map(|i| ring[i].perp_dot(ring[(i + 1) % n]))
+        .sum::<f32>()
+        * 0.5;
     let sign = area.signum();
     let mut out = Vec::with_capacity(n);
     for i in 0..n {
@@ -479,7 +615,10 @@ pub fn inset(ring: &[Vec2], d: f32) -> Option<Vec<Vec2>> {
         }
         out.push(c + m * (2.0 * d / k));
     }
-    let a2: f32 = (0..n).map(|i| out[i].perp_dot(out[(i + 1) % n])).sum::<f32>() * 0.5;
+    let a2: f32 = (0..n)
+        .map(|i| out[i].perp_dot(out[(i + 1) % n]))
+        .sum::<f32>()
+        * 0.5;
     if a2 * sign <= area.abs() * 0.08 {
         return None;
     }
@@ -527,8 +666,17 @@ impl Hoods {
         let (x0, y0) = (x as usize, y as usize);
         let (fx, fy) = (x - x0 as f32, y - y0 as f32);
         let g = |i: usize, j: usize| self.0[j.min(NB - 1) * NB + i.min(NB - 1)];
-        let mix = |a: Hood, b: Hood, t: f32| Hood { cover: a.cover + (b.cover - a.cover) * t, green: a.green + (b.green - a.green) * t, wealth: a.wealth + (b.wealth - a.wealth) * t, mean_h: a.mean_h + (b.mean_h - a.mean_h) * t };
-        mix(mix(g(x0, y0), g(x0 + 1, y0), fx), mix(g(x0, y0 + 1), g(x0 + 1, y0 + 1), fx), fy)
+        let mix = |a: Hood, b: Hood, t: f32| Hood {
+            cover: a.cover + (b.cover - a.cover) * t,
+            green: a.green + (b.green - a.green) * t,
+            wealth: a.wealth + (b.wealth - a.wealth) * t,
+            mean_h: a.mean_h + (b.mean_h - a.mean_h) * t,
+        };
+        mix(
+            mix(g(x0, y0), g(x0 + 1, y0), fx),
+            mix(g(x0, y0 + 1), g(x0 + 1, y0 + 1), fx),
+            fy,
+        )
     }
     pub fn mean_cover(&self) -> f32 {
         self.0.iter().map(|h| h.cover).sum::<f32>() / self.0.len() as f32
@@ -542,12 +690,15 @@ fn neighbourhoods(cx: &Ctx, vt: &VecTile) -> Hoods {
     for b in &vt.buildings {
         let r = &b.rings[0];
         let n = r.len() as f32;
-        let c = r.iter().fold([0.0, 0.0], |a, p| [a[0] + p[0] / n, a[1] + p[1] / n]);
+        let c = r
+            .iter()
+            .fold([0.0, 0.0], |a, p| [a[0] + p[0] / n, a[1] + p[1] / n]);
         if c[0] < 0.0 || c[1] < 0.0 || c[0] >= cx.ext || c[1] >= cx.ext {
             continue;
         }
         let a = crate::mvt::signed_area(r).abs() * cx.unit_m * cx.unit_m;
-        let i = ((c[1] / cx.ext * NB as f32) as usize).min(NB - 1) * NB + ((c[0] / cx.ext * NB as f32) as usize).min(NB - 1);
+        let i = ((c[1] / cx.ext * NB as f32) as usize).min(NB - 1) * NB
+            + ((c[0] / cx.ext * NB as f32) as usize).min(NB - 1);
         area[i] += a;
         hsum[i].0 += b.height * a;
         hsum[i].1 += a;
@@ -577,16 +728,37 @@ fn neighbourhoods(cx: &Ctx, vt: &VecTile) -> Hoods {
         for i in 0..NB {
             let k = j * NB + i;
             let cover = (area[k] / cell_m2).min(1.0);
-            let size = if house[k].0 > 0.0 { house[k].1 / house[k].0 } else { 110.0 };
+            let size = if house[k].0 > 0.0 {
+                house[k].1 / house[k].0
+            } else {
+                110.0
+            };
             // Bigger homes, more green and a bit of a view read as money;
             // tiny homes packed wall to wall read as the opposite.
             let size_t = ((size - 55.0) / 230.0).clamp(0.0, 1.0);
             let green_t = ((green[k] - 0.04) / 0.3).clamp(0.0, 1.0);
-            let c = [(i as f32 + 0.5) / NB as f32 * cx.ext, (j as f32 + 0.5) / NB as f32 * cx.ext];
+            let c = [
+                (i as f32 + 0.5) / NB as f32 * cx.ext,
+                (j as f32 + 0.5) / NB as f32 * cx.ext,
+            ];
             let hill = ((cx.ground(c) - mean_elev) / 120.0).clamp(-0.5, 1.0);
-            let crowd = if size < 80.0 { ((cover - 0.3) / 0.3).clamp(0.0, 1.0) } else { 0.0 };
-            let wealth = (0.22 + 0.5 * size_t + 0.28 * green_t + 0.12 * hill - 0.3 * crowd).clamp(0.0, 1.0);
-            raw[k] = Hood { cover, green: green[k], wealth, mean_h: if hsum[k].1 > 0.0 { hsum[k].0 / hsum[k].1 } else { 0.0 } };
+            let crowd = if size < 80.0 {
+                ((cover - 0.3) / 0.3).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let wealth =
+                (0.22 + 0.5 * size_t + 0.28 * green_t + 0.12 * hill - 0.3 * crowd).clamp(0.0, 1.0);
+            raw[k] = Hood {
+                cover,
+                green: green[k],
+                wealth,
+                mean_h: if hsum[k].1 > 0.0 {
+                    hsum[k].0 / hsum[k].1
+                } else {
+                    0.0
+                },
+            };
         }
     }
     // Blur wealth so it changes over neighbourhoods rather than cell by cell.
@@ -619,15 +791,91 @@ fn mixc(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
     [0, 1, 2].map(|i| (a[i] as f32 + (b[i] as f32 - a[i] as f32) * t).clamp(0.0, 255.0) as u8)
 }
 
-const PAL_NA: &[[u8; 3]] = &[[226, 222, 212], [205, 196, 178], [188, 190, 186], [214, 205, 172], [160, 175, 186], [172, 182, 160], [222, 208, 160], [150, 92, 74], [196, 170, 146], [236, 232, 226], [140, 150, 160], [206, 178, 170]];
-const PAL_MED: &[[u8; 3]] = &[[236, 230, 214], [226, 206, 168], [214, 170, 132], [222, 190, 160], [240, 236, 228], [204, 180, 140], [228, 214, 190]];
-const PAL_NEUR: &[[u8; 3]] = &[[150, 86, 66], [168, 104, 78], [196, 170, 120], [226, 222, 210], [170, 168, 160], [122, 80, 62], [206, 196, 176], [188, 150, 110]];
-const PAL_ARID: &[[u8; 3]] = &[[214, 196, 164], [228, 218, 198], [190, 184, 172], [222, 196, 176], [200, 180, 150], [236, 230, 218]];
-const PAL_TROPIC: &[[u8; 3]] = &[[186, 184, 176], [200, 214, 220], [208, 222, 196], [226, 200, 190], [226, 216, 180], [170, 150, 126], [232, 228, 216]];
-const PAL_EASIA: &[[u8; 3]] = &[[206, 204, 196], [226, 222, 212], [190, 176, 156], [160, 160, 158], [214, 200, 178], [176, 150, 130]];
-const PAL_OFFICE: &[[u8; 3]] = &[[196, 192, 184], [170, 168, 164], [210, 200, 180], [128, 126, 124], [150, 110, 90], [222, 220, 214], [176, 160, 140]];
-const PAL_GLASS: &[[u8; 3]] = &[[110, 140, 165], [95, 125, 135], [120, 150, 150], [70, 85, 100], [140, 120, 95], [130, 160, 185], [60, 70, 80]];
-const PAL_SHED: &[[u8; 3]] = &[[190, 192, 190], [168, 180, 188], [206, 200, 180], [150, 164, 150], [212, 212, 208], [140, 144, 150], [176, 150, 130]];
+const PAL_NA: &[[u8; 3]] = &[
+    [226, 222, 212],
+    [205, 196, 178],
+    [188, 190, 186],
+    [214, 205, 172],
+    [160, 175, 186],
+    [172, 182, 160],
+    [222, 208, 160],
+    [150, 92, 74],
+    [196, 170, 146],
+    [236, 232, 226],
+    [140, 150, 160],
+    [206, 178, 170],
+];
+const PAL_MED: &[[u8; 3]] = &[
+    [236, 230, 214],
+    [226, 206, 168],
+    [214, 170, 132],
+    [222, 190, 160],
+    [240, 236, 228],
+    [204, 180, 140],
+    [228, 214, 190],
+];
+const PAL_NEUR: &[[u8; 3]] = &[
+    [150, 86, 66],
+    [168, 104, 78],
+    [196, 170, 120],
+    [226, 222, 210],
+    [170, 168, 160],
+    [122, 80, 62],
+    [206, 196, 176],
+    [188, 150, 110],
+];
+const PAL_ARID: &[[u8; 3]] = &[
+    [214, 196, 164],
+    [228, 218, 198],
+    [190, 184, 172],
+    [222, 196, 176],
+    [200, 180, 150],
+    [236, 230, 218],
+];
+const PAL_TROPIC: &[[u8; 3]] = &[
+    [186, 184, 176],
+    [200, 214, 220],
+    [208, 222, 196],
+    [226, 200, 190],
+    [226, 216, 180],
+    [170, 150, 126],
+    [232, 228, 216],
+];
+const PAL_EASIA: &[[u8; 3]] = &[
+    [206, 204, 196],
+    [226, 222, 212],
+    [190, 176, 156],
+    [160, 160, 158],
+    [214, 200, 178],
+    [176, 150, 130],
+];
+const PAL_OFFICE: &[[u8; 3]] = &[
+    [196, 192, 184],
+    [170, 168, 164],
+    [210, 200, 180],
+    [128, 126, 124],
+    [150, 110, 90],
+    [222, 220, 214],
+    [176, 160, 140],
+];
+const PAL_GLASS: &[[u8; 3]] = &[
+    [110, 140, 165],
+    [95, 125, 135],
+    [120, 150, 150],
+    [70, 85, 100],
+    [140, 120, 95],
+    [130, 160, 185],
+    [60, 70, 80],
+];
+const PAL_SHED: &[[u8; 3]] = &[
+    [190, 192, 190],
+    [168, 180, 188],
+    [206, 200, 180],
+    [150, 164, 150],
+    [212, 212, 208],
+    [140, 144, 150],
+    [176, 150, 130],
+];
 
 fn wall_palette(r: Region) -> &'static [[u8; 3]] {
     match r {
@@ -658,17 +906,88 @@ fn pitched_chance(r: Region) -> f32 {
 
 /// Roof material (shader id) and its typical colour.
 fn roof_stuff(r: Region, wealth: f32, h: f32) -> (u8, [u8; 3]) {
-    let tin = (4u8, pick(&[[150, 150, 148], [120, 124, 128], [140, 96, 70], [110, 60, 44], [170, 176, 180]], h));
-    let shingle = (0u8, pick(&[[84, 80, 78], [104, 96, 88], [70, 70, 74], [120, 100, 84], [92, 72, 60], [130, 126, 120]], h));
-    let clay = (1u8, pick(&[[176, 96, 62], [160, 84, 56], [190, 112, 74], [148, 80, 60]], h));
-    let dark_tile = (1u8, pick(&[[110, 62, 50], [84, 70, 66], [128, 74, 54], [70, 66, 68]], h));
+    let tin = (
+        4u8,
+        pick(
+            &[
+                [150, 150, 148],
+                [120, 124, 128],
+                [140, 96, 70],
+                [110, 60, 44],
+                [170, 176, 180],
+            ],
+            h,
+        ),
+    );
+    let shingle = (
+        0u8,
+        pick(
+            &[
+                [84, 80, 78],
+                [104, 96, 88],
+                [70, 70, 74],
+                [120, 100, 84],
+                [92, 72, 60],
+                [130, 126, 120],
+            ],
+            h,
+        ),
+    );
+    let clay = (
+        1u8,
+        pick(
+            &[[176, 96, 62], [160, 84, 56], [190, 112, 74], [148, 80, 60]],
+            h,
+        ),
+    );
+    let dark_tile = (
+        1u8,
+        pick(
+            &[[110, 62, 50], [84, 70, 66], [128, 74, 54], [70, 66, 68]],
+            h,
+        ),
+    );
     let slate = (3u8, pick(&[[70, 74, 82], [86, 88, 92], [60, 62, 68]], h));
     match r {
-        Region::NAm | Region::Oceania => if wealth < 0.18 && h < 0.4 { tin } else if wealth > 0.75 && h < 0.25 { clay } else { shingle },
-        Region::Med | Region::LatAm => if wealth < 0.3 { tin } else { clay },
-        Region::NEur => if h < 0.3 { slate } else { dark_tile },
-        Region::Africa | Region::SeAsia | Region::SAsia | Region::Mena => if wealth > 0.6 { clay } else { tin },
-        Region::EAsia => if wealth < 0.25 { tin } else if h < 0.5 { dark_tile } else { slate },
+        Region::NAm | Region::Oceania => {
+            if wealth < 0.18 && h < 0.4 {
+                tin
+            } else if wealth > 0.75 && h < 0.25 {
+                clay
+            } else {
+                shingle
+            }
+        }
+        Region::Med | Region::LatAm => {
+            if wealth < 0.3 {
+                tin
+            } else {
+                clay
+            }
+        }
+        Region::NEur => {
+            if h < 0.3 {
+                slate
+            } else {
+                dark_tile
+            }
+        }
+        Region::Africa | Region::SeAsia | Region::SAsia | Region::Mena => {
+            if wealth > 0.6 {
+                clay
+            } else {
+                tin
+            }
+        }
+        Region::EAsia => {
+            if wealth < 0.25 {
+                tin
+            } else if h < 0.5 {
+                dark_tile
+            } else {
+                slate
+            }
+        }
     }
 }
 
@@ -712,7 +1031,11 @@ fn roof_colour(cx: &Ctx, ring: &[[f32; 2]], cen: [f32; 2]) -> [u8; 3] {
     }
     let mean = all.iter().map(lum).sum::<f32>() / all.len() as f32;
     let floor = (mean * 0.6).min(70.0);
-    let mut keep: Vec<[u8; 3]> = all.iter().copied().filter(|c| greenness(*c) < 0.3 && lum(c) > floor).collect();
+    let mut keep: Vec<[u8; 3]> = all
+        .iter()
+        .copied()
+        .filter(|c| greenness(*c) < 0.3 && lum(c) > floor)
+        .collect();
     let dirty = keep.len() < 3;
     if dirty {
         keep = all;
@@ -738,10 +1061,22 @@ const F_PAVERS: u8 = 3;
 /// What covers a flat roof, chosen to agree with how light it looks from above.
 fn flat_stuff(kind: Kind, lum: f32, r: f32) -> (u8, [u8; 3]) {
     let q = (r * 7.0).fract();
-    let membrane = (F_MEMBRANE, pick(&[[204, 204, 198], [190, 192, 190], [176, 176, 170]], q));
-    let bitumen = (F_BITUMEN, pick(&[[64, 63, 62], [86, 82, 78], [112, 108, 100]], q));
-    let gravel = (F_GRAVEL, pick(&[[150, 144, 134], [132, 128, 122], [160, 152, 140]], q));
-    let pavers = (F_PAVERS, pick(&[[176, 170, 160], [156, 152, 146], [186, 168, 150]], q));
+    let membrane = (
+        F_MEMBRANE,
+        pick(&[[204, 204, 198], [190, 192, 190], [176, 176, 170]], q),
+    );
+    let bitumen = (
+        F_BITUMEN,
+        pick(&[[64, 63, 62], [86, 82, 78], [112, 108, 100]], q),
+    );
+    let gravel = (
+        F_GRAVEL,
+        pick(&[[150, 144, 134], [132, 128, 122], [160, 152, 140]], q),
+    );
+    let pavers = (
+        F_PAVERS,
+        pick(&[[176, 170, 160], [156, 152, 146], [186, 168, 150]], q),
+    );
     match kind {
         Kind::Tower if r < 0.45 => pavers,
         Kind::Industrial | Kind::Retail if lum > 110.0 => membrane,
@@ -756,12 +1091,25 @@ fn flat_stuff(kind: Kind, lum: f32, r: f32) -> (u8, [u8; 3]) {
 
 /// The rule set: from what we know about a footprint to what gets built.
 #[allow(clippy::too_many_arguments)]
-fn style(cx: &Ctx, b: &crate::sources::BuildingPoly, area: f32, hl: f32, hw: f32, rect: f32, nverts: usize, hood: Hood, landuse: u8, img: [u8; 3], seed: u32) -> Style {
+fn style(
+    cx: &Ctx,
+    b: &crate::sources::BuildingPoly,
+    area: f32,
+    hl: f32,
+    hw: f32,
+    rect: f32,
+    nverts: usize,
+    hood: Hood,
+    landuse: u8,
+    img: [u8; 3],
+    seed: u32,
+) -> Style {
     let r = |k: u32| hash(seed, k);
     let h = b.height;
     let reg = cx.region;
     // Each building strays from its neighbourhood: some are kept perfectly, some are not.
-    let wealth = (hood.wealth + (r(1) - 0.5) * 0.5 + if r(2) < 0.08 { -0.35 } else { 0.0 }).clamp(0.0, 1.0);
+    let wealth =
+        (hood.wealth + (r(1) - 0.5) * 0.5 + if r(2) < 0.08 { -0.35 } else { 0.0 }).clamp(0.0, 1.0);
     let urban = hood.cover > 0.3;
     let kind = if b.min_height > 0.5 {
         Kind::Part
@@ -769,12 +1117,22 @@ fn style(cx: &Ctx, b: &crate::sources::BuildingPoly, area: f32, hl: f32, hw: f32
         Kind::Shed
     } else if h >= 45.0 || (h >= 28.0 && area > 500.0) {
         Kind::Tower
-    } else if landuse == LU_INDUSTRIAL && h < 22.0 || (area > 1500.0 && h < 13.0 && landuse != LU_RESIDENTIAL && hl / hw < 6.0 && rect > 0.6) {
-        if landuse == LU_COMMERCIAL { Kind::Retail } else { Kind::Industrial }
+    } else if landuse == LU_INDUSTRIAL && h < 22.0
+        || (area > 1500.0 && h < 13.0 && landuse != LU_RESIDENTIAL && hl / hw < 6.0 && rect > 0.6)
+    {
+        if landuse == LU_COMMERCIAL {
+            Kind::Retail
+        } else {
+            Kind::Industrial
+        }
     } else if h >= 14.0 {
         Kind::MidRise
     } else if area < 620.0 {
-        if urban && (hw < 5.5 || hood.cover > 0.42) { Kind::Row } else { Kind::House }
+        if urban && (hw < 5.5 || hood.cover > 0.42) {
+            Kind::Row
+        } else {
+            Kind::House
+        }
     } else if landuse == LU_COMMERCIAL || urban {
         Kind::Retail
     } else {
@@ -799,7 +1157,11 @@ fn style(cx: &Ctx, b: &crate::sources::BuildingPoly, area: f32, hl: f32, hw: f32
         Kind::Part => Roof::Flat,
         Kind::Shed => {
             roof_mat = 4;
-            if r(6) < 0.5 { Roof::Shed(0.18) } else { Roof::Gable(hw * 0.35, 0.0) }
+            if r(6) < 0.5 {
+                Roof::Shed(0.18)
+            } else {
+                Roof::Gable(hw * 0.35, 0.0)
+            }
         }
         Kind::House => {
             let p = pitched_chance(reg) * if complex && area > 300.0 { 0.6 } else { 1.0 };
@@ -839,20 +1201,49 @@ fn style(cx: &Ctx, b: &crate::sources::BuildingPoly, area: f32, hl: f32, hw: f32
             }
         }
         Kind::MidRise => {
-            facade = if landuse == LU_COMMERCIAL { if r(6) < 0.5 { 2 } else { 5 } } else if matches!(reg, Region::NEur | Region::NAm) && r(6) < 0.45 { 6 } else if r(6) < 0.8 { 1 } else { 5 };
+            facade = if landuse == LU_COMMERCIAL {
+                if r(6) < 0.5 { 2 } else { 5 }
+            } else if matches!(reg, Region::NEur | Region::NAm) && r(6) < 0.45 {
+                6
+            } else if r(6) < 0.8 {
+                1
+            } else {
+                5
+            };
             parapet = 0.6 + r(7) * 0.6;
-            if reg == Region::NEur && r(8) < 0.35 && !complex { Roof::Mansard(1.6, 2.6) } else { Roof::Flat }
+            if reg == Region::NEur && r(8) < 0.35 && !complex {
+                Roof::Mansard(1.6, 2.6)
+            } else {
+                Roof::Flat
+            }
         }
         Kind::Tower => {
-            let glassy = (0.25 + (h - 45.0) / 160.0 + if landuse == LU_COMMERCIAL { 0.2 } else { 0.0 }).min(0.85);
-            facade = if r(6) < glassy { 3 } else if landuse == LU_RESIDENTIAL || r(7) < 0.4 { 6 } else { 2 };
+            let glassy =
+                (0.25 + (h - 45.0) / 160.0 + if landuse == LU_COMMERCIAL { 0.2 } else { 0.0 })
+                    .min(0.85);
+            facade = if r(6) < glassy {
+                3
+            } else if landuse == LU_RESIDENTIAL || r(7) < 0.4 {
+                6
+            } else {
+                2
+            };
             parapet = 0.9;
             Roof::Flat
         }
         Kind::Industrial => {
             facade = 4;
             roof_mat = 2;
-            roof_col = pick(&[[170, 172, 174], [150, 156, 160], [196, 196, 190], [130, 140, 150], [150, 120, 100]], r(4));
+            roof_col = pick(
+                &[
+                    [170, 172, 174],
+                    [150, 156, 160],
+                    [196, 196, 190],
+                    [130, 140, 150],
+                    [150, 120, 100],
+                ],
+                r(4),
+            );
             wall = pick(PAL_SHED, r(3));
             if complex {
                 parapet = 0.4;
@@ -869,11 +1260,27 @@ fn style(cx: &Ctx, b: &crate::sources::BuildingPoly, area: f32, hl: f32, hw: f32
         Kind::Retail => {
             facade = if h > 7.0 || r(6) < 0.6 { 5 } else { 2 };
             parapet = 0.7 + r(7) * 0.7;
-            if !complex && area < 1200.0 && r(8) < 0.12 { Roof::Gable(hw * 0.3, 0.0) } else { Roof::Flat }
+            if !complex && area < 1200.0 && r(8) < 0.12 {
+                Roof::Gable(hw * 0.3, 0.0)
+            } else {
+                Roof::Flat
+            }
         }
     };
-    if matches!(kind, Kind::MidRise | Kind::Tower | Kind::Retail | Kind::Part) {
-        wall = pick(if facade == 3 { PAL_GLASS } else if facade == 6 { PAL_NEUR } else { PAL_OFFICE }, r(3));
+    if matches!(
+        kind,
+        Kind::MidRise | Kind::Tower | Kind::Retail | Kind::Part
+    ) {
+        wall = pick(
+            if facade == 3 {
+                PAL_GLASS
+            } else if facade == 6 {
+                PAL_NEUR
+            } else {
+                PAL_OFFICE
+            },
+            r(3),
+        );
     }
     if kind == Kind::Row && reg == Region::NAm {
         // Painted town houses.
@@ -887,8 +1294,22 @@ fn style(cx: &Ctx, b: &crate::sources::BuildingPoly, area: f32, hl: f32, hw: f32
     }
     // Flat roofs take their covering from how light they look, and most of their colour from the image.
     let (flat_mat, flat_col) = flat_stuff(kind, lum, r(10));
-    let roof_col = if matches!(roof, Roof::Flat) { mixc(flat_col, img, 0.55) } else { mixc(roof_col, img, 0.4) };
-    Style { kind, roof, roof_mat, roof_col, flat_mat, wall, facade, wealth, parapet }
+    let roof_col = if matches!(roof, Roof::Flat) {
+        mixc(flat_col, img, 0.55)
+    } else {
+        mixc(roof_col, img, 0.4)
+    };
+    Style {
+        kind,
+        roof,
+        roof_mat,
+        roof_col,
+        flat_mat,
+        wall,
+        facade,
+        wealth,
+        parapet,
+    }
 }
 
 // --------------------------------------------------------------- generator
@@ -911,7 +1332,20 @@ impl Shape {
 
 /// Walls of one ring from `z0` up to `top` + roof height, following the roof's folds.
 #[allow(clippy::too_many_arguments)]
-fn walls(cx: &Ctx, m: &mut Mesh, lvl: Lvl, sh: &Shape, ring: &[Vec2], z0: f32, top: f32, roof: &Roof, creases: &[(f32, f32, f32)], col: [u8; 4], sty: [u8; 4], extra: f32) {
+fn walls(
+    cx: &Ctx,
+    m: &mut Mesh,
+    lvl: Lvl,
+    sh: &Shape,
+    ring: &[Vec2],
+    z0: f32,
+    top: f32,
+    roof: &Roof,
+    creases: &[(f32, f32, f32)],
+    col: [u8; 4],
+    sty: [u8; 4],
+    extra: f32,
+) {
     let mut along = 0.0;
     let n = ring.len();
     for i in 0..n {
@@ -940,14 +1374,36 @@ fn walls(cx: &Ctx, m: &mut Mesh, lvl: Lvl, sh: &Shape, ring: &[Vec2], z0: f32, t
             };
             let (h0, h1) = (h(p0), h(p1));
             let (s0, s1) = (along + l * w[0], along + l * w[1]);
-            m.poly(lvl, &[(cx.pos_m(p0, z0), [s0, z0 - sh.gmin]), (cx.pos_m(p1, z0), [s1, z0 - sh.gmin]), (cx.pos_m(p1, h1), [s1, h1 - sh.gmin]), (cx.pos_m(p0, h0), [s0, h0 - sh.gmin])], col, sty, None);
+            m.poly(
+                lvl,
+                &[
+                    (cx.pos_m(p0, z0), [s0, z0 - sh.gmin]),
+                    (cx.pos_m(p1, z0), [s1, z0 - sh.gmin]),
+                    (cx.pos_m(p1, h1), [s1, h1 - sh.gmin]),
+                    (cx.pos_m(p0, h0), [s0, h0 - sh.gmin]),
+                ],
+                col,
+                sty,
+                None,
+            );
         }
         along += l;
     }
 }
 
 /// Roof surface over a set of rings (outer + holes).
-fn roof_surface(cx: &Ctx, m: &mut Mesh, lvl: Lvl, sh: &Shape, rings: &[Vec<Vec2>], top: f32, roof: &Roof, creases: &[(f32, f32, f32)], col: [u8; 4], sty: [u8; 4]) {
+fn roof_surface(
+    cx: &Ctx,
+    m: &mut Mesh,
+    lvl: Lvl,
+    sh: &Shape,
+    rings: &[Vec<Vec2>],
+    top: f32,
+    roof: &Roof,
+    creases: &[(f32, f32, f32)],
+    col: [u8; 4],
+    sty: [u8; 4],
+) {
     let mut flat: Vec<f64> = Vec::new();
     let mut holes = Vec::new();
     let mut pts = Vec::new();
@@ -961,8 +1417,13 @@ fn roof_surface(cx: &Ctx, m: &mut Mesh, lvl: Lvl, sh: &Shape, rings: &[Vec<Vec2>
             pts.push(Vec2::new(u, v));
         }
     }
-    let Ok(ix) = earcutr::earcut(&flat, &holes, 2) else { return };
-    let mut tris: Vec<[Vec2; 3]> = ix.chunks_exact(3).map(|t| [pts[t[0]], pts[t[1]], pts[t[2]]]).collect();
+    let Ok(ix) = earcutr::earcut(&flat, &holes, 2) else {
+        return;
+    };
+    let mut tris: Vec<[Vec2; 3]> = ix
+        .chunks_exact(3)
+        .map(|t| [pts[t[0]], pts[t[1]], pts[t[2]]])
+        .collect();
     for c in creases {
         tris = split_tris(tris, *c);
     }
@@ -972,12 +1433,23 @@ fn roof_surface(cx: &Ctx, m: &mut Mesh, lvl: Lvl, sh: &Shape, rings: &[Vec<Vec2>
         // Slope direction of this facet, for laying tiles in rows.
         let (e1, e2) = (t[1] - t[0], t[2] - t[0]);
         let det = e1.perp_dot(e2);
-        let grad = if det.abs() > 1e-6 { Vec2::new((hs[1] - hs[0]) * e2.y - (hs[2] - hs[0]) * e1.y, (hs[2] - hs[0]) * e1.x - (hs[1] - hs[0]) * e2.x) / det } else { Vec2::ZERO };
+        let grad = if det.abs() > 1e-6 {
+            Vec2::new(
+                (hs[1] - hs[0]) * e2.y - (hs[2] - hs[0]) * e1.y,
+                (hs[2] - hs[0]) * e1.x - (hs[1] - hs[0]) * e2.x,
+            ) / det
+        } else {
+            Vec2::ZERO
+        };
         let g = grad.length();
         let p3: Vec<(Vec3, [f32; 2])> = (0..3)
             .map(|k| {
                 let world = sh.c + sh.u * t[k].x + sh.v * t[k].y;
-                let uv = if g > 0.02 { [t[k].dot(grad.perp() / g), -hs[k] / g * (1.0 + g * g).sqrt()] } else { [t[k].x, t[k].y] };
+                let uv = if g > 0.02 {
+                    [t[k].dot(grad.perp() / g), -hs[k] / g * (1.0 + g * g).sqrt()]
+                } else {
+                    [t[k].x, t[k].y]
+                };
                 (cx.pos_m(world, top + hs[k]), uv)
             })
             .collect();
@@ -1008,7 +1480,18 @@ pub const HELIPAD: u8 = 16;
 /// skylights, aircraft warning lights.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_arguments)]
-fn roof_clutter(cx: &Ctx, m: &mut Mesh, sh: &Shape, ring: &[Vec2], top: f32, st: &Style, seed: u32, height: f32, helipad: bool, avoid: &[Vec<Vec2>]) {
+fn roof_clutter(
+    cx: &Ctx,
+    m: &mut Mesh,
+    sh: &Shape,
+    ring: &[Vec2],
+    top: f32,
+    st: &Style,
+    seed: u32,
+    height: f32,
+    helipad: bool,
+    avoid: &[Vec<Vec2>],
+) {
     let area = sh.hl * sh.hw * 4.0;
     let want = match st.kind {
         Kind::Tower => 3 + (area / 500.0) as usize,
@@ -1026,11 +1509,31 @@ fn roof_clutter(cx: &Ctx, m: &mut Mesh, sh: &Shape, ring: &[Vec2], top: f32, st:
     let w8 = (st.wealth * 255.0) as u8;
     let sty = |mat: u8| [s8, mat, w8, 0];
     let fits = |c: Vec2, hx: f32, hy: f32, placed: &Vec<(Vec2, f32)>| {
-        let corners = [c + sh.u * hx + sh.v * hy, c - sh.u * hx + sh.v * hy, c + sh.u * hx - sh.v * hy, c - sh.u * hx - sh.v * hy];
+        let corners = [
+            c + sh.u * hx + sh.v * hy,
+            c - sh.u * hx + sh.v * hy,
+            c + sh.u * hx - sh.v * hy,
+            c - sh.u * hx - sh.v * hy,
+        ];
         // Keep clear of holes and of any part standing on or rising through the roof.
         let (ex, ey) = (hx + 0.4, hy + 0.4);
-        let clear = [c, c + sh.u * ex + sh.v * ey, c - sh.u * ex + sh.v * ey, c + sh.u * ex - sh.v * ey, c - sh.u * ex - sh.v * ey];
-        corners.iter().all(|p| in_ring_m(*p, ring)) && !sh.rings.iter().skip(1).chain(avoid).any(|h| clear.iter().any(|p| in_ring_m(*p, h))) && !placed.iter().any(|(p, pr)| (*p - c).length() < hx.hypot(hy) + pr + 0.6)
+        let clear = [
+            c,
+            c + sh.u * ex + sh.v * ey,
+            c - sh.u * ex + sh.v * ey,
+            c + sh.u * ex - sh.v * ey,
+            c - sh.u * ex - sh.v * ey,
+        ];
+        corners.iter().all(|p| in_ring_m(*p, ring))
+            && !sh
+                .rings
+                .iter()
+                .skip(1)
+                .chain(avoid)
+                .any(|h| clear.iter().any(|p| in_ring_m(*p, h)))
+            && !placed
+                .iter()
+                .any(|(p, pr)| (*p - c).length() < hx.hypot(hy) + pr + 0.6)
     };
     let mut n_box = 0;
     for k in 0..want * 4 {
@@ -1038,11 +1541,18 @@ fn roof_clutter(cx: &Ctx, m: &mut Mesh, sh: &Shape, ring: &[Vec2], top: f32, st:
             break;
         }
         let r = |j: u32| hash(seed, 100 + k as u32 * 8 + j);
-        let (u, v) = ((r(0) * 2.0 - 1.0) * (sh.hl - 1.5), (r(1) * 2.0 - 1.0) * (sh.hw - 1.5));
+        let (u, v) = (
+            (r(0) * 2.0 - 1.0) * (sh.hl - 1.5),
+            (r(1) * 2.0 - 1.0) * (sh.hw - 1.5),
+        );
         let c = sh.c + sh.u * u + sh.v * v;
         // First box on a tall building is the lift overrun / stair head, the rest are plant.
         let big = n_box == 0 && matches!(st.kind, Kind::Tower | Kind::MidRise);
-        let (hx, hy, hz) = if big { (2.0 + r(2) * 2.5, 1.6 + r(3) * 1.6, 2.6 + r(4) * 1.5) } else { (0.6 + r(2) * 1.3, 0.5 + r(3) * 0.9, 0.7 + r(4) * 1.1) };
+        let (hx, hy, hz) = if big {
+            (2.0 + r(2) * 2.5, 1.6 + r(3) * 1.6, 2.6 + r(4) * 1.5)
+        } else {
+            (0.6 + r(2) * 1.3, 0.5 + r(3) * 0.9, 0.7 + r(4) * 1.1)
+        };
         let (hx, hy) = (hx.min(sh.hl * 0.4), hy.min(sh.hw * 0.4));
         if !fits(c, hx, hy, &placed) {
             continue;
@@ -1050,16 +1560,68 @@ fn roof_clutter(cx: &Ctx, m: &mut Mesh, sh: &Shape, ring: &[Vec2], top: f32, st:
         placed.push((c, hx.hypot(hy)));
         n_box += 1;
         if big {
-            m.boxm(cx, false, c, sh.u * hx, sh.v * hy, top - 0.1, top + hz, kcol(mixc(st.wall, [150, 150, 150], 0.5), K_PLAIN), sty(P_STAIR), None);
+            m.boxm(
+                cx,
+                false,
+                c,
+                sh.u * hx,
+                sh.v * hy,
+                top - 0.1,
+                top + hz,
+                kcol(mixc(st.wall, [150, 150, 150], 0.5), K_PLAIN),
+                sty(P_STAIR),
+                None,
+            );
             if st.kind == Kind::Tower && height > 110.0 && r(6) < 0.4 {
                 // Mast.
                 let mh = height * (0.12 + r(7) * 0.15);
-                m.boxm(cx, false, c, sh.u * 0.35, sh.v * 0.35, top + hz, top + hz + mh, kcol([120, 122, 126], K_PLAIN), sty(P_PLAIN), None);
-                m.boxm(cx, true, c, sh.u * 0.3, sh.v * 0.3, top + hz + mh, top + hz + mh + 0.4, [255, 40, 30, K_LAMP], [s8, L_WARN, 0, 0], None);
+                m.boxm(
+                    cx,
+                    false,
+                    c,
+                    sh.u * 0.35,
+                    sh.v * 0.35,
+                    top + hz,
+                    top + hz + mh,
+                    kcol([120, 122, 126], K_PLAIN),
+                    sty(P_PLAIN),
+                    None,
+                );
+                m.boxm(
+                    cx,
+                    true,
+                    c,
+                    sh.u * 0.3,
+                    sh.v * 0.3,
+                    top + hz + mh,
+                    top + hz + mh + 0.4,
+                    [255, 40, 30, K_LAMP],
+                    [s8, L_WARN, 0, 0],
+                    None,
+                );
             }
         } else {
-            let col = pick(&[[168, 170, 172], [140, 144, 146], [196, 196, 192], [120, 124, 122]], r(5));
-            m.boxm(cx, true, c, sh.u * hx, sh.v * hy, top - 0.1, top + hz, kcol(col, K_PLAIN), sty(P_HVAC), None);
+            let col = pick(
+                &[
+                    [168, 170, 172],
+                    [140, 144, 146],
+                    [196, 196, 192],
+                    [120, 124, 122],
+                ],
+                r(5),
+            );
+            m.boxm(
+                cx,
+                true,
+                c,
+                sh.u * hx,
+                sh.v * hy,
+                top - 0.1,
+                top + hz,
+                kcol(col, K_PLAIN),
+                sty(P_HVAC),
+                None,
+            );
         }
     }
     // Warning lights on the corners of anything tall.
@@ -1067,7 +1629,18 @@ fn roof_clutter(cx: &Ctx, m: &mut Mesh, sh: &Shape, ring: &[Vec2], top: f32, st:
         if let Some(inner) = inset(ring, 0.5) {
             let step = (inner.len() / 4).max(1);
             for p in inner.iter().step_by(step).take(4) {
-                m.boxm(cx, true, *p, sh.u * 0.2, sh.v * 0.2, top + 0.8, top + 1.3, [255, 40, 30, K_LAMP], [s8.wrapping_add(p.x as u8), L_WARN, 0, 0], None);
+                m.boxm(
+                    cx,
+                    true,
+                    *p,
+                    sh.u * 0.2,
+                    sh.v * 0.2,
+                    top + 0.8,
+                    top + 1.3,
+                    [255, 40, 30, K_LAMP],
+                    [s8.wrapping_add(p.x as u8), L_WARN, 0, 0],
+                    None,
+                );
             }
         }
     }
@@ -1075,11 +1648,17 @@ fn roof_clutter(cx: &Ctx, m: &mut Mesh, sh: &Shape, ring: &[Vec2], top: f32, st:
         return;
     }
     // Timber water tanks on legs: old American mid-rises.
-    if cx.region == Region::NAm && matches!(st.kind, Kind::MidRise | Kind::Tower) && height < 130.0 && hash(seed, 70) < 0.45 + (0.5 - st.wealth) * 0.4 {
+    if cx.region == Region::NAm
+        && matches!(st.kind, Kind::MidRise | Kind::Tower)
+        && height < 130.0
+        && hash(seed, 70) < 0.45 + (0.5 - st.wealth) * 0.4
+    {
         for k in 0..1 + (hash(seed, 71) < 0.3) as u32 {
             let r = |j: u32| hash(seed, 72 + k * 8 + j);
             let rad = 1.5 + r(0) * 1.0;
-            let c = sh.c + sh.u * (r(1) * 2.0 - 1.0) * (sh.hl - rad - 1.0) + sh.v * (r(2) * 2.0 - 1.0) * (sh.hw - rad - 1.0);
+            let c = sh.c
+                + sh.u * (r(1) * 2.0 - 1.0) * (sh.hl - rad - 1.0)
+                + sh.v * (r(2) * 2.0 - 1.0) * (sh.hw - rad - 1.0);
             if !fits(c, rad, rad, &placed) {
                 continue;
             }
@@ -1087,12 +1666,45 @@ fn roof_clutter(cx: &Ctx, m: &mut Mesh, sh: &Shape, ring: &[Vec2], top: f32, st:
             let legs = 2.4 + r(3) * 1.5;
             for (a, b) in [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
                 let lp = c + (sh.u * a + sh.v * b) * (rad * 0.62);
-                m.boxm(cx, FINE, lp, sh.u * 0.12, sh.v * 0.12, top - 0.1, top + legs, kcol([60, 58, 56], K_PLAIN), sty(P_PLAIN), None);
+                m.boxm(
+                    cx,
+                    FINE,
+                    lp,
+                    sh.u * 0.12,
+                    sh.v * 0.12,
+                    top - 0.1,
+                    top + legs,
+                    kcol([60, 58, 56], K_PLAIN),
+                    sty(P_PLAIN),
+                    None,
+                );
             }
             let th = rad * 1.6 + r(4) * 1.5;
-            m.prism(cx, FINE, c, rad, 10, top + legs, top + legs + th, kcol([110, 80, 58], K_PLAIN), sty(P_TANK), None);
+            m.prism(
+                cx,
+                FINE,
+                c,
+                rad,
+                10,
+                top + legs,
+                top + legs + th,
+                kcol([110, 80, 58], K_PLAIN),
+                sty(P_TANK),
+                None,
+            );
             // Conical lid.
-            m.prism(cx, FINE, c, rad * 0.55, 10, top + legs + th, top + legs + th + rad * 0.45, kcol([70, 62, 56], K_PLAIN), sty(P_TANK), None);
+            m.prism(
+                cx,
+                FINE,
+                c,
+                rad * 0.55,
+                10,
+                top + legs + th,
+                top + legs + th + rad * 0.45,
+                kcol([70, 62, 56], K_PLAIN),
+                sty(P_TANK),
+                None,
+            );
         }
     }
     // Solar panels in tilted rows, facing the equator.
@@ -1100,12 +1712,24 @@ fn roof_clutter(cx: &Ctx, m: &mut Mesh, sh: &Shape, ring: &[Vec2], top: f32, st:
         Kind::Retail | Kind::Industrial => 0.25 + 0.35 * st.wealth,
         Kind::MidRise => 0.1 + 0.3 * st.wealth,
         _ => 0.0,
-    } + if matches!(cx.region, Region::Oceania | Region::NEur | Region::Med) { 0.15 } else { 0.0 };
+    } + if matches!(cx.region, Region::Oceania | Region::NEur | Region::Med) {
+        0.15
+    } else {
+        0.0
+    };
     if hash(seed, 80) < solar_p && sh.hl > 5.0 && sh.hw > 4.0 {
         // "South" in the metric frame is +y in the north, -y in the south.
         let eq = Vec2::new(0.0, if cx.lat >= 0.0 { 1.0 } else { -1.0 });
-        let (along, across) = if sh.v.dot(eq).abs() > sh.u.dot(eq).abs() { (sh.u, sh.v * sh.v.dot(eq).signum()) } else { (sh.v, sh.u * sh.u.dot(eq).signum()) };
-        let (la, lc) = if along == sh.u { (sh.hl, sh.hw) } else { (sh.hw, sh.hl) };
+        let (along, across) = if sh.v.dot(eq).abs() > sh.u.dot(eq).abs() {
+            (sh.u, sh.v * sh.v.dot(eq).signum())
+        } else {
+            (sh.v, sh.u * sh.u.dot(eq).signum())
+        };
+        let (la, lc) = if along == sh.u {
+            (sh.hl, sh.hw)
+        } else {
+            (sh.hw, sh.hl)
+        };
         let rows = (((lc - 2.0) * 2.0) / 2.6) as i32;
         let half = (la - 1.8).min(14.0);
         let tilt = 0.9f32;
@@ -1118,10 +1742,33 @@ fn roof_clutter(cx: &Ctx, m: &mut Mesh, sh: &Shape, ring: &[Vec2], top: f32, st:
             }
             let (f0, f1) = (c - across * 0.45, c + across * 0.45);
             let z0 = top + 0.35;
-            let quad = [(f0 - along * half, z0 + rise), (f0 + along * half, z0 + rise), (f1 + along * half, z0), (f1 - along * half, z0)];
-            let pts: Vec<(Vec3, [f32; 2])> = quad.iter().enumerate().map(|(k, (p, z))| (cx.pos_m(*p, *z), [if k == 1 || k == 2 { half * 2.0 } else { 0.0 }, if k >= 2 { tilt } else { 0.0 }])).collect();
+            let quad = [
+                (f0 - along * half, z0 + rise),
+                (f0 + along * half, z0 + rise),
+                (f1 + along * half, z0),
+                (f1 - along * half, z0),
+            ];
+            let pts: Vec<(Vec3, [f32; 2])> = quad
+                .iter()
+                .enumerate()
+                .map(|(k, (p, z))| {
+                    (
+                        cx.pos_m(*p, *z),
+                        [
+                            if k == 1 || k == 2 { half * 2.0 } else { 0.0 },
+                            if k >= 2 { tilt } else { 0.0 },
+                        ],
+                    )
+                })
+                .collect();
             let upv = (pts[0].0 + cx.center.as_vec3()).normalize();
-            m.poly(FINE, &pts, kcol([20, 26, 50], K_PLAIN), sty(P_SOLAR), Some(upv));
+            m.poly(
+                FINE,
+                &pts,
+                kcol([20, 26, 50], K_PLAIN),
+                sty(P_SOLAR),
+                Some(upv),
+            );
         }
     }
     // Skylights over sheds and shops.
@@ -1135,7 +1782,18 @@ fn roof_clutter(cx: &Ctx, m: &mut Mesh, sh: &Shape, ring: &[Vec2], top: f32, st:
                 }
                 let c = sh.c + sh.u * (i as f32 * 6.0) + sh.v * (j as f32 * 6.0);
                 if fits(c, 1.2, 0.9, &placed) && m.fine_ok() {
-                    m.boxm(cx, FINE, c, sh.u * 1.2, sh.v * 0.9, top - 0.05, top + 0.35, kcol([150, 152, 150], K_PLAIN), sty(P_SKYLIGHT), Some(kcol([60, 64, 66], K_PLAIN)));
+                    m.boxm(
+                        cx,
+                        FINE,
+                        c,
+                        sh.u * 1.2,
+                        sh.v * 0.9,
+                        top - 0.05,
+                        top + 0.35,
+                        kcol([150, 152, 150], K_PLAIN),
+                        sty(P_SKYLIGHT),
+                        Some(kcol([60, 64, 66], K_PLAIN)),
+                    );
                 }
             }
         }
@@ -1145,9 +1803,22 @@ fn roof_clutter(cx: &Ctx, m: &mut Mesh, sh: &Shape, ring: &[Vec2], top: f32, st:
 /// Overhanging eaves round a pitched roof: the roof planes carried on past
 /// the walls, with a fascia board along the edge.
 #[allow(clippy::too_many_arguments)]
-fn eaves(cx: &Ctx, m: &mut Mesh, sh: &Shape, top: f32, roof: &Roof, creases: &[(f32, f32, f32)], col: [u8; 4], sty: [u8; 4], fascia: [u8; 4], over: f32) {
+fn eaves(
+    cx: &Ctx,
+    m: &mut Mesh,
+    sh: &Shape,
+    top: f32,
+    roof: &Roof,
+    creases: &[(f32, f32, f32)],
+    col: [u8; 4],
+    sty: [u8; 4],
+    fascia: [u8; 4],
+    over: f32,
+) {
     let ring = &sh.rings[0];
-    let Some(out) = inset(ring, -over) else { return };
+    let Some(out) = inset(ring, -over) else {
+        return;
+    };
     let n = ring.len();
     let upv = (cx.pos_m(sh.c, top) + cx.center.as_vec3()).normalize();
     let hr = |p: Vec2| {
@@ -1175,11 +1846,42 @@ fn eaves(cx: &Ctx, m: &mut Mesh, sh: &Shape, top: f32, roof: &Roof, creases: &[(
             }
             let (p0, p1) = (a + (b - a) * w[0], a + (b - a) * w[1]);
             let (q0, q1) = (oa + (ob - oa) * w[0], ob + (oa - ob) * (1.0 - w[1]));
-            let (h0, h1) = (top + { let (u, v) = sh.uv(p0); roof.h(u, v, sh.hl, sh.hw) }, top + { let (u, v) = sh.uv(p1); roof.h(u, v, sh.hl, sh.hw) });
+            let (h0, h1) = (
+                top + {
+                    let (u, v) = sh.uv(p0);
+                    roof.h(u, v, sh.hl, sh.hw)
+                },
+                top + {
+                    let (u, v) = sh.uv(p1);
+                    roof.h(u, v, sh.hl, sh.hw)
+                },
+            );
             let (g0, g1) = (hr(q0).min(h0), hr(q1).min(h1));
             let l = (p1 - p0).length();
-            m.poly(true, &[(cx.pos_m(p0, h0), [0.0, 0.0]), (cx.pos_m(p1, h1), [l, 0.0]), (cx.pos_m(q1, g1), [l, over]), (cx.pos_m(q0, g0), [0.0, over])], col, sty, Some(upv));
-            m.poly(true, &[(cx.pos_m(q0, g0 - 0.22), [0.0, 0.0]), (cx.pos_m(q1, g1 - 0.22), [l, 0.0]), (cx.pos_m(q1, g1), [l, 0.22]), (cx.pos_m(q0, g0), [0.0, 0.22])], fascia, [0, P_PLAIN, 0, 0], None);
+            m.poly(
+                true,
+                &[
+                    (cx.pos_m(p0, h0), [0.0, 0.0]),
+                    (cx.pos_m(p1, h1), [l, 0.0]),
+                    (cx.pos_m(q1, g1), [l, over]),
+                    (cx.pos_m(q0, g0), [0.0, over]),
+                ],
+                col,
+                sty,
+                Some(upv),
+            );
+            m.poly(
+                true,
+                &[
+                    (cx.pos_m(q0, g0 - 0.22), [0.0, 0.0]),
+                    (cx.pos_m(q1, g1 - 0.22), [l, 0.0]),
+                    (cx.pos_m(q1, g1), [l, 0.22]),
+                    (cx.pos_m(q0, g0), [0.0, 0.22]),
+                ],
+                fascia,
+                [0, P_PLAIN, 0, 0],
+                None,
+            );
         }
     }
 }
@@ -1218,14 +1920,27 @@ fn roof_dressing(cx: &Ctx, m: &mut Mesh, sh: &Shape, top: f32, st: &Style, seed:
         _ => 0.04,
     };
     let (v0, v1) = span(sunny);
-    let hu = if matches!(st.roof, Roof::Hip(_)) { hl - hw * 0.9 } else { hl - 0.8 };
+    let hu = if matches!(st.roof, Roof::Hip(_)) {
+        hl - hw * 0.9
+    } else {
+        hl - 0.8
+    };
     if hash(seed, 90) < solar_p && hu > 1.5 {
         let (a, b) = (v0 + (v1 - v0) * 0.15, v0 + (v1 - v0) * 0.8);
         let w = hu.min(5.0 + hash(seed, 91) * 4.0);
         let u0 = (hash(seed, 92) - 0.5) * (hu - w);
         let pts = [(u0 - w, a), (u0 + w, a), (u0 + w, b), (u0 - w, b)];
-        let lp: Vec<(Vec3, [f32; 2])> = pts.iter().map(|(u, v)| (plane(*u, *v, 0.09), [*u - (u0 - w), (*v - a).abs() * 1.25])).collect();
-        m.poly(FINE, &lp, kcol([20, 26, 50], K_PLAIN), [0, P_SOLAR, w8, 0], Some(upv));
+        let lp: Vec<(Vec3, [f32; 2])> = pts
+            .iter()
+            .map(|(u, v)| (plane(*u, *v, 0.09), [*u - (u0 - w), (*v - a).abs() * 1.25]))
+            .collect();
+        m.poly(
+            FINE,
+            &lp,
+            kcol([20, 26, 50], K_PLAIN),
+            [0, P_SOLAR, w8, 0],
+            Some(upv),
+        );
     } else if hash(seed, 93) < 0.3 + 0.3 * st.wealth {
         // Roof windows.
         for k in 0..1 + (hash(seed, 94) * 2.5) as u32 {
@@ -1234,13 +1949,30 @@ fn roof_dressing(cx: &Ctx, m: &mut Mesh, sh: &Shape, top: f32, st: &Style, seed:
             let u = (hash(seed, 98 + k) - 0.5) * hu * 1.6;
             let v = s0 + (s1 - s0) * 0.45;
             let (du, dv) = (0.4, (s1 - s0).abs() * 0.12);
-            let pts = [(u - du, v - dv), (u + du, v - dv), (u + du, v + dv), (u - du, v + dv)];
-            let lp: Vec<(Vec3, [f32; 2])> = pts.iter().map(|(a, b)| (plane(*a, *b, 0.07), [*a - (u - du), *b - (v - dv)])).collect();
-            m.poly(FINE, &lp, kcol([90, 92, 94], K_PLAIN), [(hash(seed, 99) * 255.0) as u8, P_SKYLIGHT, w8, 0], Some(upv));
+            let pts = [
+                (u - du, v - dv),
+                (u + du, v - dv),
+                (u + du, v + dv),
+                (u - du, v + dv),
+            ];
+            let lp: Vec<(Vec3, [f32; 2])> = pts
+                .iter()
+                .map(|(a, b)| (plane(*a, *b, 0.07), [*a - (u - du), *b - (v - dv)]))
+                .collect();
+            m.poly(
+                FINE,
+                &lp,
+                kcol([90, 92, 94], K_PLAIN),
+                [(hash(seed, 99) * 255.0) as u8, P_SKYLIGHT, w8, 0],
+                Some(upv),
+            );
         }
     }
     // Dormers in the steep roofs of northern Europe and old America.
-    if matches!(cx.region, Region::NEur | Region::NAm) && ridge > 2.2 && hash(seed, 110) < 0.4 + 0.3 * st.wealth {
+    if matches!(cx.region, Region::NEur | Region::NAm)
+        && ridge > 2.2
+        && hash(seed, 110) < 0.4 + 0.3 * st.wealth
+    {
         let side = -sunny;
         let (s0, s1) = span(side);
         let nd = ((hu * 2.0 / 3.4) as i32).clamp(1, 3);
@@ -1248,20 +1980,64 @@ fn roof_dressing(cx: &Ctx, m: &mut Mesh, sh: &Shape, top: f32, st: &Style, seed:
             let u = (k as f32 + 0.5) / nd as f32 * hu * 1.6 - hu * 0.8;
             let vf = s0 + (s1 - s0) * if side > 0.0 { 0.35 } else { 0.65 };
             let ve = s0 + (s1 - s0) * if side > 0.0 { 0.85 } else { 0.15 };
-            let (zb, zt) = (top + st.roof.h(u, ve, hl, hw) - 0.1, top + st.roof.h(u, vf, hl, hw));
+            let (zb, zt) = (
+                top + st.roof.h(u, ve, hl, hw) - 0.1,
+                top + st.roof.h(u, vf, hl, hw),
+            );
             if zt - zb < 0.9 {
                 continue;
             }
             let c = sh.c + sh.u * u + sh.v * ((vf + ve) * 0.5);
             let half_d = (ve - vf).abs() * 0.5;
-            m.boxm(cx, FINE, c, sh.u * 0.75, sh.v * half_d, zb, zt, kcol(st.wall, K_WALL), [(hash(seed, 111 + k as u32) * 255.0) as u8, 0, w8, (zt - zb) as u8], Some(kcol(mixc(st.roof_col, [60, 60, 60], 0.3), K_PLAIN)));
+            m.boxm(
+                cx,
+                FINE,
+                c,
+                sh.u * 0.75,
+                sh.v * half_d,
+                zb,
+                zt,
+                kcol(st.wall, K_WALL),
+                [
+                    (hash(seed, 111 + k as u32) * 255.0) as u8,
+                    0,
+                    w8,
+                    (zt - zb) as u8,
+                ],
+                Some(kcol(mixc(st.roof_col, [60, 60, 60], 0.3), K_PLAIN)),
+            );
             // The dormer window, on the face looking down the slope.
             let face = sh.c + sh.u * u + sh.v * ve;
             let out = sh.v * side * 0.02;
             let w = 0.45;
-            let wp = [(face + out - sh.u * w, zb + 0.35), (face + out + sh.u * w, zb + 0.35), (face + out + sh.u * w, zt - 0.2), (face + out - sh.u * w, zt - 0.2)];
-            let lp: Vec<(Vec3, [f32; 2])> = wp.iter().enumerate().map(|(i, (p, z))| (cx.pos_m(*p, *z), [if i == 1 || i == 2 { 0.9 } else { 0.0 }, *z - zb])).collect();
-            m.poly(FINE, &lp, kcol([40, 44, 48], K_PLAIN), [(hash(seed, 115 + k as u32) * 255.0) as u8, P_SKYLIGHT, w8, 0], None);
+            let wp = [
+                (face + out - sh.u * w, zb + 0.35),
+                (face + out + sh.u * w, zb + 0.35),
+                (face + out + sh.u * w, zt - 0.2),
+                (face + out - sh.u * w, zt - 0.2),
+            ];
+            let lp: Vec<(Vec3, [f32; 2])> = wp
+                .iter()
+                .enumerate()
+                .map(|(i, (p, z))| {
+                    (
+                        cx.pos_m(*p, *z),
+                        [if i == 1 || i == 2 { 0.9 } else { 0.0 }, *z - zb],
+                    )
+                })
+                .collect();
+            m.poly(
+                FINE,
+                &lp,
+                kcol([40, 44, 48], K_PLAIN),
+                [
+                    (hash(seed, 115 + k as u32) * 255.0) as u8,
+                    P_SKYLIGHT,
+                    w8,
+                    0,
+                ],
+                None,
+            );
         }
     }
 }
@@ -1270,7 +2046,16 @@ fn roof_dressing(cx: &Ctx, m: &mut Mesh, sh: &Shape, top: f32, st: &Style, seed:
 /// air conditioners under apartment windows, awnings over shop fronts.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_arguments)]
-fn wall_dressing(cx: &Ctx, m: &mut Mesh, sh: &Shape, st: &Style, seed8: u8, seed: u32, base: f32, top: f32) {
+fn wall_dressing(
+    cx: &Ctx,
+    m: &mut Mesh,
+    sh: &Shape,
+    st: &Style,
+    seed8: u8,
+    seed: u32,
+    base: f32,
+    top: f32,
+) {
     let ac_p = match cx.region {
         Region::SAsia | Region::EAsia | Region::SeAsia | Region::Mena => 0.35,
         Region::LatAm | Region::Med | Region::Africa => 0.22,
@@ -1325,7 +2110,18 @@ fn wall_dressing(cx: &Ctx, m: &mut Mesh, sh: &Shape, st: &Style, seed8: u8, seed
                     let z = sh.gmin + fl as f32 * floor_h + 0.35;
                     // Only on this part's own stretch of wall.
                     if h < ac_p && z > base + 0.3 && z + 0.5 < top {
-                        m.boxm(cx, FINE, p + out * 0.27, d * 0.36, out * 0.26, z, z + 0.48, kcol([200, 200, 196], K_PLAIN), [seed8, P_AC, 0, 0], None);
+                        m.boxm(
+                            cx,
+                            FINE,
+                            p + out * 0.27,
+                            d * 0.36,
+                            out * 0.26,
+                            z,
+                            z + 0.48,
+                            kcol([200, 200, 196], K_PLAIN),
+                            [seed8, P_AC, 0, 0],
+                            None,
+                        );
                         budget -= 1;
                     }
                 }
@@ -1338,17 +2134,49 @@ fn wall_dressing(cx: &Ctx, m: &mut Mesh, sh: &Shape, st: &Style, seed8: u8, seed
             while x < l - 1.3 && awn < 12 {
                 if hash(seed, 300 + (along + x) as u32) < 0.5 {
                     let p = a + d * x;
-                    let col = pick(&[[150, 30, 30], [30, 70, 40], [30, 50, 110], [190, 150, 40], [80, 40, 30], [40, 40, 44]], hash(seed, 400 + (along + x) as u32));
+                    let col = pick(
+                        &[
+                            [150, 30, 30],
+                            [30, 70, 40],
+                            [30, 50, 110],
+                            [190, 150, 40],
+                            [80, 40, 30],
+                            [40, 40, 44],
+                        ],
+                        hash(seed, 400 + (along + x) as u32),
+                    );
                     let (z0, z1) = (sh.gmin + 3.15, sh.gmin + 2.55);
                     let (w0, w1) = (p - d * 1.15, p + d * 1.15);
                     let q = |p: Vec2, o: f32, z: f32| (cx.pos_m(p + out * o, z), [0.0f32, 0.0f32]);
-                    let mut quad = [q(w0, 0.05, z0), q(w1, 0.05, z0), q(w1, 1.3, z1), q(w0, 1.3, z1)];
+                    let mut quad = [
+                        q(w0, 0.05, z0),
+                        q(w1, 0.05, z0),
+                        q(w1, 1.3, z1),
+                        q(w0, 1.3, z1),
+                    ];
                     quad[1].1 = [2.3, 0.0];
                     quad[2].1 = [2.3, 1.3];
                     quad[3].1 = [0.0, 1.3];
-                    m.poly(FINE, &quad, kcol(col, K_PLAIN), [seed8, P_AWNING, 0, 0], None);
-                    let val = [q(w0, 1.3, z1), q(w1, 1.3, z1), q(w1, 1.3, z1 - 0.3), q(w0, 1.3, z1 - 0.3)];
-                    m.poly(FINE, &val, kcol(col, K_PLAIN), [seed8, P_AWNING, 0, 0], None);
+                    m.poly(
+                        FINE,
+                        &quad,
+                        kcol(col, K_PLAIN),
+                        [seed8, P_AWNING, 0, 0],
+                        None,
+                    );
+                    let val = [
+                        q(w0, 1.3, z1),
+                        q(w1, 1.3, z1),
+                        q(w1, 1.3, z1 - 0.3),
+                        q(w0, 1.3, z1 - 0.3),
+                    ];
+                    m.poly(
+                        FINE,
+                        &val,
+                        kcol(col, K_PLAIN),
+                        [seed8, P_AWNING, 0, 0],
+                        None,
+                    );
                     awn += 1;
                 }
                 x += 2.6;
@@ -1387,9 +2215,25 @@ fn inside_poly(p: [f32; 2], b: &crate::sources::BuildingPoly) -> bool {
 
 fn relate(unit_m: f32, bs: &[crate::sources::BuildingPoly]) -> Vec<Rel> {
     let n = bs.len();
-    let area: Vec<f32> = bs.iter().map(|b| crate::mvt::signed_area(&b.rings[0]).abs() * unit_m * unit_m).collect();
-    let mut lo: Vec<f32> = bs.iter().map(|b| if b.min_height > 0.5 { b.min_height } else { 0.0 }).collect();
-    let mut hi: Vec<f32> = bs.iter().zip(&lo).map(|(b, l)| b.height.max(2.5).max(l + 0.5)).collect();
+    let area: Vec<f32> = bs
+        .iter()
+        .map(|b| crate::mvt::signed_area(&b.rings[0]).abs() * unit_m * unit_m)
+        .collect();
+    let mut lo: Vec<f32> = bs
+        .iter()
+        .map(|b| {
+            if b.min_height > 0.5 {
+                b.min_height
+            } else {
+                0.0
+            }
+        })
+        .collect();
+    let mut hi: Vec<f32> = bs
+        .iter()
+        .zip(&lo)
+        .map(|(b, l)| b.height.max(2.5).max(l + 0.5))
+        .collect();
     let mut keep: Vec<bool> = area.iter().map(|a| *a >= 4.0).collect();
 
     // Each footprint is stood for by a grid of points inside it; how much of
@@ -1406,7 +2250,10 @@ fn relate(unit_m: f32, bs: &[crate::sources::BuildingPoly]) -> Vec<Rel> {
         const G: usize = 10;
         for y in 0..G {
             for x in 0..G {
-                let p = [a[0] + (z[0] - a[0]) * (x as f32 + 0.5) / G as f32, a[1] + (z[1] - a[1]) * (y as f32 + 0.5) / G as f32];
+                let p = [
+                    a[0] + (z[0] - a[0]) * (x as f32 + 0.5) / G as f32,
+                    a[1] + (z[1] - a[1]) * (y as f32 + 0.5) / G as f32,
+                ];
                 if inside_poly(p, b) {
                     pts[i].push(p);
                 }
@@ -1416,7 +2263,9 @@ fn relate(unit_m: f32, bs: &[crate::sources::BuildingPoly]) -> Vec<Rel> {
             pts[i].push([(a[0] + z[0]) * 0.5, (a[1] + z[1]) * 0.5]);
         }
     }
-    let share = |i: usize, j: usize| pts[i].iter().filter(|p| inside_poly(**p, &bs[j])).count() as f32 / pts[i].len() as f32;
+    let share = |i: usize, j: usize| {
+        pts[i].iter().filter(|p| inside_poly(**p, &bs[j])).count() as f32 / pts[i].len() as f32
+    };
     // nb[i]: (j, share of i inside j) for every footprint touching i.
     let mut nb: Vec<Vec<(usize, f32)>> = vec![Vec::new(); n];
     let mut ord: Vec<usize> = (0..n).collect();
@@ -1447,7 +2296,8 @@ fn relate(unit_m: f32, bs: &[crate::sources::BuildingPoly]) -> Vec<Rel> {
             let mut grew = false;
             for &(j, fij) in &nb[i] {
                 let twin = fij >= 0.85 && f(j, i) >= 0.85;
-                let stacked = bs[i].colour == bs[j].colour && lo[j] >= lo[i] - 0.01 && lo[j] <= hi[i] + 0.5;
+                let stacked =
+                    bs[i].colour == bs[j].colour && lo[j] >= lo[i] - 0.01 && lo[j] <= hi[i] + 0.5;
                 if keep[j] && twin && ((lo[j] - lo[i]).abs() <= 0.5 || stacked) {
                     hi[i] = hi[i].max(hi[j]);
                     keep[j] = false;
@@ -1461,13 +2311,25 @@ fn relate(unit_m: f32, bs: &[crate::sources::BuildingPoly]) -> Vec<Rel> {
     }
     // A part that lies entirely within another one is never seen.
     let mut by_vol: Vec<usize> = (0..n).collect();
-    by_vol.sort_by(|a, b| (area[*b] * (hi[*b] - lo[*b])).total_cmp(&(area[*a] * (hi[*a] - lo[*a]))).then(a.cmp(b)));
+    by_vol.sort_by(|a, b| {
+        (area[*b] * (hi[*b] - lo[*b]))
+            .total_cmp(&(area[*a] * (hi[*a] - lo[*a])))
+            .then(a.cmp(b))
+    });
     let mut rank = vec![0; n];
     for (k, &i) in by_vol.iter().enumerate() {
         rank[i] = k;
     }
     for &i in &by_vol {
-        if keep[i] && nb[i].iter().any(|&(j, fij)| keep[j] && rank[j] < rank[i] && fij >= 0.85 && lo[j] <= lo[i] + 0.5 && hi[j] >= hi[i] - 0.5) {
+        if keep[i]
+            && nb[i].iter().any(|&(j, fij)| {
+                keep[j]
+                    && rank[j] < rank[i]
+                    && fij >= 0.85
+                    && lo[j] <= lo[i] + 0.5
+                    && hi[j] >= hi[i] - 0.5
+            })
+        {
             keep[i] = false;
         }
     }
@@ -1517,7 +2379,8 @@ fn relate(unit_m: f32, bs: &[crate::sources::BuildingPoly]) -> Vec<Rel> {
     let mut best: Vec<Option<usize>> = vec![None; n];
     let mut count = vec![0; n];
     let mut top = vec![0f32; n];
-    let better = |a: usize, b: usize| ((lo[a] <= 0.5) as u8, area[a]) > ((lo[b] <= 0.5) as u8, area[b]);
+    let better =
+        |a: usize, b: usize| ((lo[a] <= 0.5) as u8, area[a]) > ((lo[b] <= 0.5) as u8, area[b]);
     for i in 0..n {
         if !keep[i] {
             continue;
@@ -1533,15 +2396,45 @@ fn relate(unit_m: f32, bs: &[crate::sources::BuildingPoly]) -> Vec<Rel> {
     (0..n)
         .map(|i| {
             let g = find(&mut up, i);
-            let above: Vec<usize> = if keep[i] { nb[i].iter().filter(|&&(j, fij)| keep[j] && fij > 0.0 && lo[j] <= hi[i] + 1.0 && hi[j] > hi[i] + 0.3).map(|e| e.0).collect() } else { Vec::new() };
-            let capped = if above.is_empty() { 0.0 } else { pts[i].iter().filter(|p| above.iter().any(|&j| inside_poly(**p, &bs[j]))).count() as f32 / pts[i].len() as f32 };
-            Rel { keep: keep[i], lo: lo[i], hi: hi[i], root: best[g].unwrap_or(i), multi: keep[i] && count[g] > 1, top: top[g].max(hi[i]), capped, above }
+            let above: Vec<usize> = if keep[i] {
+                nb[i]
+                    .iter()
+                    .filter(|&&(j, fij)| {
+                        keep[j] && fij > 0.0 && lo[j] <= hi[i] + 1.0 && hi[j] > hi[i] + 0.3
+                    })
+                    .map(|e| e.0)
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let capped = if above.is_empty() {
+                0.0
+            } else {
+                pts[i]
+                    .iter()
+                    .filter(|p| above.iter().any(|&j| inside_poly(**p, &bs[j])))
+                    .count() as f32
+                    / pts[i].len() as f32
+            };
+            Rel {
+                keep: keep[i],
+                lo: lo[i],
+                hi: hi[i],
+                root: best[g].unwrap_or(i),
+                multi: keep[i] && count[g] > 1,
+                top: top[g].max(hi[i]),
+                capped,
+                above,
+            }
         })
         .collect()
 }
 
 /// Footprint rings without closing points, the vertex centre and ground heights under the outline.
-fn site(cx: &Ctx, b: &crate::sources::BuildingPoly) -> Option<(Vec<Vec<[f32; 2]>>, [f32; 2], f32, f32)> {
+fn site(
+    cx: &Ctx,
+    b: &crate::sources::BuildingPoly,
+) -> Option<(Vec<Vec<[f32; 2]>>, [f32; 2], f32, f32)> {
     let mut rings: Vec<Vec<[f32; 2]>> = b.rings.clone();
     for r in rings.iter_mut() {
         if r.len() > 3 && r.first() == r.last() {
@@ -1551,7 +2444,9 @@ fn site(cx: &Ctx, b: &crate::sources::BuildingPoly) -> Option<(Vec<Vec<[f32; 2]>
     rings.retain(|r| r.len() >= 3);
     let outer = rings.first()?;
     let n = outer.len() as f32;
-    let cen = outer.iter().fold([0.0, 0.0], |a, p| [a[0] + p[0] / n, a[1] + p[1] / n]);
+    let cen = outer
+        .iter()
+        .fold([0.0, 0.0], |a, p| [a[0] + p[0] / n, a[1] + p[1] / n]);
     let (mut gmin, mut gmax) = (f32::MAX, f32::MIN);
     for p in outer {
         let g = cx.ground(*p);
@@ -1562,27 +2457,54 @@ fn site(cx: &Ctx, b: &crate::sources::BuildingPoly) -> Option<(Vec<Vec<[f32; 2]>
 }
 
 /// The look a footprint gets on its own: what `style` decides from what is known about it.
-fn own_style(cx: &Ctx, b: &crate::sources::BuildingPoly, rings: &[Vec<[f32; 2]>], cen: [f32; 2], bi: usize, hoods: &Hoods, landuse: &[u8]) -> (Style, [u8; 3], u32) {
+fn own_style(
+    cx: &Ctx,
+    b: &crate::sources::BuildingPoly,
+    rings: &[Vec<[f32; 2]>],
+    cen: [f32; 2],
+    bi: usize,
+    hoods: &Hoods,
+    landuse: &[u8],
+) -> (Style, [u8; 3], u32) {
     let outer = &rings[0];
     let area = crate::mvt::signed_area(outer).abs() * cx.unit_m * cx.unit_m;
     let rm: Vec<Vec2> = outer.iter().map(|p| cx.metres(*p)).collect();
     let (_, _, hl, hw) = obb(&rm);
     let rect = area / (4.0 * hl * hw);
-    let seed = (bi as u32).wrapping_mul(2654435761) ^ cx.id.x.wrapping_mul(97) ^ cx.id.y.wrapping_mul(131);
+    let seed =
+        (bi as u32).wrapping_mul(2654435761) ^ cx.id.x.wrapping_mul(97) ^ cx.id.y.wrapping_mul(131);
     let hood = hoods.at(cx, cen);
-    let lu = landuse[((cen[1] / cx.ext * 64.0) as usize).min(63) * 64 + ((cen[0] / cx.ext * 64.0) as usize).min(63)];
+    let lu = landuse[((cen[1] / cx.ext * 64.0) as usize).min(63) * 64
+        + ((cen[0] / cx.ext * 64.0) as usize).min(63)];
     let img = roof_colour(cx, outer, cen);
-    (style(cx, b, area, hl, hw, rect, outer.len(), hood, lu, img, seed), img, seed)
+    (
+        style(cx, b, area, hl, hw, rect, outer.len(), hood, lu, img, seed),
+        img,
+        seed,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
-fn building(cx: &Ctx, m: &mut Mesh, all: &[crate::sources::BuildingPoly], rels: &[Rel], bi: usize, hoods: &Hoods, landuse: &[u8]) -> Option<Footprint> {
+fn building(
+    cx: &Ctx,
+    m: &mut Mesh,
+    all: &[crate::sources::BuildingPoly],
+    rels: &[Rel],
+    bi: usize,
+    hoods: &Hoods,
+    landuse: &[u8],
+) -> Option<Footprint> {
     let rel = &rels[bi];
     if !rel.keep {
         return None;
     }
     let src = &all[bi];
-    let b = &crate::sources::BuildingPoly { rings: Vec::new(), height: rel.hi, min_height: if rel.lo > 0.5 { rel.lo } else { src.min_height }, colour: src.colour };
+    let b = &crate::sources::BuildingPoly {
+        rings: Vec::new(),
+        height: rel.hi,
+        min_height: if rel.lo > 0.5 { rel.lo } else { src.min_height },
+        colour: src.colour,
+    };
     let (rings_u, cen, gmin, gmax) = site(cx, src)?;
     let outer = &rings_u[0];
     // Tiles overlap by a buffer; keep a building only in the tile that owns its centre.
@@ -1593,7 +2515,10 @@ fn building(cx: &Ctx, m: &mut Mesh, all: &[crate::sources::BuildingPoly], rels: 
     if area < 4.0 {
         return None;
     }
-    let rings: Vec<Vec<Vec2>> = rings_u.iter().map(|r| r.iter().map(|p| cx.metres(*p)).collect()).collect();
+    let rings: Vec<Vec<Vec2>> = rings_u
+        .iter()
+        .map(|r| r.iter().map(|p| cx.metres(*p)).collect())
+        .collect();
     let (c, u, hl, hw) = obb(&rings[0]);
     let rect = area / (4.0 * hl * hw);
     // Parts of one structure share its ground level (so floors line up), its
@@ -1601,7 +2526,12 @@ fn building(cx: &Ctx, m: &mut Mesh, all: &[crate::sources::BuildingPoly], rels: 
     let (st, seed, gref, gtop) = if rel.multi {
         let rb = &all[rel.root];
         let (rr, rcen, rgmin, rgmax) = site(cx, rb)?;
-        let whole = crate::sources::BuildingPoly { rings: Vec::new(), height: rel.top, min_height: rb.min_height, colour: rb.colour };
+        let whole = crate::sources::BuildingPoly {
+            rings: Vec::new(),
+            height: rel.top,
+            min_height: rb.min_height,
+            colour: rb.colour,
+        };
         let (mut st, _, rseed) = own_style(cx, &whole, &rr, rcen, rel.root, hoods, landuse);
         if let Some(c) = src.colour {
             st.wall = c;
@@ -1634,18 +2564,39 @@ fn building(cx: &Ctx, m: &mut Mesh, all: &[crate::sources::BuildingPoly], rels: 
     if hidden_roof {
         st.parapet = 0.0;
     }
-    let sh = Shape { rings, c, u, v: u.perp(), hl, hw, gmin: gref };
-    let avoid: Vec<Vec<Vec2>> = rel.above.iter().map(|&j| all[j].rings[0].iter().map(|p| cx.metres(*p)).collect()).collect();
+    let sh = Shape {
+        rings,
+        c,
+        u,
+        v: u.perp(),
+        hl,
+        hw,
+        gmin: gref,
+    };
+    let avoid: Vec<Vec<Vec2>> = rel
+        .above
+        .iter()
+        .map(|&j| all[j].rings[0].iter().map(|p| cx.metres(*p)).collect())
+        .collect();
 
     let height = b.height.max(2.5);
-    let base = if b.min_height > 0.5 { gref + b.min_height } else { gmin - 2.0 };
+    let base = if b.min_height > 0.5 {
+        gref + b.min_height
+    } else {
+        gmin - 2.0
+    };
     let mut top = gtop + height;
     let rmax = st.roof.max_h(hl, hw);
     // The tagged height is to the ridge: pitched roofs take their rise out of the walls.
     if rmax > 0.0 {
         top -= (rmax * 0.6).min(height * 0.45);
     }
-    let (i_main, i_det, i_fine, i_far) = (m.main.len() as u32, m.det.len() as u32, m.fine.len() as u32, m.far.len() as u32);
+    let (i_main, i_det, i_fine, i_far) = (
+        m.main.len() as u32,
+        m.det.len() as u32,
+        m.fine.len() as u32,
+        m.far.len() as u32,
+    );
     let seed8 = (hash(seed, 0) * 255.0) as u8;
     let w8 = (st.wealth * 255.0) as u8;
     let h8 = (top + rmax - gref).clamp(0.0, 255.0) as u8;
@@ -1654,13 +2605,26 @@ fn building(cx: &Ctx, m: &mut Mesh, all: &[crate::sources::BuildingPoly], rels: 
     let wall = kcol(st.wall, K_WALL);
     let creases = st.roof.creases(hl, hw);
     let flat = matches!(st.roof, Roof::Flat);
-    let helipad = flat && !hidden_roof && rel.above.is_empty() && st.kind == Kind::Tower && height > 100.0 && hl > 12.0 && hw > 12.0 && hash(seed, 23) < 0.15;
+    let helipad = flat
+        && !hidden_roof
+        && rel.above.is_empty()
+        && st.kind == Kind::Tower
+        && height > 100.0
+        && hl > 12.0
+        && hw > 12.0
+        && hash(seed, 23) < 0.15;
     let hp = if helipad { HELIPAD } else { 0 };
 
     // Towers step back near the top, when the map does not already model that with parts.
     let mut tiers: Vec<(Vec<Vec2>, f32)> = Vec::new();
     let mut tier_steps: Vec<(f32, f32)> = Vec::new();
-    if st.kind == Kind::Tower && !rel.multi && rel.above.is_empty() && sh.rings.len() == 1 && rect > 0.6 && hash(seed, 20) < 0.6 {
+    if st.kind == Kind::Tower
+        && !rel.multi
+        && rel.above.is_empty()
+        && sh.rings.len() == 1
+        && rect > 0.6
+        && hash(seed, 20) < 0.6
+    {
         let mut ring = sh.rings[0].clone();
         let mut z = base;
         let steps = 1 + (hash(seed, 21) * 2.2) as usize;
@@ -1681,23 +2645,79 @@ fn building(cx: &Ctx, m: &mut Mesh, all: &[crate::sources::BuildingPoly], rels: 
     if tiers.len() > 1 {
         let mut z0 = base;
         for (k, (ring, zt)) in tiers.iter().enumerate() {
-            walls(cx, m, Lvl(0), &sh, ring, z0, *zt, &Roof::Flat, &[], wall, wsty, 0.0);
+            walls(
+                cx,
+                m,
+                Lvl(0),
+                &sh,
+                ring,
+                z0,
+                *zt,
+                &Roof::Flat,
+                &[],
+                wall,
+                wsty,
+                0.0,
+            );
             // Terrace left by the setback, or the top roof.
             let last = k + 1 == tiers.len();
-            let rs = if !last { vec![ring.clone(), tiers[k + 1].0.clone()] } else { vec![ring.clone()] };
-            roof_surface(cx, m, Lvl(0), &sh, &rs, *zt, &Roof::Flat, &[], kcol(st.roof_col, K_FLAT), [seed8, st.flat_mat | if last { hp } else { 0 }, w8, 0]);
+            let rs = if !last {
+                vec![ring.clone(), tiers[k + 1].0.clone()]
+            } else {
+                vec![ring.clone()]
+            };
+            roof_surface(
+                cx,
+                m,
+                Lvl(0),
+                &sh,
+                &rs,
+                *zt,
+                &Roof::Flat,
+                &[],
+                kcol(st.roof_col, K_FLAT),
+                [seed8, st.flat_mat | if last { hp } else { 0 }, w8, 0],
+            );
             z0 = *zt - 0.2;
         }
         let last = &tiers[tiers.len() - 1].0;
         roof_clutter(cx, m, &sh, last, top, &st, seed, height, helipad, &avoid);
     } else {
         for r in &sh.rings {
-            walls(cx, m, Lvl(0), &sh, r, base, top, &st.roof, &creases, wall, wsty, if flat { st.parapet } else { 0.0 });
+            walls(
+                cx,
+                m,
+                Lvl(0),
+                &sh,
+                r,
+                base,
+                top,
+                &st.roof,
+                &creases,
+                wall,
+                wsty,
+                if flat { st.parapet } else { 0.0 },
+            );
         }
         // Pitched roofs carry their ridge height (decimetres) so the shader can cap the ridge.
         let ridge8 = (rmax * 10.0).clamp(0.0, 255.0) as u8;
-        let (rk, rsty) = if flat { (K_FLAT, [seed8, st.flat_mat | hp, w8, 0]) } else { (K_PITCH, [seed8, st.roof_mat, w8, ridge8]) };
-        roof_surface(cx, m, Lvl(0), &sh, &sh.rings, top, &st.roof, &creases, kcol(st.roof_col, rk), rsty);
+        let (rk, rsty) = if flat {
+            (K_FLAT, [seed8, st.flat_mat | hp, w8, 0])
+        } else {
+            (K_PITCH, [seed8, st.roof_mat, w8, ridge8])
+        };
+        roof_surface(
+            cx,
+            m,
+            Lvl(0),
+            &sh,
+            &sh.rings,
+            top,
+            &st.roof,
+            &creases,
+            kcol(st.roof_col, rk),
+            rsty,
+        );
         if flat && st.parapet > 0.0 && !hidden_roof {
             // Parapet: a low wall around the roof edge with an inner face and a cap.
             if let Some(inner) = inset(&sh.rings[0], 0.28) {
@@ -1707,28 +2727,103 @@ fn building(cx: &Ctx, m: &mut Mesh, all: &[crate::sources::BuildingPoly], rels: 
                 for i in 0..o.len() {
                     let j = (i + 1) % o.len();
                     let zt = top + st.parapet;
-                    let (a, bq, ia, ib) = (cx.pos_m(o[i], zt), cx.pos_m(o[j], zt), cx.pos_m(inner[i], zt), cx.pos_m(inner[j], zt));
-                    m.poly(true, &[(a, [0.0, 0.0]), (bq, [1.0, 0.0]), (ib, [1.0, 0.3]), (ia, [0.0, 0.3])], pc, psty, Some(upv));
-                    m.poly(true, &[(ia, [0.0, 0.0]), (ib, [1.0, 0.0]), (cx.pos_m(inner[j], top), [1.0, 1.0]), (cx.pos_m(inner[i], top), [0.0, 1.0])], pc, psty, None);
+                    let (a, bq, ia, ib) = (
+                        cx.pos_m(o[i], zt),
+                        cx.pos_m(o[j], zt),
+                        cx.pos_m(inner[i], zt),
+                        cx.pos_m(inner[j], zt),
+                    );
+                    m.poly(
+                        true,
+                        &[
+                            (a, [0.0, 0.0]),
+                            (bq, [1.0, 0.0]),
+                            (ib, [1.0, 0.3]),
+                            (ia, [0.0, 0.3]),
+                        ],
+                        pc,
+                        psty,
+                        Some(upv),
+                    );
+                    m.poly(
+                        true,
+                        &[
+                            (ia, [0.0, 0.0]),
+                            (ib, [1.0, 0.0]),
+                            (cx.pos_m(inner[j], top), [1.0, 1.0]),
+                            (cx.pos_m(inner[i], top), [0.0, 1.0]),
+                        ],
+                        pc,
+                        psty,
+                        None,
+                    );
                 }
             }
-            roof_clutter(cx, m, &sh, &sh.rings[0], top, &st, seed, height, helipad, &avoid);
+            roof_clutter(
+                cx,
+                m,
+                &sh,
+                &sh.rings[0],
+                top,
+                &st,
+                seed,
+                height,
+                helipad,
+                &avoid,
+            );
         }
         if !flat && matches!(st.kind, Kind::House | Kind::Row | Kind::Shed) && sh.rings.len() == 1 {
-            let over = if st.kind == Kind::Shed { 0.25 } else { 0.35 + 0.3 * hash(seed, 24) };
+            let over = if st.kind == Kind::Shed {
+                0.25
+            } else {
+                0.35 + 0.3 * hash(seed, 24)
+            };
             let fascia = kcol(mixc(st.wall, [236, 234, 228], 0.55), K_PLAIN);
-            eaves(cx, m, &sh, top, &st.roof, &creases, kcol(st.roof_col, K_PITCH), [seed8, st.roof_mat, w8, 0], fascia, over);
+            eaves(
+                cx,
+                m,
+                &sh,
+                top,
+                &st.roof,
+                &creases,
+                kcol(st.roof_col, K_PITCH),
+                [seed8, st.roof_mat, w8, 0],
+                fascia,
+                over,
+            );
             roof_dressing(cx, m, &sh, top, &st, seed);
         }
         if !flat && matches!(st.kind, Kind::House | Kind::Row) {
             // Chimneys: more of them, and tidier, where there is money.
-            let nch = if matches!(cx.region, Region::Mena | Region::SeAsia | Region::Africa | Region::SAsia) { 0 } else { (hash(seed, 40) < 0.35 + 0.45 * st.wealth) as u32 + (st.wealth > 0.7 && hash(seed, 41) < 0.4) as u32 };
+            let nch = if matches!(
+                cx.region,
+                Region::Mena | Region::SeAsia | Region::Africa | Region::SAsia
+            ) {
+                0
+            } else {
+                (hash(seed, 40) < 0.35 + 0.45 * st.wealth) as u32
+                    + (st.wealth > 0.7 && hash(seed, 41) < 0.4) as u32
+            };
             for k in 0..nch {
-                let (cu, cv) = ((hash(seed, 42 + k) - 0.5) * hl * 1.3, (hash(seed, 44 + k) - 0.5) * hw * 0.7);
+                let (cu, cv) = (
+                    (hash(seed, 42 + k) - 0.5) * hl * 1.3,
+                    (hash(seed, 44 + k) - 0.5) * hw * 0.7,
+                );
                 let p = sh.c + sh.u * cu + sh.v * cv;
                 if in_ring_m(p, &sh.rings[0]) {
                     let z = top + st.roof.h(cu, cv, hl, hw);
-                    m.boxm(cx, true, p, sh.u * 0.32, sh.v * 0.42, z - 0.6, top + rmax + 0.7, kcol(mixc([140, 82, 64], st.wall, 0.4), K_PLAIN), psty, Some(kcol([40, 36, 34], K_PLAIN)));
+                    m.boxm(
+                        cx,
+                        true,
+                        p,
+                        sh.u * 0.32,
+                        sh.v * 0.42,
+                        z - 0.6,
+                        top + rmax + 0.7,
+                        kcol(mixc([140, 82, 64], st.wall, 0.4), K_PLAIN),
+                        psty,
+                        Some(kcol([40, 36, 34], K_PLAIN)),
+                    );
                 }
             }
         } else if st.kind == Kind::Industrial && !flat {
@@ -1738,17 +2833,43 @@ fn building(cx: &Ctx, m: &mut Mesh, all: &[crate::sources::BuildingPoly], rels: 
                 let p = sh.c + sh.u * cu;
                 if in_ring_m(p, &sh.rings[0]) {
                     let z = top + st.roof.h(cu, 0.0, hl, hw);
-                    m.boxm(cx, true, p, sh.u * 0.5, sh.v * 0.5, z - 0.3, z + 0.9, kcol([150, 152, 154], K_PLAIN), psty, None);
+                    m.boxm(
+                        cx,
+                        true,
+                        p,
+                        sh.u * 0.5,
+                        sh.v * 0.5,
+                        z - 0.3,
+                        z + 0.9,
+                        kcol([150, 152, 154], K_PLAIN),
+                        psty,
+                        None,
+                    );
                 }
             }
         }
     }
 
     wall_dressing(cx, m, &sh, &st, seed8, seed, base, top);
-    let far = Far { rect, area, tiers: &tiers, base, top, hidden_roof, wall, wsty, seed8, w8, hp };
+    let far = Far {
+        rect,
+        area,
+        tiers: &tiers,
+        base,
+        top,
+        hidden_roof,
+        wall,
+        wsty,
+        seed8,
+        w8,
+        hp,
+    };
     far_version(cx, m, &sh, &st, &far);
 
-    let ring: Vec<[f32; 2]> = outer.iter().map(|p| [p[0] / cx.ext, p[1] / cx.ext]).collect();
+    let ring: Vec<[f32; 2]> = outer
+        .iter()
+        .map(|p| [p[0] / cx.ext, p[1] / cx.ext])
+        .collect();
     let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
     for p in &ring {
         lo = [lo[0].min(p[0]), lo[1].min(p[1])];
@@ -1772,7 +2893,11 @@ fn building(cx: &Ctx, m: &mut Mesh, all: &[crate::sources::BuildingPoly], rels: 
         sty: wsty,
         gref,
         roof_col: st.roof_col,
-        tiers: if tiers.len() > 1 { tier_steps } else { Vec::new() },
+        tiers: if tiers.len() > 1 {
+            tier_steps
+        } else {
+            Vec::new()
+        },
     })
 }
 
@@ -1807,9 +2932,33 @@ fn far_version(cx: &Ctx, m: &mut Mesh, sh: &Shape, st: &Style, f: &Far) {
         let mut z0 = f.base;
         for (k, (ring, zt)) in f.tiers.iter().enumerate() {
             let r = simplify_ring(ring, TOL);
-            walls(cx, m, FAR, sh, &r, z0, *zt, &Roof::Flat, &[], f.wall, f.wsty, 0.0);
+            walls(
+                cx,
+                m,
+                FAR,
+                sh,
+                &r,
+                z0,
+                *zt,
+                &Roof::Flat,
+                &[],
+                f.wall,
+                f.wsty,
+                0.0,
+            );
             let hp = if k + 1 == f.tiers.len() { f.hp } else { 0 };
-            roof_surface(cx, m, FAR, sh, &[r], *zt, &Roof::Flat, &[], flat_roof, flat_sty(hp));
+            roof_surface(
+                cx,
+                m,
+                FAR,
+                sh,
+                &[r],
+                *zt,
+                &Roof::Flat,
+                &[],
+                flat_roof,
+                flat_sty(hp),
+            );
             z0 = *zt - 0.2;
         }
         return;
@@ -1823,7 +2972,12 @@ fn far_version(cx: &Ctx, m: &mut Mesh, sh: &Shape, st: &Style, f: &Far) {
     };
     // Courtyards big enough to see stay open.
     let mut rings = vec![outer];
-    rings.extend(sh.rings[1..].iter().filter(|h| ring_area(h) > 400.0).map(|h| simplify_ring(h, TOL)));
+    rings.extend(
+        sh.rings[1..]
+            .iter()
+            .filter(|h| ring_area(h) > 400.0)
+            .map(|h| simplify_ring(h, TOL)),
+    );
     let roof = match st.roof {
         Roof::Mansard(p, cap) => Roof::Hip(p.min(cap / hw.min(hl).max(0.5))),
         Roof::Multi(_, r) => Roof::Gable(r, 0.0),
@@ -1832,13 +2986,33 @@ fn far_version(cx: &Ctx, m: &mut Mesh, sh: &Shape, st: &Style, f: &Far) {
     let flat = matches!(roof, Roof::Flat);
     let creases = roof.creases(hl, hw);
     for r in &rings {
-        walls(cx, m, FAR, sh, r, f.base, f.top, &roof, &creases, f.wall, f.wsty, if flat { st.parapet } else { 0.0 });
+        walls(
+            cx,
+            m,
+            FAR,
+            sh,
+            r,
+            f.base,
+            f.top,
+            &roof,
+            &creases,
+            f.wall,
+            f.wsty,
+            if flat { st.parapet } else { 0.0 },
+        );
     }
     if f.hidden_roof {
         return;
     }
     let ridge8 = (roof.max_h(hl, hw) * 10.0).clamp(0.0, 255.0) as u8;
-    let (col, sty) = if flat { (flat_roof, flat_sty(f.hp)) } else { (kcol(st.roof_col, K_PITCH), [f.seed8, st.roof_mat, f.w8, ridge8]) };
+    let (col, sty) = if flat {
+        (flat_roof, flat_sty(f.hp))
+    } else {
+        (
+            kcol(st.roof_col, K_PITCH),
+            [f.seed8, st.roof_mat, f.w8, ridge8],
+        )
+    };
     roof_surface(cx, m, FAR, sh, &rings, f.top, &roof, &creases, col, sty);
 }
 
@@ -1849,7 +3023,15 @@ fn simplify_ring(ring: &[Vec2], tol: f32) -> Vec<Vec2> {
     if n <= 4 {
         return ring.to_vec();
     }
-    let far_from = |p: Vec2| (0..n).max_by(|&a, &b| ring[a].distance_squared(p).total_cmp(&ring[b].distance_squared(p))).unwrap_or(0);
+    let far_from = |p: Vec2| {
+        (0..n)
+            .max_by(|&a, &b| {
+                ring[a]
+                    .distance_squared(p)
+                    .total_cmp(&ring[b].distance_squared(p))
+            })
+            .unwrap_or(0)
+    };
     let a = far_from(ring[0]);
     let b = far_from(ring[a]);
     if a == b {
@@ -1866,7 +3048,11 @@ fn simplify_ring(ring: &[Vec2], tol: f32) -> Vec<Vec2> {
         let mut k = (i + 1) % n;
         while k != j {
             let e = ring[k] - p;
-            let off = if len < 1e-4 { e.length() } else { e.perp_dot(d).abs() / len };
+            let off = if len < 1e-4 {
+                e.length()
+            } else {
+                e.perp_dot(d).abs() / len
+            };
             if off > worst {
                 (worst, at) = (off, k);
             }
@@ -1883,7 +3069,11 @@ fn simplify_ring(ring: &[Vec2], tol: f32) -> Vec<Vec2> {
 }
 
 fn ring_area(r: &[Vec2]) -> f32 {
-    (0..r.len()).map(|i| r[i].perp_dot(r[(i + 1) % r.len()])).sum::<f32>().abs() * 0.5
+    (0..r.len())
+        .map(|i| r[i].perp_dot(r[(i + 1) % r.len()]))
+        .sum::<f32>()
+        .abs()
+        * 0.5
 }
 
 /// Load the satellite image for a detail tile: its four children one zoom down.
@@ -1891,11 +3081,21 @@ fn load_atlas(src: &Sources, id: TileId) -> Vec<u8> {
     let mut atlas = vec![110u8; ATLAS * ATLAS * 4];
     for (k, c) in id.children().iter().enumerate() {
         if let Ok(img) = src.imagery(*c) {
-            let img = if img.width() as usize != ATLAS / 2 { image::imageops::resize(&img, (ATLAS / 2) as u32, (ATLAS / 2) as u32, image::imageops::FilterType::Triangle) } else { img };
+            let img = if img.width() as usize != ATLAS / 2 {
+                image::imageops::resize(
+                    &img,
+                    (ATLAS / 2) as u32,
+                    (ATLAS / 2) as u32,
+                    image::imageops::FilterType::Triangle,
+                )
+            } else {
+                img
+            };
             let (ox, oy) = ((k % 2) * ATLAS / 2, (k / 2) * ATLAS / 2);
             for y in 0..ATLAS / 2 {
                 let row = &img.as_raw()[y * ATLAS / 2 * 4..(y + 1) * ATLAS / 2 * 4];
-                atlas[((oy + y) * ATLAS + ox) * 4..((oy + y) * ATLAS + ox + ATLAS / 2) * 4].copy_from_slice(row);
+                atlas[((oy + y) * ATLAS + ox) * 4..((oy + y) * ATLAS + ox + ATLAS / 2) * 4]
+                    .copy_from_slice(row);
             }
         }
     }
@@ -1905,7 +3105,10 @@ fn load_atlas(src: &Sources, id: TileId) -> Vec<u8> {
 /// Rasterise polygons (tile units) into a w x w grid with `value`.
 pub fn raster(buf: &mut [u8], w: usize, ext: f32, rings: &[Vec<[f32; 2]>], value: u8) {
     let k = w as f32 / ext;
-    let px: Vec<Vec<[f32; 2]>> = rings.iter().map(|r| r.iter().map(|p| [p[0] * k, p[1] * k]).collect()).collect();
+    let px: Vec<Vec<[f32; 2]>> = rings
+        .iter()
+        .map(|r| r.iter().map(|p| [p[0] * k, p[1] * k]).collect())
+        .collect();
     crate::mvt::fill_rings(buf, w, w, &px, value);
 }
 
@@ -1931,7 +3134,12 @@ pub fn on_road(road: &[u8], ring: &[[f32; 2]], ext: f32) -> bool {
             if point_in_ring([x / k, y / k], ring) {
                 inside += 1;
                 let (bx, by) = (x as i64, y as i64);
-                if bx >= 0 && by >= 0 && (bx as usize) < RASTER && (by as usize) < RASTER && road[by as usize * RASTER + bx as usize] != 0 {
+                if bx >= 0
+                    && by >= 0
+                    && (bx as usize) < RASTER
+                    && (by as usize) < RASTER
+                    && road[by as usize * RASTER + bx as usize] != 0
+                {
                     hit += 1;
                 }
             }
@@ -1999,7 +3207,8 @@ pub fn build(src: &Sources, id: TileId) -> Result<BuildingData> {
         if rels[bi].hi >= 12.0 {
             n_far_tall = m.far.len() as u32;
         }
-        cls[hclass(rels[bi].hi)] = Some([m.main.len(), m.det.len(), m.fine.len(), m.far.len()].map(|n| n as u32));
+        cls[hclass(rels[bi].hi)] =
+            Some([m.main.len(), m.det.len(), m.fine.len(), m.far.len()].map(|n| n as u32));
     }
     let n_bld = m.main.len() as u32;
 
@@ -2008,7 +3217,11 @@ pub fn build(src: &Sources, id: TileId) -> Result<BuildingData> {
     let grown = crate::trees::place(&cx, &vt, &hoods, &built, &roads.mask);
 
     // Affine map from tile-local position to atlas uv.
-    let (p0, px, py) = (cx.pos([ext * 0.5, ext * 0.5], 0.0), cx.pos([ext, ext * 0.5], 0.0) - cx.pos([0.0, ext * 0.5], 0.0), cx.pos([ext * 0.5, ext], 0.0) - cx.pos([ext * 0.5, 0.0], 0.0));
+    let (p0, px, py) = (
+        cx.pos([ext * 0.5, ext * 0.5], 0.0),
+        cx.pos([ext, ext * 0.5], 0.0) - cx.pos([0.0, ext * 0.5], 0.0),
+        cx.pos([ext * 0.5, ext], 0.0) - cx.pos([ext * 0.5, 0.0], 0.0),
+    );
     let (ax, ay) = (px / px.length_squared(), py / py.length_squared());
     let n_main = m.main.len() as u32;
     let n_det = n_main + m.det.len() as u32;
@@ -2025,7 +3238,11 @@ pub fn build(src: &Sources, id: TileId) -> Result<BuildingData> {
     let mut cls_abs = [[0u32; 4]; 4];
     let mut prev = [0u32; 4];
     for (c, e) in cls.iter().enumerate() {
-        let e = if c + 1 == HCLASS.len() { [n_bld, n_det - n_main, n_far - n_det, n_idx - n_far] } else { e.unwrap_or(prev) };
+        let e = if c + 1 == HCLASS.len() {
+            [n_bld, n_det - n_main, n_far - n_det, n_idx - n_far]
+        } else {
+            e.unwrap_or(prev)
+        };
         prev = e;
         for r in 0..4 {
             cls_abs[r][c] = starts[r] + e[r];

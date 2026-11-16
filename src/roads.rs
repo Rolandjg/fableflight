@@ -1,6 +1,8 @@
 //! Roads from OpenStreetMap: ribbons laid over the terrain, bridge decks with
 //! real height, and the lane graph the traffic drives on.
-use crate::buildings::{hash, Ctx, Footprint, Hoods, Mesh, Parked, K_DECK, K_LAMP, K_PLAIN, RASTER};
+use crate::buildings::{
+    Ctx, Footprint, Hoods, K_DECK, K_LAMP, K_PLAIN, Mesh, Parked, RASTER, hash,
+};
 use crate::geo::TileId;
 use crate::render::RoadVertex;
 use crate::sources::*;
@@ -83,20 +85,82 @@ struct Cfg {
 }
 
 fn cfg(l: &RoadLine, urban: bool) -> Cfg {
-    let c = |drive: f32, lanes: u8, speed: f32| Cfg { drive, lanes, walk: false, parking: false, speed, cars: true };
+    let c = |drive: f32, lanes: u8, speed: f32| Cfg {
+        drive,
+        lanes,
+        walk: false,
+        parking: false,
+        speed,
+        cars: true,
+    };
     let plain = l.brunnel == 0;
     match l.class {
         RC_MOTORWAY | RC_TRUNK if l.ramp => c(5.5, 1, 16.0),
-        RC_MOTORWAY => if l.oneway { c(13.0, 3, 29.0) } else { c(24.0, 6, 29.0) },
-        RC_TRUNK => if l.oneway { c(8.6, 2, 22.0) } else { c(15.0, 4, 20.0) },
-        RC_PRIMARY => Cfg { walk: urban && plain, ..if l.oneway { c(10.2, 3, 15.0) } else { c(13.6, 4, 15.0) } },
-        RC_SECONDARY => Cfg { walk: urban && plain, parking: urban && plain, ..if l.oneway { c(7.0 + if urban { 4.4 } else { 0.0 }, 2, 13.0) } else { c(7.0 + if urban { 4.4 } else { 0.0 }, 2, 13.0) } },
-        RC_TERTIARY => Cfg { walk: urban && plain, parking: urban && plain, ..if l.oneway { c(4.0 + if urban { 4.4 } else { 0.0 }, 1, 11.0) } else { c(6.6 + if urban { 4.4 } else { 0.0 }, 2, 11.0) } },
-        RC_MINOR => Cfg { walk: urban && plain, parking: urban && plain, ..if l.oneway { c(3.6 + if urban { 4.4 } else { 0.0 }, 1, 8.0) } else { c(5.6 + if urban { 4.4 } else { 0.0 }, 2, 8.5) } },
-        RC_SERVICE => Cfg { cars: l.sub == 0, ..c(if l.sub == 1 { 2.8 } else { 3.6 }, 1, 4.0) },
-        RC_TRACK => Cfg { cars: false, ..c(2.8, 0, 0.0) },
-        RC_PATH => Cfg { cars: false, ..c(if l.sub == 1 { 4.0 } else { 1.7 }, 0, 0.0) },
-        _ => Cfg { cars: false, ..c(3.2, 0, 0.0) },
+        RC_MOTORWAY => {
+            if l.oneway {
+                c(13.0, 3, 29.0)
+            } else {
+                c(24.0, 6, 29.0)
+            }
+        }
+        RC_TRUNK => {
+            if l.oneway {
+                c(8.6, 2, 22.0)
+            } else {
+                c(15.0, 4, 20.0)
+            }
+        }
+        RC_PRIMARY => Cfg {
+            walk: urban && plain,
+            ..if l.oneway {
+                c(10.2, 3, 15.0)
+            } else {
+                c(13.6, 4, 15.0)
+            }
+        },
+        RC_SECONDARY => Cfg {
+            walk: urban && plain,
+            parking: urban && plain,
+            ..if l.oneway {
+                c(7.0 + if urban { 4.4 } else { 0.0 }, 2, 13.0)
+            } else {
+                c(7.0 + if urban { 4.4 } else { 0.0 }, 2, 13.0)
+            }
+        },
+        RC_TERTIARY => Cfg {
+            walk: urban && plain,
+            parking: urban && plain,
+            ..if l.oneway {
+                c(4.0 + if urban { 4.4 } else { 0.0 }, 1, 11.0)
+            } else {
+                c(6.6 + if urban { 4.4 } else { 0.0 }, 2, 11.0)
+            }
+        },
+        RC_MINOR => Cfg {
+            walk: urban && plain,
+            parking: urban && plain,
+            ..if l.oneway {
+                c(3.6 + if urban { 4.4 } else { 0.0 }, 1, 8.0)
+            } else {
+                c(5.6 + if urban { 4.4 } else { 0.0 }, 2, 8.5)
+            }
+        },
+        RC_SERVICE => Cfg {
+            cars: l.sub == 0,
+            ..c(if l.sub == 1 { 2.8 } else { 3.6 }, 1, 4.0)
+        },
+        RC_TRACK => Cfg {
+            cars: false,
+            ..c(2.8, 0, 0.0)
+        },
+        RC_PATH => Cfg {
+            cars: false,
+            ..c(if l.sub == 1 { 4.0 } else { 1.7 }, 0, 0.0)
+        },
+        _ => Cfg {
+            cars: false,
+            ..c(3.2, 0, 0.0)
+        },
     }
 }
 
@@ -108,8 +172,16 @@ pub fn carriageway(l: &RoadLine, urban: bool) -> f32 {
 
 /// Countries that drive on the left, as rough boxes.
 fn drives_left(lat: f64, lon: f64) -> bool {
-    let b = |la0: f64, la1: f64, lo0: f64, lo1: f64| lat >= la0 && lat <= la1 && lon >= lo0 && lon <= lo1;
-    b(49.8, 61.0, -11.0, 2.0) || b(30.0, 46.0, 129.0, 146.0) || b(-48.0, -9.0, 110.0, 180.0) || b(6.0, 36.0, 68.0, 92.0) && lat < 30.0 || b(-35.0, -8.0, 11.0, 41.0) || b(-11.0, 20.0, 95.0, 120.0) && !(lat > 8.0 && lon > 102.0 && lon < 110.0) || b(-5.0, 5.0, 33.0, 42.0)
+    let b = |la0: f64, la1: f64, lo0: f64, lo1: f64| {
+        lat >= la0 && lat <= la1 && lon >= lo0 && lon <= lo1
+    };
+    b(49.8, 61.0, -11.0, 2.0)
+        || b(30.0, 46.0, 129.0, 146.0)
+        || b(-48.0, -9.0, 110.0, 180.0)
+        || b(6.0, 36.0, 68.0, 92.0) && lat < 30.0
+        || b(-35.0, -8.0, 11.0, 41.0)
+        || b(-11.0, 20.0, 95.0, 120.0) && !(lat > 8.0 && lon > 102.0 && lon < 110.0)
+        || b(-5.0, 5.0, 33.0, 42.0)
 }
 
 /// Clip a polyline to the tile square; returns the pieces that lie inside.
@@ -121,14 +193,23 @@ pub fn clip(pts: &[[f32; 2]], ext: f32) -> Vec<Vec<[f32; 2]>> {
         let d = [b[0] - a[0], b[1] - a[1]];
         let (mut t0, mut t1) = (0f32, 1f32);
         let mut ok = true;
-        for (p, q) in [(-d[0], a[0]), (d[0], ext - a[0]), (-d[1], a[1]), (d[1], ext - a[1])] {
+        for (p, q) in [
+            (-d[0], a[0]),
+            (d[0], ext - a[0]),
+            (-d[1], a[1]),
+            (d[1], ext - a[1]),
+        ] {
             if p == 0.0 {
                 if q < 0.0 {
                     ok = false;
                 }
             } else {
                 let r = q / p;
-                if p < 0.0 { t0 = t0.max(r) } else { t1 = t1.min(r) }
+                if p < 0.0 {
+                    t0 = t0.max(r)
+                } else {
+                    t1 = t1.min(r)
+                }
             }
         }
         if !ok || t0 >= t1 {
@@ -138,7 +219,10 @@ pub fn clip(pts: &[[f32; 2]], ext: f32) -> Vec<Vec<[f32; 2]>> {
             cur.clear();
             continue;
         }
-        let (p0, p1) = ([a[0] + d[0] * t0, a[1] + d[1] * t0], [a[0] + d[0] * t1, a[1] + d[1] * t1]);
+        let (p0, p1) = (
+            [a[0] + d[0] * t0, a[1] + d[1] * t0],
+            [a[0] + d[0] * t1, a[1] + d[1] * t1],
+        );
         if cur.is_empty() {
             cur.push(p0);
         }
@@ -187,13 +271,23 @@ pub fn near_keys(k: u64) -> [u64; 9] {
 }
 
 fn bridge_pieces(vt: &VecTile) -> Vec<Vec<[f32; 2]>> {
-    vt.roads.iter().filter(|r| r.brunnel == 1 && r.class <= RC_RAIL && r.class != RC_PATH).flat_map(|r| clip(&r.pts, vt.extent)).collect()
+    vt.roads
+        .iter()
+        .filter(|r| r.brunnel == 1 && r.class <= RC_RAIL && r.class != RC_PATH)
+        .flat_map(|r| clip(&r.pts, vt.extent))
+        .collect()
 }
 
 /// Follow a bridge onward from one of its ends - through other bridge pieces
 /// and across tile borders - to where it lands. Returns the extra length
 /// walked and the ground height at the landing.
-fn bridge_end(src: &crate::sources::Sources, cx: &Ctx, own: &[Vec<[f32; 2]>], start: [f32; 2], skip: usize) -> (f32, f32) {
+fn bridge_end(
+    src: &crate::sources::Sources,
+    cx: &Ctx,
+    own: &[Vec<[f32; 2]>],
+    start: [f32; 2],
+    skip: usize,
+) -> (f32, f32) {
     let ext = cx.ext;
     let mut tile = cx.id;
     let mut vt: Option<std::sync::Arc<VecTile>> = None;
@@ -235,13 +329,26 @@ fn bridge_end(src: &crate::sources::Sources, cx: &Ctx, own: &[Vec<[f32; 2]>], st
             }
         });
         let Some((k, rev)) = next else { break };
-        extra += pieces[k].windows(2).map(|w| ((w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1])) * cx.unit_m).sum::<f32>();
-        p = if rev { pieces[k][0] } else { pieces[k][pieces[k].len() - 1] };
+        extra += pieces[k]
+            .windows(2)
+            .map(|w| ((w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1])) * cx.unit_m)
+            .sum::<f32>();
+        p = if rev {
+            pieces[k][0]
+        } else {
+            pieces[k][pieces[k].len() - 1]
+        };
         skip = Some(k);
         hopped = false;
     }
     let _ = vt;
-    let g = if tile == cx.id { cx.ground(p) } else { src.elev(tile).map(|e| e.sample((p[0] / ext) as f64, (p[1] / ext) as f64)).unwrap_or(0.0) };
+    let g = if tile == cx.id {
+        cx.ground(p)
+    } else {
+        src.elev(tile)
+            .map(|e| e.sample((p[0] / ext) as f64, (p[1] / ext) as f64))
+            .unwrap_or(0.0)
+    };
     (extra, g.max(0.0))
 }
 
@@ -256,7 +363,9 @@ struct NodeInfo {
 impl NodeInfo {
     /// Busy enough to have traffic lights.
     fn signalled(&self, urban: bool) -> bool {
-        urban && (self.best <= RC_SECONDARY && self.worst <= RC_TERTIARY || self.best <= RC_PRIMARY && self.worst <= RC_MINOR)
+        urban
+            && (self.best <= RC_SECONDARY && self.worst <= RC_TERTIARY
+                || self.best <= RC_PRIMARY && self.worst <= RC_MINOR)
     }
     /// Does a road of this class give way here? The bigger road runs straight through otherwise.
     fn stops(&self, class: u8, urban: bool) -> bool {
@@ -274,24 +383,52 @@ fn junctions(vt: &VecTile, urban: bool, um: f32) -> Vec<Vec<([f32; 2], NodeInfo)
         let cf = cfg(l, urban);
         cf.drive * 0.5 + if cf.walk { 1.9 } else { 0.0 }
     };
-    let idx: Vec<usize> = (0..vt.roads.len()).filter(|i| {
-        let l = &vt.roads[*i];
-        l.class <= RC_MINOR && !l.ramp && l.brunnel == 0 && l.pts.len() >= 2
-    }).collect();
-    let bb: Vec<[f32; 4]> = idx.iter().map(|i| vt.roads[*i].pts.iter().fold([f32::MAX, f32::MAX, f32::MIN, f32::MIN], |b, p| [b[0].min(p[0]), b[1].min(p[1]), b[2].max(p[0]), b[3].max(p[1])])).collect();
-    let at_end = |l: &RoadLine, p: Vec2| (Vec2::from(l.pts[0]) - p).length() < tol * 3.0 || (Vec2::from(l.pts[l.pts.len() - 1]) - p).length() < tol * 3.0;
+    let idx: Vec<usize> = (0..vt.roads.len())
+        .filter(|i| {
+            let l = &vt.roads[*i];
+            l.class <= RC_MINOR && !l.ramp && l.brunnel == 0 && l.pts.len() >= 2
+        })
+        .collect();
+    let bb: Vec<[f32; 4]> = idx
+        .iter()
+        .map(|i| {
+            vt.roads[*i]
+                .pts
+                .iter()
+                .fold([f32::MAX, f32::MAX, f32::MIN, f32::MIN], |b, p| {
+                    [
+                        b[0].min(p[0]),
+                        b[1].min(p[1]),
+                        b[2].max(p[0]),
+                        b[3].max(p[1]),
+                    ]
+                })
+        })
+        .collect();
+    let at_end = |l: &RoadLine, p: Vec2| {
+        (Vec2::from(l.pts[0]) - p).length() < tol * 3.0
+            || (Vec2::from(l.pts[l.pts.len() - 1]) - p).length() < tol * 3.0
+    };
     // (point, other road, legs the other road brings, its class, its half width)
     let mut hits: Vec<Vec<(Vec2, usize, u8, u8, f32)>> = vec![Vec::new(); vt.roads.len()];
     for x in 0..idx.len() {
         for y in x + 1..idx.len() {
             let (ba, bq) = (bb[x], bb[y]);
-            if ba[0] > bq[2] + tol || bq[0] > ba[2] + tol || ba[1] > bq[3] + tol || bq[1] > ba[3] + tol {
+            if ba[0] > bq[2] + tol
+                || bq[0] > ba[2] + tol
+                || ba[1] > bq[3] + tol
+                || bq[1] > ba[3] + tol
+            {
                 continue;
             }
             let (la, lb) = (&vt.roads[idx[x]], &vt.roads[idx[y]]);
             for wa in la.pts.windows(2) {
                 let (a, r) = (Vec2::from(wa[0]), Vec2::from(wa[1]) - Vec2::from(wa[0]));
-                if a.x.min(a.x + r.x) > bq[2] + tol || a.x.max(a.x + r.x) < bq[0] - tol || a.y.min(a.y + r.y) > bq[3] + tol || a.y.max(a.y + r.y) < bq[1] - tol {
+                if a.x.min(a.x + r.x) > bq[2] + tol
+                    || a.x.max(a.x + r.x) < bq[0] - tol
+                    || a.y.min(a.y + r.y) > bq[3] + tol
+                    || a.y.max(a.y + r.y) < bq[1] - tol
+                {
                     continue;
                 }
                 for wb in lb.pts.windows(2) {
@@ -309,69 +446,190 @@ fn junctions(vt: &VecTile, urban: bool, um: f32) -> Vec<Vec<([f32; 2], NodeInfo)
                     if p.x < 0.0 || p.y < 0.0 || p.x > ext || p.y > ext {
                         continue;
                     }
-                    hits[idx[x]].push((p, idx[y], if at_end(lb, p) { 1 } else { 2 }, lb.class, half(lb)));
-                    hits[idx[y]].push((p, idx[x], if at_end(la, p) { 1 } else { 2 }, la.class, half(la)));
+                    hits[idx[x]].push((
+                        p,
+                        idx[y],
+                        if at_end(lb, p) { 1 } else { 2 },
+                        lb.class,
+                        half(lb),
+                    ));
+                    hits[idx[y]].push((
+                        p,
+                        idx[x],
+                        if at_end(la, p) { 1 } else { 2 },
+                        la.class,
+                        half(la),
+                    ));
                 }
             }
         }
     }
-    hits.iter().enumerate().map(|(li, h)| {
-        let l = &vt.roads[li];
-        let mut out: Vec<([f32; 2], NodeInfo)> = Vec::new();
-        let mut used = vec![false; h.len()];
-        for i in 0..h.len() {
-            if used[i] {
-                continue;
-            }
-            // Everything that meets this road within a few metres of here is one junction.
-            let p = h[i].0;
-            let mut j = NodeInfo { legs: if at_end(l, p) { 1 } else { 2 }, best: l.class, worst: l.class, half: half(l) };
-            let mut seen: Vec<usize> = Vec::new();
-            for k in i..h.len() {
-                if !used[k] && (h[k].0 - p).length() < 4.0 / um {
-                    used[k] = true;
-                    if !seen.contains(&h[k].1) {
-                        seen.push(h[k].1);
-                        j.legs = j.legs.saturating_add(h[k].2);
-                        j.best = j.best.min(h[k].3);
-                        j.worst = j.worst.max(h[k].3);
-                        j.half = j.half.max(h[k].4);
+    hits.iter()
+        .enumerate()
+        .map(|(li, h)| {
+            let l = &vt.roads[li];
+            let mut out: Vec<([f32; 2], NodeInfo)> = Vec::new();
+            let mut used = vec![false; h.len()];
+            for i in 0..h.len() {
+                if used[i] {
+                    continue;
+                }
+                // Everything that meets this road within a few metres of here is one junction.
+                let p = h[i].0;
+                let mut j = NodeInfo {
+                    legs: if at_end(l, p) { 1 } else { 2 },
+                    best: l.class,
+                    worst: l.class,
+                    half: half(l),
+                };
+                let mut seen: Vec<usize> = Vec::new();
+                for k in i..h.len() {
+                    if !used[k] && (h[k].0 - p).length() < 4.0 / um {
+                        used[k] = true;
+                        if !seen.contains(&h[k].1) {
+                            seen.push(h[k].1);
+                            j.legs = j.legs.saturating_add(h[k].2);
+                            j.best = j.best.min(h[k].3);
+                            j.worst = j.worst.max(h[k].3);
+                            j.half = j.half.max(h[k].4);
+                        }
                     }
                 }
+                out.push((p.into(), j));
             }
-            out.push((p.into(), j));
-        }
-        out
-    }).collect()
+            out
+        })
+        .collect()
 }
 
 /// Spacing, mounting height, pole inset from the ribbon edge and arm length of
 /// the street lights on a road. Must match `lamp_pool` in the shaders.
 fn lamp_spec(class: u8) -> (f32, f32, f32, f32) {
-    if class <= RC_TRUNK { (48.0, 11.0, 0.4, 2.5) } else { (36.0, 8.0, 1.5, 1.8) }
+    if class <= RC_TRUNK {
+        (48.0, 11.0, 0.4, 2.5)
+    } else {
+        (36.0, 8.0, 1.5, 1.8)
+    }
 }
 
 const POLE: [u8; 4] = [96, 100, 102, K_PLAIN];
 const POLE_STY: [u8; 4] = [70, 0, 150, 0];
 
 /// Street light: pole, arm reaching `toward` the carriageway, lamp head.
-fn lamp_post(cx: &Ctx, mesh: &mut Mesh, m: Vec2, toward: Vec2, tan: Vec2, z: f32, h: f32, arm: f32) {
-    mesh.boxm(cx, true, m, toward * 0.08, tan * 0.08, z - 0.4, z + h, POLE, POLE_STY, None);
-    mesh.boxm(cx, true, m + toward * (arm * 0.5), toward * (arm * 0.5), tan * 0.05, z + h - 0.1, z + h, POLE, POLE_STY, None);
-    mesh.boxm(cx, true, m + toward * arm, toward * 0.36, tan * 0.15, z + h - 0.2, z + h + 0.02, [255, 196, 120, K_LAMP], [0, 0, 0, 0], Some([70, 72, 74, K_PLAIN]));
+fn lamp_post(
+    cx: &Ctx,
+    mesh: &mut Mesh,
+    m: Vec2,
+    toward: Vec2,
+    tan: Vec2,
+    z: f32,
+    h: f32,
+    arm: f32,
+) {
+    mesh.boxm(
+        cx,
+        true,
+        m,
+        toward * 0.08,
+        tan * 0.08,
+        z - 0.4,
+        z + h,
+        POLE,
+        POLE_STY,
+        None,
+    );
+    mesh.boxm(
+        cx,
+        true,
+        m + toward * (arm * 0.5),
+        toward * (arm * 0.5),
+        tan * 0.05,
+        z + h - 0.1,
+        z + h,
+        POLE,
+        POLE_STY,
+        None,
+    );
+    mesh.boxm(
+        cx,
+        true,
+        m + toward * arm,
+        toward * 0.36,
+        tan * 0.15,
+        z + h - 0.2,
+        z + h + 0.02,
+        [255, 196, 120, K_LAMP],
+        [0, 0, 0, 0],
+        Some([70, 72, 74, K_PLAIN]),
+    );
 }
 
 /// Traffic signal on the kerb, with a mast arm over the wider roads.
-fn signal(cx: &Ctx, mesh: &mut Mesh, m: Vec2, toward: Vec2, tan: Vec2, z: f32, mast: f32, seed: u8) {
+fn signal(
+    cx: &Ctx,
+    mesh: &mut Mesh,
+    m: Vec2,
+    toward: Vec2,
+    tan: Vec2,
+    z: f32,
+    mast: f32,
+    seed: u8,
+) {
     let dark = [28, 30, 30, K_PLAIN];
-    let head = |mesh: &mut Mesh, c: Vec2, z0: f32| mesh.boxm(cx, true, c, toward * 0.18, tan * 0.18, z0, z0 + 1.05, [20, 20, 20, K_LAMP], [seed, 1, 0, 0], Some(dark));
+    let head = |mesh: &mut Mesh, c: Vec2, z0: f32| {
+        mesh.boxm(
+            cx,
+            true,
+            c,
+            toward * 0.18,
+            tan * 0.18,
+            z0,
+            z0 + 1.05,
+            [20, 20, 20, K_LAMP],
+            [seed, 1, 0, 0],
+            Some(dark),
+        )
+    };
     if mast > 0.0 {
-        mesh.boxm(cx, true, m, toward * 0.1, tan * 0.1, z - 0.4, z + 6.3, POLE, POLE_STY, None);
-        mesh.boxm(cx, true, m + toward * (mast * 0.5), toward * (mast * 0.5), tan * 0.07, z + 6.1, z + 6.3, POLE, POLE_STY, None);
+        mesh.boxm(
+            cx,
+            true,
+            m,
+            toward * 0.1,
+            tan * 0.1,
+            z - 0.4,
+            z + 6.3,
+            POLE,
+            POLE_STY,
+            None,
+        );
+        mesh.boxm(
+            cx,
+            true,
+            m + toward * (mast * 0.5),
+            toward * (mast * 0.5),
+            tan * 0.07,
+            z + 6.1,
+            z + 6.3,
+            POLE,
+            POLE_STY,
+            None,
+        );
         head(mesh, m + toward * mast, z + 5.05);
         head(mesh, m + toward * 0.3, z + 2.6);
     } else {
-        mesh.boxm(cx, true, m, toward * 0.07, tan * 0.07, z - 0.4, z + 3.2, POLE, POLE_STY, None);
+        mesh.boxm(
+            cx,
+            true,
+            m,
+            toward * 0.07,
+            tan * 0.07,
+            z - 0.4,
+            z + 3.2,
+            POLE,
+            POLE_STY,
+            None,
+        );
         head(mesh, m, z + 3.2);
     }
 }
@@ -384,7 +642,8 @@ fn seg_dist(p: Vec2, a: Vec2, b: Vec2) -> f32 {
 
 /// Is `p` within `r` of the polyline (all in tile units)?
 fn near_line(pts: &[[f32; 2]], p: Vec2, r: f32) -> bool {
-    pts.windows(2).any(|w| seg_dist(p, Vec2::from(w[0]), Vec2::from(w[1])) < r)
+    pts.windows(2)
+        .any(|w| seg_dist(p, Vec2::from(w[0]), Vec2::from(w[1])) < r)
 }
 
 /// Roads that only repeat another road: the map often carries the same street
@@ -399,8 +658,27 @@ fn redundant(vt: &VecTile, urban: bool, um: f32) -> Vec<bool> {
     let mut skip = vec![false; n];
     let ground = |l: &RoadLine| l.brunnel == 0 && l.class <= RC_SERVICE && l.pts.len() >= 2;
     // half width of each carriageway, in tile units
-    let hw: Vec<f32> = vt.roads.iter().map(|l| cfg(l, urban).drive * 0.5 / um).collect();
-    let bb: Vec<[f32; 4]> = vt.roads.iter().map(|l| l.pts.iter().fold([f32::MAX, f32::MAX, f32::MIN, f32::MIN], |b, p| [b[0].min(p[0]), b[1].min(p[1]), b[2].max(p[0]), b[3].max(p[1])])).collect();
+    let hw: Vec<f32> = vt
+        .roads
+        .iter()
+        .map(|l| cfg(l, urban).drive * 0.5 / um)
+        .collect();
+    let bb: Vec<[f32; 4]> = vt
+        .roads
+        .iter()
+        .map(|l| {
+            l.pts
+                .iter()
+                .fold([f32::MAX, f32::MAX, f32::MIN, f32::MIN], |b, p| {
+                    [
+                        b[0].min(p[0]),
+                        b[1].min(p[1]),
+                        b[2].max(p[0]),
+                        b[3].max(p[1]),
+                    ]
+                })
+        })
+        .collect();
     let step = 3.0 / um;
     for i in 0..n {
         let li = &vt.roads[i];
@@ -414,7 +692,10 @@ fn redundant(vt: &VecTile, urban: bool, um: f32) -> Vec<bool> {
                     && ground(lj)
                     && lj.layer == li.layer
                     && (lj.class < li.class || (lj.class == li.class && j < i))
-                    && !(bb[i][0] > bb[j][2] + hw[j] || bb[j][0] - hw[j] > bb[i][2] || bb[i][1] > bb[j][3] + hw[j] || bb[j][1] - hw[j] > bb[i][3])
+                    && !(bb[i][0] > bb[j][2] + hw[j]
+                        || bb[j][0] - hw[j] > bb[i][2]
+                        || bb[i][1] > bb[j][3] + hw[j]
+                        || bb[j][1] - hw[j] > bb[i][3])
             })
             .collect();
         if rivals.is_empty() {
@@ -427,7 +708,10 @@ fn redundant(vt: &VecTile, urban: bool, um: f32) -> Vec<bool> {
             for s in 0..m {
                 let p = a + (b - a) * ((s as f32 + 0.5) / m as f32);
                 total += 1;
-                if rivals.iter().any(|&j| near_line(&vt.roads[j].pts, p, hw[j] * 0.6)) {
+                if rivals
+                    .iter()
+                    .any(|&j| near_line(&vt.roads[j].pts, p, hw[j] * 0.6))
+                {
                     covered += 1;
                 }
             }
@@ -442,8 +726,14 @@ fn redundant(vt: &VecTile, urban: bool, um: f32) -> Vec<bool> {
 /// Stamp the pixels within `hw` pixels of the segment a-b into a RASTER x RASTER mask.
 fn stamp_segment(mask: &mut [u8], a: Vec2, b: Vec2, hw: f32) {
     let r = RASTER as i64;
-    let (x0, x1) = ((a.x.min(b.x) - hw).floor().max(0.0) as i64, ((a.x.max(b.x) + hw).ceil() as i64).min(r));
-    let (y0, y1) = ((a.y.min(b.y) - hw).floor().max(0.0) as i64, ((a.y.max(b.y) + hw).ceil() as i64).min(r));
+    let (x0, x1) = (
+        (a.x.min(b.x) - hw).floor().max(0.0) as i64,
+        ((a.x.max(b.x) + hw).ceil() as i64).min(r),
+    );
+    let (y0, y1) = (
+        (a.y.min(b.y) - hw).floor().max(0.0) as i64,
+        ((a.y.max(b.y) + hw).ceil() as i64).min(r),
+    );
     let d = b - a;
     let dd = d.length_squared().max(1e-6);
     for y in y0..y1 {
@@ -467,7 +757,12 @@ pub fn surface_mask(vt: &VecTile, ext: f32, um: f32) -> Vec<u8> {
     let skip = redundant(vt, urban, um);
     let mut mask = vec![0u8; RASTER * RASTER];
     for (li, line) in vt.roads.iter().enumerate() {
-        if skip[li] || line.brunnel != 0 || line.class > RC_SERVICE || (line.class == RC_SERVICE && line.sub == 1) || line.pts.len() < 2 {
+        if skip[li]
+            || line.brunnel != 0
+            || line.class > RC_SERVICE
+            || (line.class == RC_SERVICE && line.sub == 1)
+            || line.pts.len() < 2
+        {
             continue;
         }
         let cf = cfg(line, urban);
@@ -475,19 +770,40 @@ pub fn surface_mask(vt: &VecTile, ext: f32, um: f32) -> Vec<u8> {
         let hw = ((cf.drive * 0.5 - 0.5).max(1.0) / um) * k;
         for piece in clip(&line.pts, ext) {
             for w in piece.windows(2) {
-                stamp_segment(&mut mask, Vec2::new(w[0][0] * k, w[0][1] * k), Vec2::new(w[1][0] * k, w[1][1] * k), hw);
+                stamp_segment(
+                    &mut mask,
+                    Vec2::new(w[0][0] * k, w[0][1] * k),
+                    Vec2::new(w[1][0] * k, w[1][1] * k),
+                    hw,
+                );
             }
         }
     }
     mask
 }
 
-pub fn build(cx: &Ctx, vt: &VecTile, src: &crate::sources::Sources, mesh: &mut Mesh, footprints: &mut Vec<Footprint>, built: &[u8]) -> Roads {
+pub fn build(
+    cx: &Ctx,
+    vt: &VecTile,
+    src: &crate::sources::Sources,
+    mesh: &mut Mesh,
+    footprints: &mut Vec<Footprint>,
+    built: &[u8],
+) -> Roads {
     let ext = cx.ext;
     let um = cx.unit_m;
     let urban = vt.buildings.len() > 150;
     let yellow = cx.lon < -30.0;
-    let mut out = Roads { verts: Vec::new(), idx: Vec::new(), net: RoadNet { left: drives_left(cx.lat, cx.lon), ..Default::default() }, mask: vec![0u8; RASTER * RASTER], radius: 0.0 };
+    let mut out = Roads {
+        verts: Vec::new(),
+        idx: Vec::new(),
+        net: RoadNet {
+            left: drives_left(cx.lat, cx.lon),
+            ..Default::default()
+        },
+        mask: vec![0u8; RASTER * RASTER],
+        radius: 0.0,
+    };
     let own_bridges = bridge_pieces(vt);
     // Roads that only repeat another one are not laid a second time.
     let dup = redundant(vt, urban, um);
@@ -516,8 +832,18 @@ pub fn build(cx: &Ctx, vt: &VecTile, src: &crate::sources::Sources, mesh: &mut M
         let cf = cfg(line, urban);
         let half = cf.drive * 0.5 + if cf.walk { 1.9 } else { 0.0 };
         let is_bridge = line.brunnel == 1 && line.class != RC_PATH && line.class != RC_TRACK;
-        let lit = urban && line.brunnel != 2 && line.class <= RC_MINOR && (cf.walk || (line.class <= RC_TRUNK && !line.ramp) || is_bridge);
-        let kind = line.class as u32 | (line.oneway as u32) << 4 | (yellow as u32) << 5 | (cf.walk as u32) << 6 | (cf.lanes as u32) << 8 | (cf.parking as u32) << 12 | (left as u32) << 13 | (lit as u32) << 14;
+        let lit = urban
+            && line.brunnel != 2
+            && line.class <= RC_MINOR
+            && (cf.walk || (line.class <= RC_TRUNK && !line.ramp) || is_bridge);
+        let kind = line.class as u32
+            | (line.oneway as u32) << 4
+            | (yellow as u32) << 5
+            | (cf.walk as u32) << 6
+            | (cf.lanes as u32) << 8
+            | (cf.parking as u32) << 12
+            | (left as u32) << 13
+            | (lit as u32) << 14;
         for piece in clip(&line.pts, ext) {
             // Resample to at most ~9 m between points so the ribbon follows the ground.
             let mut pts: Vec<[f32; 2]> = Vec::new();
@@ -531,7 +857,10 @@ pub fn build(cx: &Ctx, vt: &VecTile, src: &crate::sources::Sources, mesh: &mut M
                 orig.push(pts.len());
                 for j in 0..n {
                     let t = j as f32 / n as f32;
-                    pts.push([w[0][0] + (w[1][0] - w[0][0]) * t, w[0][1] + (w[1][1] - w[0][1]) * t]);
+                    pts.push([
+                        w[0][0] + (w[1][0] - w[0][0]) * t,
+                        w[0][1] + (w[1][1] - w[0][1]) * t,
+                    ]);
                 }
             }
             pts.push(piece[piece.len() - 1]);
@@ -541,7 +870,8 @@ pub fn build(cx: &Ctx, vt: &VecTile, src: &crate::sources::Sources, mesh: &mut M
             let n = pts.len();
             let mut cum = vec![0f32; n];
             for i in 1..n {
-                cum[i] = cum[i - 1] + (pts[i][0] - pts[i - 1][0]).hypot(pts[i][1] - pts[i - 1][1]) * um;
+                cum[i] =
+                    cum[i - 1] + (pts[i][0] - pts[i - 1][0]).hypot(pts[i][1] - pts[i - 1][1]) * um;
             }
             let len = cum[n - 1];
             if len < 0.5 {
@@ -556,7 +886,8 @@ pub fn build(cx: &Ctx, vt: &VecTile, src: &crate::sources::Sources, mesh: &mut M
                 let mut best = (2.0 / um, 0.0);
                 for i in 0..n - 1 {
                     let (a, b) = (Vec2::from(pts[i]), Vec2::from(pts[i + 1]));
-                    let t = ((q - a).dot(b - a) / (b - a).length_squared().max(1e-9)).clamp(0.0, 1.0);
+                    let t =
+                        ((q - a).dot(b - a) / (b - a).length_squared().max(1e-9)).clamp(0.0, 1.0);
                     let d = (a + (b - a) * t - q).length();
                     if d < best.0 {
                         best = (d, cum[i] + (cum[i + 1] - cum[i]) * t);
@@ -569,21 +900,38 @@ pub fn build(cx: &Ctx, vt: &VecTile, src: &crate::sources::Sources, mesh: &mut M
             // Left-pointing unit normals (tile units are x east, y south) with mitred corners.
             let nrm: Vec<Vec2> = (0..n)
                 .map(|i| {
-                    let d = |a: usize, b: usize| Vec2::new(pts[b][0] - pts[a][0], pts[b][1] - pts[a][1]).normalize_or_zero();
-                    let (d0, d1) = (if i > 0 { d(i - 1, i) } else { d(0, 1) }, if i + 1 < n { d(i, i + 1) } else { d(n - 2, n - 1) });
+                    let d = |a: usize, b: usize| {
+                        Vec2::new(pts[b][0] - pts[a][0], pts[b][1] - pts[a][1]).normalize_or_zero()
+                    };
+                    let (d0, d1) = (
+                        if i > 0 { d(i - 1, i) } else { d(0, 1) },
+                        if i + 1 < n {
+                            d(i, i + 1)
+                        } else {
+                            d(n - 2, n - 1)
+                        },
+                    );
                     let m = (d0 + d1).normalize_or_zero();
                     let m = if m == Vec2::ZERO { d0 } else { m };
                     Vec2::new(m.y, -m.x) / m.dot(d0).max(0.55)
                 })
                 .collect();
-            let side = |i: usize, s: f32, w: f32| [pts[i][0] + nrm[i].x * s * w / um, pts[i][1] + nrm[i].y * s * w / um];
+            let side = |i: usize, s: f32, w: f32| {
+                [
+                    pts[i][0] + nrm[i].x * s * w / um,
+                    pts[i][1] + nrm[i].y * s * w / um,
+                ]
+            };
 
             // Surface height along the centreline.
             let bridge = line.brunnel == 1 && line.class != RC_PATH && line.class != RC_TRACK;
             let mut zs: Vec<f32> = pts.iter().map(|p| cx.ground(*p)).collect();
             let mut pre = 0.0;
             if bridge {
-                let me = own_bridges.iter().position(|b| b[0] == piece[0] && b.len() == piece.len()).unwrap_or(usize::MAX);
+                let me = own_bridges
+                    .iter()
+                    .position(|b| b[0] == piece[0] && b.len() == piece.len())
+                    .unwrap_or(usize::MAX);
                 let (ea, za) = bridge_end(src, cx, &own_bridges, pts[0], me);
                 let (eb, zb) = bridge_end(src, cx, &own_bridges, pts[n - 1], me);
                 let total = ea + len + eb;
@@ -600,24 +948,89 @@ pub fn build(cx: &Ctx, vt: &VecTile, src: &crate::sources::Sources, mesh: &mut M
                 if bridge {
                     // Solid deck with parapets, soffit and piers, in the building mesh.
                     let thick = if len + pre > 300.0 { 1.8 } else { 1.0 };
-                    let sty = [(half * 4.0).min(255.0) as u8, (kind & 255) as u8, (kind >> 8) as u8, 0];
+                    let sty = [
+                        (half * 4.0).min(255.0) as u8,
+                        (kind & 255) as u8,
+                        (kind >> 8) as u8,
+                        0,
+                    ];
                     let grey = [150, 148, 142, K_PLAIN];
                     for i in 0..n - 1 {
                         let c = |k: usize, s: f32, dz: f32| cx.pos(side(k, s, half), zs[k] + dz);
                         let (al0, al1) = (pre + cum[i], pre + cum[i + 1]);
-                        mesh.poly(false, &[(c(i, 1.0, 0.0), [-half, al0]), (c(i, -1.0, 0.0), [half, al0]), (c(i + 1, -1.0, 0.0), [half, al1]), (c(i + 1, 1.0, 0.0), [-half, al1])], [0, 0, 0, K_DECK], sty, Some(upv));
+                        mesh.poly(
+                            false,
+                            &[
+                                (c(i, 1.0, 0.0), [-half, al0]),
+                                (c(i, -1.0, 0.0), [half, al0]),
+                                (c(i + 1, -1.0, 0.0), [half, al1]),
+                                (c(i + 1, 1.0, 0.0), [-half, al1]),
+                            ],
+                            [0, 0, 0, K_DECK],
+                            sty,
+                            Some(upv),
+                        );
                         for s in [1.0f32, -1.0] {
-                            mesh.poly(false, &[(c(i, s, -thick), [al0, 0.0]), (c(i + 1, s, -thick), [al1, 0.0]), (c(i + 1, s, 0.9), [al1, 1.9]), (c(i, s, 0.9), [al0, 1.9])], grey, [90, 0, 120, 0], None);
+                            mesh.poly(
+                                false,
+                                &[
+                                    (c(i, s, -thick), [al0, 0.0]),
+                                    (c(i + 1, s, -thick), [al1, 0.0]),
+                                    (c(i + 1, s, 0.9), [al1, 1.9]),
+                                    (c(i, s, 0.9), [al0, 1.9]),
+                                ],
+                                grey,
+                                [90, 0, 120, 0],
+                                None,
+                            );
                         }
-                        mesh.poly(false, &[(c(i, 1.0, -thick), [0.0, al0]), (c(i, -1.0, -thick), [1.0, al0]), (c(i + 1, -1.0, -thick), [1.0, al1]), (c(i + 1, 1.0, -thick), [0.0, al1])], grey, [90, 0, 120, 0], None);
-                        let ring: Vec<[f32; 2]> = [side(i, 1.0, half), side(i, -1.0, half), side(i + 1, -1.0, half), side(i + 1, 1.0, half)].iter().map(|p| [p[0] / ext, p[1] / ext]).collect();
+                        mesh.poly(
+                            false,
+                            &[
+                                (c(i, 1.0, -thick), [0.0, al0]),
+                                (c(i, -1.0, -thick), [1.0, al0]),
+                                (c(i + 1, -1.0, -thick), [1.0, al1]),
+                                (c(i + 1, 1.0, -thick), [0.0, al1]),
+                            ],
+                            grey,
+                            [90, 0, 120, 0],
+                            None,
+                        );
+                        let ring: Vec<[f32; 2]> = [
+                            side(i, 1.0, half),
+                            side(i, -1.0, half),
+                            side(i + 1, -1.0, half),
+                            side(i + 1, 1.0, half),
+                        ]
+                        .iter()
+                        .map(|p| [p[0] / ext, p[1] / ext])
+                        .collect();
                         let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
                         for p in &ring {
                             lo = [lo[0].min(p[0]), lo[1].min(p[1])];
                             hi = [hi[0].max(p[0]), hi[1].max(p[1])];
                         }
                         let z = zs[i].min(zs[i + 1]);
-                        footprints.push(Footprint { min: lo, max: hi, ring, base: z - thick - 0.4, top: zs[i].max(zs[i + 1]) + 0.2, kind: 1, col: [150, 148, 142], main: (0, 0), det: (0, 0), fine: (0, 0), far: (0, 0), alive: true, center: cx.pos(pts[i], z), area: 0.0, sty: [0; 4], gref: 0.0, roof_col: [0; 3], tiers: Vec::new() });
+                        footprints.push(Footprint {
+                            min: lo,
+                            max: hi,
+                            ring,
+                            base: z - thick - 0.4,
+                            top: zs[i].max(zs[i + 1]) + 0.2,
+                            kind: 1,
+                            col: [150, 148, 142],
+                            main: (0, 0),
+                            det: (0, 0),
+                            fine: (0, 0),
+                            far: (0, 0),
+                            alive: true,
+                            center: cx.pos(pts[i], z),
+                            area: 0.0,
+                            sty: [0; 4],
+                            gref: 0.0,
+                            roof_col: [0; 3],
+                            tiers: Vec::new(),
+                        });
                     }
                     let total = pre + len;
                     let sp = if total > 400.0 { 130.0 } else { 34.0 };
@@ -628,8 +1041,23 @@ pub fn build(cx: &Ctx, vt: &VecTile, src: &crate::sources::Sources, mesh: &mut M
                             if zs[i] - g > 3.5 {
                                 let m = cx.metres(pts[i]);
                                 let t = Vec2::new(nrm[i].y, -nrm[i].x).normalize_or_zero();
-                                let (a, b) = (nrm[i].normalize_or_zero() * (half * if sp > 100.0 { 0.9 } else { 0.55 }), t * if sp > 100.0 { 2.6 } else { 0.7 });
-                                mesh.boxm(cx, false, m, a, b, g - 3.0, zs[i] - thick, grey, [40, 0, 110, 0], None);
+                                let (a, b) = (
+                                    nrm[i].normalize_or_zero()
+                                        * (half * if sp > 100.0 { 0.9 } else { 0.55 }),
+                                    t * if sp > 100.0 { 2.6 } else { 0.7 },
+                                );
+                                mesh.boxm(
+                                    cx,
+                                    false,
+                                    m,
+                                    a,
+                                    b,
+                                    g - 3.0,
+                                    zs[i] - thick,
+                                    grey,
+                                    [40, 0, 110, 0],
+                                    None,
+                                );
                             }
                             next += sp;
                         }
@@ -639,12 +1067,18 @@ pub fn build(cx: &Ctx, vt: &VecTile, src: &crate::sources::Sources, mesh: &mut M
                     let v0 = out.verts.len() as u32;
                     for i in 0..n {
                         // Measured so that the junction's edge is always at `half`.
-                        let endd = stops.iter().fold(1e4f32, |m, (s, j)| m.min((cum[i] - s).abs() - (j.half - half)));
+                        let endd = stops.iter().fold(1e4f32, |m, (s, j)| {
+                            m.min((cum[i] - s).abs() - (j.half - half))
+                        });
                         for s in [1.0f32, -1.0] {
                             let p = side(i, s, half);
                             let pos = cx.pos(p, cx.ground(p) + 0.12);
                             out.radius = out.radius.max(pos.length());
-                            out.verts.push(RoadVertex { pos: pos.into(), q: [-s * half, cum[i], half, endd], kind: kind as f32 });
+                            out.verts.push(RoadVertex {
+                                pos: pos.into(),
+                                q: [-s * half, cum[i], half, endd],
+                                kind: kind as f32,
+                            });
                         }
                     }
                     for i in 0..n as u32 - 1 {
@@ -657,19 +1091,28 @@ pub fn build(cx: &Ctx, vt: &VecTile, src: &crate::sources::Sources, mesh: &mut M
                     let k = RASTER as f32 / ext;
                     let free = |p: [f32; 2]| {
                         let (bx, by) = ((p[0] * k) as i64, (p[1] * k) as i64);
-                        p[0] >= 0.0 && p[1] >= 0.0 && bx < RASTER as i64 && by < RASTER as i64 && built[by as usize * RASTER + bx as usize] == 0
+                        p[0] >= 0.0
+                            && p[1] >= 0.0
+                            && bx < RASTER as i64
+                            && by < RASTER as i64
+                            && built[by as usize * RASTER + bx as usize] == 0
                     };
                     // Point at a distance along: tile position, left normal, tangent, deck height.
                     let at = |s: f32| {
                         let i = cum.partition_point(|c| *c <= s).clamp(1, n - 1) - 1;
                         let t = ((s - cum[i]) / (cum[i + 1] - cum[i]).max(1e-3)).clamp(0.0, 1.0);
-                        let p = [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t];
-                        let d = Vec2::new(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]).normalize_or_zero();
+                        let p = [
+                            pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t,
+                            pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t,
+                        ];
+                        let d = Vec2::new(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1])
+                            .normalize_or_zero();
                         (p, Vec2::new(d.y, -d.x), d, zs[i] + (zs[i + 1] - zs[i]) * t)
                     };
                     let stand = |p: [f32; 2], nl: Vec2, off: f32, deck: f32| {
                         let q = [p[0] + nl.x * off / um, p[1] + nl.y * off / um];
-                        (free(q)).then(|| (cx.metres(q), if is_bridge { deck } else { cx.ground(q) }))
+                        (free(q))
+                            .then(|| (cx.metres(q), if is_bridge { deck } else { cx.ground(q) }))
                     };
                     if lit {
                         let (sp, h, inset, arm) = lamp_spec(line.class);
@@ -686,7 +1129,10 @@ pub fn build(cx: &Ctx, vt: &VecTile, src: &crate::sources::Sources, mesh: &mut M
                     }
                     // Signals face the traffic arriving at each junction end.
                     let kerb = half - if cf.walk { 1.9 } else { 0.0 };
-                    for (sj, j) in stops.iter().filter(|(_, j)| j.signalled(urban) && cf.lanes > 0) {
+                    for (sj, j) in stops
+                        .iter()
+                        .filter(|(_, j)| j.signalled(urban) && cf.lanes > 0)
+                    {
                         for dir in [1.0f32, -1.0] {
                             let s = sj - dir * (j.half + 4.9);
                             if s < 2.0 || s > len - 2.0 || (line.oneway && dir < 0.0) {
@@ -698,9 +1144,21 @@ pub fn build(cx: &Ctx, vt: &VecTile, src: &crate::sources::Sources, mesh: &mut M
                             if let Some((m, z)) = stand(p, nl, sgn * (kerb + 0.5), deck) {
                                 let (jp, ..) = at(*sj);
                                 let key = node_key(cx.id, jp, ext);
-                                let axis = ((d.y.atan2(d.x) / std::f32::consts::FRAC_PI_2 + 0.5).floor() as i32 & 1) as u8;
-                                let seed = (hash(key as u32 ^ (key >> 32) as u32, 7) * 127.0) as u8 | axis << 7;
-                                signal(cx, mesh, m, -nl * sgn, d, z, if kerb > 5.0 { kerb * 0.6 } else { 0.0 }, seed);
+                                let axis = ((d.y.atan2(d.x) / std::f32::consts::FRAC_PI_2 + 0.5)
+                                    .floor() as i32
+                                    & 1) as u8;
+                                let seed = (hash(key as u32 ^ (key >> 32) as u32, 7) * 127.0) as u8
+                                    | axis << 7;
+                                signal(
+                                    cx,
+                                    mesh,
+                                    m,
+                                    -nl * sgn,
+                                    d,
+                                    z,
+                                    if kerb > 5.0 { kerb * 0.6 } else { 0.0 },
+                                    seed,
+                                );
                             }
                         }
                     }
@@ -709,7 +1167,15 @@ pub fn build(cx: &Ctx, vt: &VecTile, src: &crate::sources::Sources, mesh: &mut M
                 let k = RASTER as f32 / ext;
                 for i in 0..n - 1 {
                     let w = half + 1.0;
-                    let q: Vec<[f32; 2]> = [side(i, 1.0, w), side(i, -1.0, w), side(i + 1, -1.0, w), side(i + 1, 1.0, w)].iter().map(|p| [p[0] * k, p[1] * k]).collect();
+                    let q: Vec<[f32; 2]> = [
+                        side(i, 1.0, w),
+                        side(i, -1.0, w),
+                        side(i + 1, -1.0, w),
+                        side(i + 1, 1.0, w),
+                    ]
+                    .iter()
+                    .map(|p| [p[0] * k, p[1] * k])
+                    .collect();
                     crate::mvt::fill_rings(&mut out.mask, RASTER, RASTER, &[q], 1);
                 }
             }
@@ -719,19 +1185,28 @@ pub fn build(cx: &Ctx, vt: &VecTile, src: &crate::sources::Sources, mesh: &mut M
                 let drive_half = (cf.drive - if cf.parking { 4.4 } else { 0.0 }) * 0.5;
                 let lane_w = (2.0 * drive_half / lanes_all as f32).min(3.7);
                 let pi = out.net.paths.len() as u32;
-                let nodes = [node_key(cx.id, pts[0], ext), node_key(cx.id, pts[n - 1], ext)];
+                let nodes = [
+                    node_key(cx.id, pts[0], ext),
+                    node_key(cx.id, pts[n - 1], ext),
+                ];
                 for (k, oi) in orig.iter().enumerate().skip(1) {
                     let _ = k;
                     mids.push((node_key(cx.id, pts[*oi], ext), pi, cum[*oi]));
                 }
                 out.net.total_len += len;
                 out.net.paths.push(Path {
-                    pts: (0..n).map(|i| cx.pos(pts[i], zs[i] + if bridge { 0.02 } else { 0.14 })).collect(),
+                    pts: (0..n)
+                        .map(|i| cx.pos(pts[i], zs[i] + if bridge { 0.02 } else { 0.14 }))
+                        .collect(),
                     cum,
                     len,
                     class: line.class,
                     oneway: line.oneway,
-                    lanes: if line.oneway { lanes_all } else { (lanes_all / 2).max(1) },
+                    lanes: if line.oneway {
+                        lanes_all
+                    } else {
+                        (lanes_all / 2).max(1)
+                    },
                     lane_w,
                     park_off: if cf.parking { drive_half + 1.1 } else { 0.0 },
                     speed: cf.speed,
@@ -747,13 +1222,25 @@ pub fn build(cx: &Ctx, vt: &VecTile, src: &crate::sources::Sources, mesh: &mut M
 
     // Wire up the graph: path ends meet other ends, or the middle of a through road.
     for (i, p) in out.net.paths.iter().enumerate() {
-        out.net.nodes.entry(p.nodes[0]).or_default().push(Link { path: i as u32, at: 0.0, end: 0 });
-        out.net.nodes.entry(p.nodes[1]).or_default().push(Link { path: i as u32, at: p.len, end: 1 });
+        out.net.nodes.entry(p.nodes[0]).or_default().push(Link {
+            path: i as u32,
+            at: 0.0,
+            end: 0,
+        });
+        out.net.nodes.entry(p.nodes[1]).or_default().push(Link {
+            path: i as u32,
+            at: p.len,
+            end: 1,
+        });
     }
     for (key, pi, s) in mids {
         if let Some(links) = out.net.nodes.get_mut(&key) {
             if links.iter().any(|l| l.path != pi) {
-                links.push(Link { path: pi, at: s, end: 2 });
+                links.push(Link {
+                    path: pi,
+                    at: s,
+                    end: 2,
+                });
                 out.net.paths[pi as usize].junctions.push((s, key));
             }
         }
@@ -762,16 +1249,16 @@ pub fn build(cx: &Ctx, vt: &VecTile, src: &crate::sources::Sources, mesh: &mut M
 }
 
 const PAINT: &[([f32; 3], f32)] = &[
-    ([0.80, 0.80, 0.78], 0.24), // white
+    ([0.80, 0.80, 0.78], 0.24),    // white
     ([0.015, 0.015, 0.018], 0.19), // black
-    ([0.16, 0.17, 0.18], 0.17), // grey
-    ([0.45, 0.46, 0.47], 0.13), // silver
-    ([0.02, 0.06, 0.22], 0.09), // blue
-    ([0.35, 0.02, 0.02], 0.08), // red
-    ([0.03, 0.10, 0.05], 0.03), // green
-    ([0.30, 0.22, 0.12], 0.03), // beige / gold
-    ([0.55, 0.30, 0.02], 0.02), // orange
-    ([0.60, 0.48, 0.03], 0.02), // yellow
+    ([0.16, 0.17, 0.18], 0.17),    // grey
+    ([0.45, 0.46, 0.47], 0.13),    // silver
+    ([0.02, 0.06, 0.22], 0.09),    // blue
+    ([0.35, 0.02, 0.02], 0.08),    // red
+    ([0.03, 0.10, 0.05], 0.03),    // green
+    ([0.30, 0.22, 0.12], 0.03),    // beige / gold
+    ([0.55, 0.30, 0.02], 0.02),    // orange
+    ([0.60, 0.48, 0.03], 0.02),    // yellow
 ];
 /// A car colour in roughly the proportions seen on real roads.
 pub fn paint(h: f32) -> [f32; 3] {
@@ -786,7 +1273,29 @@ pub fn paint(h: f32) -> [f32; 3] {
 }
 /// A car body type: mostly ordinary cars, the odd van, pickup or sports car.
 pub fn car_model(h: f32, big_road: bool) -> u8 {
-    let table: &[(u8, f32)] = if big_road { &[(0, 0.26), (1, 0.14), (2, 0.24), (3, 0.1), (4, 0.1), (5, 0.03), (6, 0.03), (7, 0.1)] } else { &[(0, 0.3), (1, 0.2), (2, 0.26), (3, 0.08), (4, 0.07), (5, 0.04), (6, 0.02), (7, 0.03)] };
+    let table: &[(u8, f32)] = if big_road {
+        &[
+            (0, 0.26),
+            (1, 0.14),
+            (2, 0.24),
+            (3, 0.1),
+            (4, 0.1),
+            (5, 0.03),
+            (6, 0.03),
+            (7, 0.1),
+        ]
+    } else {
+        &[
+            (0, 0.3),
+            (1, 0.2),
+            (2, 0.26),
+            (3, 0.08),
+            (4, 0.07),
+            (5, 0.04),
+            (6, 0.02),
+            (7, 0.03),
+        ]
+    };
     let mut acc = 0.0;
     for (m, w) in table {
         acc += w;
@@ -807,7 +1316,9 @@ pub fn park_cars(cx: &Ctx, net: &RoadNet, hoods: &Hoods, built: &[u8]) -> Vec<Pa
             continue;
         }
         for (si, side) in [1.0f32, -1.0].iter().enumerate() {
-            let seed = (pi as u32 * 2 + si as u32).wrapping_mul(747796405) ^ cx.id.x.wrapping_mul(31) ^ cx.id.y;
+            let seed = (pi as u32 * 2 + si as u32).wrapping_mul(747796405)
+                ^ cx.id.x.wrapping_mul(31)
+                ^ cx.id.y;
             let mut s = 10.0 + hash(seed, 0) * 6.0;
             let mut j = 0u32;
             while s < p.len - 10.0 {
@@ -823,12 +1334,26 @@ pub fn park_cars(cx: &Ctx, net: &RoadNet, hoods: &Hoods, built: &[u8]) -> Vec<Pa
                 let hood = hoods.at(cx, u);
                 let fill = ((hood.cover - 0.06) / 0.25).clamp(0.0, 0.85);
                 let (bx, by) = ((u[0] * k) as i64, (u[1] * k) as i64);
-                let clear = bx >= 1 && by >= 1 && bx < RASTER as i64 - 1 && by < RASTER as i64 - 1 && built[by as usize * RASTER + bx as usize] == 0;
+                let clear = bx >= 1
+                    && by >= 1
+                    && bx < RASTER as i64 - 1
+                    && by < RASTER as i64 - 1
+                    && built[by as usize * RASTER + bx as usize] == 0;
                 let crossing = p.keep_clear.iter().any(|(sj, r)| (s - sj).abs() < *r);
                 if h < fill && clear && !crossing && out.len() < 2600 {
                     let model = car_model(hash(seed, j * 4 + 1), false).min(5);
-                    let facing = if (*side > 0.0) == net.left && !p.oneway { -t } else { t };
-                    out.push(Parked { pos: pos - up0 * 0.02, fwd: facing, up: up0, model, col: paint(hash(seed, j * 4 + 2)) });
+                    let facing = if (*side > 0.0) == net.left && !p.oneway {
+                        -t
+                    } else {
+                        t
+                    };
+                    out.push(Parked {
+                        pos: pos - up0 * 0.02,
+                        fwd: facing,
+                        up: up0,
+                        model,
+                        col: paint(hash(seed, j * 4 + 2)),
+                    });
                 }
                 s += 5.6 + hash(seed, j * 4 + 3) * 2.5;
             }
@@ -842,10 +1367,28 @@ mod tests {
     use super::*;
 
     fn line(pts: Vec<[f32; 2]>, class: u8) -> RoadLine {
-        RoadLine { pts, class, brunnel: 0, oneway: false, ramp: false, layer: 0, sub: 0 }
+        RoadLine {
+            pts,
+            class,
+            brunnel: 0,
+            oneway: false,
+            ramp: false,
+            layer: 0,
+            sub: 0,
+        }
     }
     fn tile(roads: Vec<RoadLine>) -> VecTile {
-        VecTile { extent: 1024.0, water: vec![], buildings: vec![], roads, landcover: vec![], landuse: vec![], aero_lines: vec![], aero_polys: vec![], gates: vec![] }
+        VecTile {
+            extent: 1024.0,
+            water: vec![],
+            buildings: vec![],
+            roads,
+            landcover: vec![],
+            landuse: vec![],
+            aero_lines: vec![],
+            aero_polys: vec![],
+            gates: vec![],
+        }
     }
 
     #[test]
@@ -858,13 +1401,19 @@ mod tests {
 
     #[test]
     fn crossing_roads_both_stay() {
-        let t = tile(vec![line(vec![[100.0, 500.0], [400.0, 500.0]], RC_MINOR), line(vec![[250.0, 300.0], [250.0, 700.0]], RC_MINOR)]);
+        let t = tile(vec![
+            line(vec![[100.0, 500.0], [400.0, 500.0]], RC_MINOR),
+            line(vec![[250.0, 300.0], [250.0, 700.0]], RC_MINOR),
+        ]);
         assert!(redundant(&t, false, 1.0).iter().all(|d| !*d));
     }
 
     #[test]
     fn a_road_beside_another_stays() {
-        let t = tile(vec![line(vec![[100.0, 500.0], [400.0, 500.0]], RC_MINOR), line(vec![[100.0, 520.0], [400.0, 520.0]], RC_MINOR)]);
+        let t = tile(vec![
+            line(vec![[100.0, 500.0], [400.0, 500.0]], RC_MINOR),
+            line(vec![[100.0, 520.0], [400.0, 520.0]], RC_MINOR),
+        ]);
         assert!(redundant(&t, false, 1.0).iter().all(|d| !*d));
     }
 
@@ -875,8 +1424,18 @@ mod tests {
         let k = RASTER as f32 / 1024.0;
         assert!(mask[(500.0 * k) as usize * RASTER + (250.0 * k) as usize] != 0);
         assert!(mask[(560.0 * k) as usize * RASTER + (250.0 * k) as usize] == 0);
-        let on = [[240.0, 497.0], [260.0, 497.0], [260.0, 503.0], [240.0, 503.0]];
-        let off = [[240.0, 600.0], [260.0, 600.0], [260.0, 610.0], [240.0, 610.0]];
+        let on = [
+            [240.0, 497.0],
+            [260.0, 497.0],
+            [260.0, 503.0],
+            [240.0, 503.0],
+        ];
+        let off = [
+            [240.0, 600.0],
+            [260.0, 600.0],
+            [260.0, 610.0],
+            [240.0, 610.0],
+        ];
         assert!(crate::buildings::on_road(&mask, &on, 1024.0));
         assert!(!crate::buildings::on_road(&mask, &off, 1024.0));
     }

@@ -6,7 +6,7 @@
 //! Prompts are written as short specs: button names separated by spaces,
 //! with `+` and `/` drawn as text between them, e.g. `"Y + View"`, `"LT / RT"`.
 
-use egui::{pos2, vec2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Stroke, Ui};
+use egui::{Color32, CornerRadius, FontId, Painter, Pos2, Rect, Stroke, Ui, pos2, vec2};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -103,25 +103,56 @@ pub fn paint(p: &Painter, r: Rect, b: Btn) {
     let face = |col: Color32, ink: Color32, s: &str| {
         p.circle_filled(c + vec2(0.0, 1.0), rad, Color32::from_black_alpha(90));
         p.circle_filled(c, rad, col);
-        p.circle_stroke(c, rad - 0.5, Stroke::new(1.0, Color32::from_white_alpha(60)));
+        p.circle_stroke(
+            c,
+            rad - 0.5,
+            Stroke::new(1.0, Color32::from_white_alpha(60)),
+        );
         bold(p, text_at, s, h * 0.6, ink);
     };
     match b {
         Btn::A => face(Color32::from_rgb(84, 168, 58), Color32::WHITE, "A"),
         Btn::B => face(Color32::from_rgb(212, 52, 48), Color32::WHITE, "B"),
         Btn::X => face(Color32::from_rgb(38, 112, 214), Color32::WHITE, "X"),
-        Btn::Y => face(Color32::from_rgb(236, 182, 24), Color32::from_rgb(40, 30, 0), "Y"),
+        Btn::Y => face(
+            Color32::from_rgb(236, 182, 24),
+            Color32::from_rgb(40, 30, 0),
+            "Y",
+        ),
         Btn::LB | Btn::RB | Btn::LT | Btn::RT => {
             let big = (h * 0.5) as u8;
             let small = (h * 0.16) as u8;
             // Bumpers sweep up to the outer corner; triggers are rounded over the top.
             let cr = match b {
-                Btn::LB => CornerRadius { nw: big, ne: small, sw: small, se: small },
-                Btn::RB => CornerRadius { nw: small, ne: big, sw: small, se: small },
-                _ => CornerRadius { nw: big, ne: big, sw: small, se: small },
+                Btn::LB => CornerRadius {
+                    nw: big,
+                    ne: small,
+                    sw: small,
+                    se: small,
+                },
+                Btn::RB => CornerRadius {
+                    nw: small,
+                    ne: big,
+                    sw: small,
+                    se: small,
+                },
+                _ => CornerRadius {
+                    nw: big,
+                    ne: big,
+                    sw: small,
+                    se: small,
+                },
             };
-            let body = if matches!(b, Btn::LB | Btn::RB) { r.shrink2(vec2(0.0, h * 0.06)) } else { r };
-            p.rect_filled(body.translate(vec2(0.0, 1.0)), cr, Color32::from_black_alpha(90));
+            let body = if matches!(b, Btn::LB | Btn::RB) {
+                r.shrink2(vec2(0.0, h * 0.06))
+            } else {
+                r
+            };
+            p.rect_filled(
+                body.translate(vec2(0.0, 1.0)),
+                cr,
+                Color32::from_black_alpha(90),
+            );
             p.rect_filled(body, cr, BODY);
             p.rect_stroke(body, cr, Stroke::new(1.0, RIM), egui::StrokeKind::Inside);
             let s = match b {
@@ -130,7 +161,13 @@ pub fn paint(p: &Painter, r: Rect, b: Btn) {
                 Btn::LT => "LT",
                 _ => "RT",
             };
-            p.text(body.center() + vec2(0.0, h * 0.03), egui::Align2::CENTER_CENTER, s, FontId::proportional(h * 0.54), INK);
+            p.text(
+                body.center() + vec2(0.0, h * 0.03),
+                egui::Align2::CENTER_CENTER,
+                s,
+                FontId::proportional(h * 0.54),
+                INK,
+            );
         }
         Btn::View | Btn::Menu => {
             p.circle_filled(c + vec2(0.0, 1.0), rad, Color32::from_black_alpha(90));
@@ -156,11 +193,29 @@ pub fn paint(p: &Painter, r: Rect, b: Btn) {
             let click = matches!(b, Btn::L3 | Btn::R3);
             p.circle_filled(c + vec2(0.0, 1.0), rad, Color32::from_black_alpha(90));
             p.circle_filled(c, rad, BODY);
-            p.circle_stroke(c, rad - 0.5, Stroke::new(if click { 2.0 } else { 1.0 }, RIM));
-            p.circle_stroke(c, rad * 0.62, Stroke::new(1.0, Color32::from_white_alpha(70)));
-            let letter = if matches!(b, Btn::LS | Btn::L3) { "L" } else { "R" };
+            p.circle_stroke(
+                c,
+                rad - 0.5,
+                Stroke::new(if click { 2.0 } else { 1.0 }, RIM),
+            );
+            p.circle_stroke(
+                c,
+                rad * 0.62,
+                Stroke::new(1.0, Color32::from_white_alpha(70)),
+            );
+            let letter = if matches!(b, Btn::LS | Btn::L3) {
+                "L"
+            } else {
+                "R"
+            };
             if click {
-                p.text(text_at, egui::Align2::CENTER_CENTER, format!("{letter}S"), FontId::proportional(h * 0.42), INK);
+                p.text(
+                    text_at,
+                    egui::Align2::CENTER_CENTER,
+                    format!("{letter}S"),
+                    FontId::proportional(h * 0.42),
+                    INK,
+                );
             } else {
                 bold(p, text_at, letter, h * 0.5, INK);
                 // arrow ticks all round: the stick is moved
@@ -170,7 +225,11 @@ pub fn paint(p: &Painter, r: Rect, b: Btn) {
                     let tip = c + d * (rad - 1.2);
                     let back = tip - d * t * 1.3;
                     let side = vec2(-dy, dx) * t;
-                    p.add(egui::Shape::convex_polygon(vec![tip, back + side, back - side], INK, Stroke::NONE));
+                    p.add(egui::Shape::convex_polygon(
+                        vec![tip, back + side, back - side],
+                        INK,
+                        Stroke::NONE,
+                    ));
                 }
             }
         }
@@ -180,7 +239,11 @@ pub fn paint(p: &Painter, r: Rect, b: Btn) {
             let v = Rect::from_center_size(c, vec2(arm, len * 2.0));
             let hz = Rect::from_center_size(c, vec2(len * 2.0, arm));
             for rr in [v, hz] {
-                p.rect_filled(rr.translate(vec2(0.0, 1.0)), 2.0, Color32::from_black_alpha(90));
+                p.rect_filled(
+                    rr.translate(vec2(0.0, 1.0)),
+                    2.0,
+                    Color32::from_black_alpha(90),
+                );
             }
             for rr in [v, hz] {
                 p.rect_filled(rr, 2.0, BODY);
@@ -189,14 +252,34 @@ pub fn paint(p: &Painter, r: Rect, b: Btn) {
             let lit = |d: Btn| b == Btn::Dpad || b == d;
             // (each arm from the middle out)
             let arms = [
-                (Btn::Up, Rect::from_min_max(pos2(v.left(), v.top()), pos2(v.right(), c.y))),
-                (Btn::Down, Rect::from_min_max(pos2(v.left(), c.y), pos2(v.right(), v.bottom()))),
-                (Btn::Left, Rect::from_min_max(pos2(hz.left(), hz.top()), pos2(c.x, hz.bottom()))),
-                (Btn::Right, Rect::from_min_max(pos2(c.x, hz.top()), pos2(hz.right(), hz.bottom()))),
+                (
+                    Btn::Up,
+                    Rect::from_min_max(pos2(v.left(), v.top()), pos2(v.right(), c.y)),
+                ),
+                (
+                    Btn::Down,
+                    Rect::from_min_max(pos2(v.left(), c.y), pos2(v.right(), v.bottom())),
+                ),
+                (
+                    Btn::Left,
+                    Rect::from_min_max(pos2(hz.left(), hz.top()), pos2(c.x, hz.bottom())),
+                ),
+                (
+                    Btn::Right,
+                    Rect::from_min_max(pos2(c.x, hz.top()), pos2(hz.right(), hz.bottom())),
+                ),
             ];
             for (d, rr) in arms {
                 if lit(d) {
-                    p.rect_filled(rr.shrink(1.0), 1.5, if b == Btn::Dpad { Color32::from_rgb(120, 128, 140) } else { INK });
+                    p.rect_filled(
+                        rr.shrink(1.0),
+                        1.5,
+                        if b == Btn::Dpad {
+                            Color32::from_rgb(120, 128, 140)
+                        } else {
+                            INK
+                        },
+                    );
                 }
             }
             for rr in [v, hz] {
@@ -212,13 +295,16 @@ enum Tok<'a> {
 }
 
 fn tokens(spec: &str) -> impl Iterator<Item = Tok<'_>> {
-    spec.split_whitespace().map(|t| Btn::parse(t).map(Tok::Btn).unwrap_or(Tok::Text(t)))
+    spec.split_whitespace()
+        .map(|t| Btn::parse(t).map(Tok::Btn).unwrap_or(Tok::Text(t)))
 }
 
 const GAP: f32 = 3.0;
 
 fn text_w(p: &Painter, s: &str, size: f32) -> f32 {
-    p.layout_no_wrap(s.to_string(), FontId::proportional(size), Color32::WHITE).size().x
+    p.layout_no_wrap(s.to_string(), FontId::proportional(size), Color32::WHITE)
+        .size()
+        .x
 }
 
 /// Width of a whole spec at a glyph height.
@@ -263,7 +349,14 @@ pub fn paint_spec(p: &Painter, x: f32, y: f32, spec: &str, h: f32, text: Color32
 pub fn glyphs(ui: &mut Ui, spec: &str, h: f32) -> egui::Response {
     let w = spec_width(ui.painter(), spec, h);
     let (r, resp) = ui.allocate_exact_size(vec2(w, h), egui::Sense::hover());
-    paint_spec(ui.painter(), r.left(), r.center().y, spec, h, Color32::from_white_alpha(200));
+    paint_spec(
+        ui.painter(),
+        r.left(),
+        r.center().y,
+        spec,
+        h,
+        Color32::from_white_alpha(200),
+    );
     resp
 }
 
@@ -307,22 +400,38 @@ pub fn focus_ring(ctx: &egui::Context, col: Color32) {
     if !active() {
         return;
     }
-    let Some(id) = ctx.memory(|m| m.focused()) else { return };
-    let Some(r) = ctx.read_response(id) else { return };
+    let Some(id) = ctx.memory(|m| m.focused()) else {
+        return;
+    };
+    let Some(r) = ctx.read_response(id) else {
+        return;
+    };
     let rect = r.interact_rect;
     if rect.width() < 2.0 || rect.height() < 2.0 {
         return;
     }
-    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("pad_focus")));
-    p.rect_stroke(rect.expand(2.0), 6.0, Stroke::new(2.0, col), egui::StrokeKind::Outside);
+    let p = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Tooltip,
+        egui::Id::unique("pad_focus"),
+    ));
+    p.rect_stroke(
+        rect.expand(2.0),
+        6.0,
+        Stroke::new(2.0, col),
+        egui::StrokeKind::Outside,
+    );
 }
 
 /// At the end of a scroll area's contents: scroll a widget the gamepad has
 /// just moved to into view.
 pub fn follow_focus(ui: &Ui) {
     let ctx = ui.ctx();
-    let Some(id) = ctx.memory(|m| m.focused()) else { return };
-    let Some(r) = ctx.read_response(id) else { return };
+    let Some(id) = ctx.memory(|m| m.focused()) else {
+        return;
+    };
+    let Some(r) = ctx.read_response(id) else {
+        return;
+    };
     if r.gained_focus() && r.layer_id == ui.layer_id() && ui.min_rect().contains_rect(r.rect) {
         ui.scroll_to_rect(r.rect.expand(8.0), None);
     }

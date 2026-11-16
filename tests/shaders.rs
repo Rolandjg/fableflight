@@ -5,7 +5,12 @@ fn check(name: &str, src: &str) -> bool {
             eprintln!("--- {name}\n{}", e.emit_to_string(src));
             false
         }
-        Ok(m) => match naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all()).validate(&m) {
+        Ok(m) => match naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&m)
+        {
             Err(e) => {
                 eprintln!("--- {name}\n{}", e.emit_to_string(src));
                 false
@@ -30,8 +35,14 @@ fn shaders_validate() {
         ("terrain", include_str!("../src/shaders/terrain.wgsl")),
         ("photo", include_str!("../src/shaders/photo.wgsl")),
         ("post", include_str!("../src/shaders/post.wgsl")),
-        ("particles_sim", include_str!("../src/shaders/particles_sim.wgsl")),
-        ("particles_draw", include_str!("../src/shaders/particles_draw.wgsl")),
+        (
+            "particles_sim",
+            include_str!("../src/shaders/particles_sim.wgsl"),
+        ),
+        (
+            "particles_draw",
+            include_str!("../src/shaders/particles_draw.wgsl"),
+        ),
         ("roads", include_str!("../src/shaders/roads.wgsl")),
         ("trees", include_str!("../src/shaders/trees.wgsl")),
         ("vol", include_str!("../src/shaders/vol.wgsl")),
@@ -44,10 +55,16 @@ fn shaders_validate() {
     }
     // As in render.rs, buildings and instanced solids share the facade shading.
     let facade = include_str!("../src/shaders/facade.wgsl");
-    for (name, src) in [("buildings", include_str!("../src/shaders/buildings.wgsl")), ("inst", include_str!("../src/shaders/inst.wgsl"))] {
+    for (name, src) in [
+        ("buildings", include_str!("../src/shaders/buildings.wgsl")),
+        ("inst", include_str!("../src/shaders/inst.wgsl")),
+    ] {
         ok &= check(name, &format!("{common}\n{facade}\n{src}"));
     }
-    for (name, src) in [("composite", include_str!("../src/shaders/composite.wgsl")), ("clouds", include_str!("../src/shaders/clouds.wgsl"))] {
+    for (name, src) in [
+        ("composite", include_str!("../src/shaders/composite.wgsl")),
+        ("clouds", include_str!("../src/shaders/clouds.wgsl")),
+    ] {
         ok &= check(name, &format!("{common}\n{sky}\n{src}"));
     }
     // plane.wgsl takes the 747 deck's string table: checked in b747::deck's tests.

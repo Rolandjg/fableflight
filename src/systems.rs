@@ -29,11 +29,27 @@ impl Failures {
     pub const N: usize = 7;
 
     pub fn get(&self, i: usize) -> bool {
-        [self.engine, self.alternator, self.battery, self.vacuum, self.pitot, self.static_port, self.fuel_leak][i]
+        [
+            self.engine,
+            self.alternator,
+            self.battery,
+            self.vacuum,
+            self.pitot,
+            self.static_port,
+            self.fuel_leak,
+        ][i]
     }
 
     pub fn set(&mut self, i: usize, v: bool) {
-        *[&mut self.engine, &mut self.alternator, &mut self.battery, &mut self.vacuum, &mut self.pitot, &mut self.static_port, &mut self.fuel_leak][i] = v;
+        *[
+            &mut self.engine,
+            &mut self.alternator,
+            &mut self.battery,
+            &mut self.vacuum,
+            &mut self.pitot,
+            &mut self.static_port,
+            &mut self.fuel_leak,
+        ][i] = v;
     }
 
     pub fn label(i: usize) -> &'static str {
@@ -42,9 +58,18 @@ impl Failures {
             0 => t!("Engine failure", "Panne moteur"),
             1 => t!("Alternator (generators)", "Alternateur (génératrices)"),
             2 => t!("Battery flat", "Batterie à plat"),
-            3 => t!("Vacuum pump (attitude and heading gyros)", "Pompe à vide (horizon et conservateur de cap)"),
-            4 => t!("Pitot tube blocked (airspeed)", "Tube Pitot bouché (anémomètre)"),
-            5 => t!("Static port blocked (altimeter, VSI)", "Prise statique bouchée (altimètre, variomètre)"),
+            3 => t!(
+                "Vacuum pump (attitude and heading gyros)",
+                "Pompe à vide (horizon et conservateur de cap)"
+            ),
+            4 => t!(
+                "Pitot tube blocked (airspeed)",
+                "Tube Pitot bouché (anémomètre)"
+            ),
+            5 => t!(
+                "Static port blocked (altimeter, VSI)",
+                "Prise statique bouchée (altimètre, variomètre)"
+            ),
             _ => t!("Fuel leak", "Fuite de carburant"),
         }
     }
@@ -70,7 +95,15 @@ pub struct Systems {
 
 impl Default for Systems {
     fn default() -> Self {
-        Systems { elec: Electrics { master: true, charge: 0.95, volts: 28.0, amps: 0.0 }, fail: Failures::default() }
+        Systems {
+            elec: Electrics {
+                master: true,
+                charge: 0.95,
+                volts: 28.0,
+                amps: 0.0,
+            },
+            fail: Failures::default(),
+        }
     }
 }
 
@@ -101,7 +134,11 @@ impl Systems {
         if charging && !self.fail.alternator {
             // The alternator carries the load and charges the battery, tapering as it fills.
             let spare = (ALTERNATOR_A - load).max(0.0);
-            let into = if e.charge > 0.0 || !self.fail.battery { spare.min(30.0 * (1.0 - e.charge).max(0.05)) } else { 0.0 };
+            let into = if e.charge > 0.0 || !self.fail.battery {
+                spare.min(30.0 * (1.0 - e.charge).max(0.05))
+            } else {
+                0.0
+            };
             let short = (load - ALTERNATOR_A).max(0.0);
             e.amps = into - short;
             e.volts = 28.0;
@@ -133,7 +170,11 @@ mod tests {
         for _ in 0..3600 {
             s.update(1.0, true, false, true);
         }
-        assert!(s.elec.charge < c0 - 0.3 && s.elec.charge > 0.0, "{}", s.elec.charge);
+        assert!(
+            s.elec.charge < c0 - 0.3 && s.elec.charge > 0.0,
+            "{}",
+            s.elec.charge
+        );
         assert!(s.powered() && s.elec.amps < 0.0);
         // The starter pulls the volts down hard.
         let v = s.elec.volts;

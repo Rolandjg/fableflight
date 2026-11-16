@@ -10,10 +10,10 @@
 //! Rubble heaps up on a coarse height field, so piles have slopes, and heavy
 //! pieces falling on a smaller building next door can bring that down too.
 use crate::cars::{M_CUBE, M_REBAR, M_ROCK, M_SLAB, N_REBAR};
-use crate::crash::{Rng, DUST, GLASS, GRIT, LEAF};
+use crate::crash::{DUST, GLASS, GRIT, LEAF, Rng};
 use crate::geo::{self, TileId};
 use crate::render::{Inst, MeshVertex, Particle, TreeInst};
-use crate::skin::{Group, PieceRef, NO_SKIN};
+use crate::skin::{Group, NO_SKIN, PieceRef};
 use crate::tiles3d::SkinSrc;
 use crate::world::{TreeRef, World, Wreck};
 use glam::{DQuat, DVec3, Mat3, Vec2, Vec3};
@@ -46,27 +46,49 @@ struct Edge {
 /// edges crumbled thinner. Faces of the break get col.a = 1; the rest keep 0,
 /// so the outer face of a piece of facade (+y) can still show the wall.
 fn slab_mesh(seed: u32) -> (Vec<MeshVertex>, Vec<u32>, Vec<Edge>) {
-    let mut r = Rng(0x9E37_79B9_7F4A_7C15 ^ (seed as u64 + 1).wrapping_mul(0x2545_F491_4F6C_DD1D) | 1);
+    let mut r =
+        Rng(0x9E37_79B9_7F4A_7C15 ^ (seed as u64 + 1).wrapping_mul(0x2545_F491_4F6C_DD1D) | 1);
     for _ in 0..4 {
         r.f();
     }
-    const MASKS: [u8; 12] = [0b0001, 0b0011, 0b0111, 0b0101, 0b1011, 0b0010, 0b0110, 0b1101, 0b1001, 0b1110, 0b0100, 0b1111];
+    const MASKS: [u8; 12] = [
+        0b0001, 0b0011, 0b0111, 0b0101, 0b1011, 0b0010, 0b0110, 0b1101, 0b1001, 0b1110, 0b0100,
+        0b1111,
+    ];
     let mask = MASKS[seed as usize % MASKS.len()];
-    let corners = [Vec2::new(-1.0, -1.0), Vec2::new(1.0, -1.0), Vec2::new(1.0, 1.0), Vec2::new(-1.0, 1.0)];
+    let corners = [
+        Vec2::new(-1.0, -1.0),
+        Vec2::new(1.0, -1.0),
+        Vec2::new(1.0, 1.0),
+        Vec2::new(-1.0, 1.0),
+    ];
     // Outline (counter-clockwise in x, z): each point, whether the edge from
     // it on is broken, and how much it is crumbled.
     let mut pts: Vec<(Vec2, bool, f32)> = Vec::new();
     let mut edges = Vec::new();
     // On some a corner is knocked off: a ragged line across it instead.
-    let cut = if seed % 3 == 1 { Some(((seed / 3) as usize % 4, r.range(0.5, 1.3), r.range(0.5, 1.3))) } else { None };
-    // A ragged line from p towards q (q itself not included), dented inwards.
-    let ragged = |r: &mut Rng, pts: &mut Vec<(Vec2, bool, f32)>, p: Vec2, q: Vec2, n: Vec2, deep: f32| {
-        let m = 3 + (r.f() * 3.0) as usize + ((q - p).length() > 1.2) as usize;
-        for k in 1..m {
-            let t = (k as f32 + r.range(-0.3, 0.3)) / m as f32;
-            pts.push((p + (q - p) * t - n * r.range(0.0, deep), true, r.range(0.2, 0.65)));
-        }
+    let cut = if seed % 3 == 1 {
+        Some((
+            (seed / 3) as usize % 4,
+            r.range(0.5, 1.3),
+            r.range(0.5, 1.3),
+        ))
+    } else {
+        None
     };
+    // A ragged line from p towards q (q itself not included), dented inwards.
+    let ragged =
+        |r: &mut Rng, pts: &mut Vec<(Vec2, bool, f32)>, p: Vec2, q: Vec2, n: Vec2, deep: f32| {
+            let m = 3 + (r.f() * 3.0) as usize + ((q - p).length() > 1.2) as usize;
+            for k in 1..m {
+                let t = (k as f32 + r.range(-0.3, 0.3)) / m as f32;
+                pts.push((
+                    p + (q - p) * t - n * r.range(0.0, deep),
+                    true,
+                    r.range(0.2, 0.65),
+                ));
+            }
+        };
     for s in 0..4 {
         let (a, b) = (corners[s], corners[(s + 1) % 4]);
         let d = (b - a) * 0.5;
@@ -83,11 +105,19 @@ fn slab_mesh(seed: u32) -> (Vec<MeshVertex>, Vec<u32>, Vec<Edge>) {
             Some((c, ka, _)) if c == (s + 1) % 4 => b - d * ka,
             _ => b,
         };
-        let crumb = if broken || prev_broken || matches!(cut, Some((c, _, _)) if c == s) { r.range(0.2, 0.5) } else { 0.0 };
+        let crumb = if broken || prev_broken || matches!(cut, Some((c, _, _)) if c == s) {
+            r.range(0.2, 0.5)
+        } else {
+            0.0
+        };
         pts.push((start, broken, crumb));
         if broken {
             ragged(&mut r, &mut pts, start, end, n, 0.24);
-            edges.push(Edge { mid: (start + end) * 0.5, n, half: (end - start).length() * 0.5 });
+            edges.push(Edge {
+                mid: (start + end) * 0.5,
+                n,
+                half: (end - start).length() * 0.5,
+            });
         }
         if let Some((c, _, kb)) = cut {
             if c == (s + 1) % 4 {
@@ -96,7 +126,11 @@ fn slab_mesh(seed: u32) -> (Vec<MeshVertex>, Vec<u32>, Vec<Edge>) {
                 let nc = -(q - end).normalize().perp();
                 pts.push((end, true, 0.3));
                 ragged(&mut r, &mut pts, end, q, nc, 0.16);
-                edges.push(Edge { mid: (end + q) * 0.5, n: nc, half: (q - end).length() * 0.5 });
+                edges.push(Edge {
+                    mid: (end + q) * 0.5,
+                    n: nc,
+                    half: (q - end).length() * 0.5,
+                });
             }
         }
     }
@@ -111,7 +145,11 @@ fn slab_mesh(seed: u32) -> (Vec<MeshVertex>, Vec<u32>, Vec<Edge>) {
         };
         let base = v.len() as u32;
         for q in [a, b, c] {
-            v.push(MeshVertex { pos: q.into(), nrm: nrm.into(), col });
+            v.push(MeshVertex {
+                pos: q.into(),
+                nrm: nrm.into(),
+                col,
+            });
         }
         idx.extend([base, base + 1, base + 2]);
     };
@@ -138,17 +176,20 @@ fn slab_mesh(seed: u32) -> (Vec<MeshVertex>, Vec<u32>, Vec<Edge>) {
 }
 
 pub fn slab_meshes() -> Vec<(Vec<MeshVertex>, Vec<u32>)> {
-    (0..N_SLAB).map(|s| {
-        let (v, i, _) = slab_mesh(s);
-        (v, i)
-    }).collect()
+    (0..N_SLAB)
+        .map(|s| {
+            let (v, i, _) = slab_mesh(s);
+            (v, i)
+        })
+        .collect()
 }
 
 /// Bars left sticking out of a broken edge: two layers of rods along +x from
 /// inside the concrete, spaced along z over -1..1, bent and some snapped
 /// short (to be drawn at one even scale, so the rods stay round).
 fn rebar_mesh(seed: u32) -> (Vec<MeshVertex>, Vec<u32>) {
-    let mut r = Rng(0x51_7CC1_B727_220A ^ (seed as u64 + 7).wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+    let mut r =
+        Rng(0x51_7CC1_B727_220A ^ (seed as u64 + 7).wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
     for _ in 0..4 {
         r.f();
     }
@@ -161,7 +202,11 @@ fn rebar_mesh(seed: u32) -> (Vec<MeshVertex>, Vec<u32>) {
                 continue;
             }
             let z = -0.9 + 0.2 * j as f32 + r.range(-0.04, 0.04);
-            let len = if r.f() < 0.25 { r.range(0.08, 0.2) } else { r.range(0.25, 0.75) };
+            let len = if r.f() < 0.25 {
+                r.range(0.08, 0.2)
+            } else {
+                r.range(0.25, 0.75)
+            };
             let droop = r.range(-0.6, 0.15) * len;
             let side = r.range(-0.25, 0.25) * len;
             let path = [
@@ -172,23 +217,35 @@ fn rebar_mesh(seed: u32) -> (Vec<MeshVertex>, Vec<u32>) {
             ];
             // A three-sided tube along the path.
             let ring = |k: usize| {
-                let d = if k + 1 < path.len() { path[k + 1] - path[k] } else { path[k] - path[k - 1] }.normalize();
+                let d = if k + 1 < path.len() {
+                    path[k + 1] - path[k]
+                } else {
+                    path[k] - path[k - 1]
+                }
+                .normalize();
                 let a = d.any_orthonormal_vector();
                 let b = d.cross(a);
-                (0..3).map(|i| {
-                    let t = i as f32 * std::f32::consts::TAU / 3.0;
-                    let o = a * t.cos() + b * t.sin();
-                    (path[k] + o * rad, o)
-                }).collect::<Vec<_>>()
+                (0..3)
+                    .map(|i| {
+                        let t = i as f32 * std::f32::consts::TAU / 3.0;
+                        let o = a * t.cos() + b * t.sin();
+                        (path[k] + o * rad, o)
+                    })
+                    .collect::<Vec<_>>()
             };
             let rings: Vec<_> = (0..path.len()).map(ring).collect();
             for k in 0..path.len() - 1 {
                 for i in 0..3 {
                     let i2 = (i + 1) % 3;
-                    let (a, b, c, d) = (rings[k][i], rings[k][i2], rings[k + 1][i2], rings[k + 1][i]);
+                    let (a, b, c, d) =
+                        (rings[k][i], rings[k][i2], rings[k + 1][i2], rings[k + 1][i]);
                     let base = v.len() as u32;
                     for (p, n) in [a, b, c, d] {
-                        v.push(MeshVertex { pos: p.into(), nrm: n.into(), col });
+                        v.push(MeshVertex {
+                            pos: p.into(),
+                            nrm: n.into(),
+                            col,
+                        });
                     }
                     idx.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
                 }
@@ -231,7 +288,13 @@ struct Under {
 }
 
 impl Under {
-    const NONE: Under = Under { at: DVec3::ZERO, ground: 0.0, water: false, roof: -1e9, hit: None };
+    const NONE: Under = Under {
+        at: DVec3::ZERO,
+        ground: 0.0,
+        water: false,
+        roof: -1e9,
+        hit: None,
+    };
 }
 
 const NO_GROUP: u32 = u32::MAX;
@@ -291,7 +354,15 @@ struct Chunk {
 
 impl Chunk {
     /// A loose piece flying free.
-    fn loose(pos: DVec3, half: Vec3, rot: DQuat, vel: DVec3, omega: DVec3, col: [f32; 3], mesh: u32) -> Chunk {
+    fn loose(
+        pos: DVec3,
+        half: Vec3,
+        rot: DQuat,
+        vel: DVec3,
+        omega: DVec3,
+        col: [f32; 3],
+        mesh: u32,
+    ) -> Chunk {
         Chunk {
             pos,
             half,
@@ -355,8 +426,15 @@ impl Hitter {
         let f = self.up.cross(self.right);
         let q = p - at;
         let df = dir.dot(f);
-        let q2 = if df.abs() > 0.3 { q - dir * (q.dot(f) / df) } else { q - dir * q.dot(dir) };
-        (Vec2::new(q2.dot(self.right) as f32, q2.dot(self.up) as f32), q.dot(dir) as f32)
+        let q2 = if df.abs() > 0.3 {
+            q - dir * (q.dot(f) / df)
+        } else {
+            q - dir * q.dot(dir)
+        };
+        (
+            Vec2::new(q2.dot(self.right) as f32, q2.dot(self.up) as f32),
+            q.dot(dir) as f32,
+        )
     }
 
     /// Signed distance (m) from the aircraft's head-on outline, negative
@@ -387,10 +465,19 @@ impl Hitter {
             }
         }
         let [sy, st, ss] = h.stab;
-        let stab = if self.stab[side] > 0.5 { ((y - sy).abs() - st).max(ax - ss) } else { 1e3 };
+        let stab = if self.stab[side] > 0.5 {
+            ((y - sy).abs() - st).max(ax - ss)
+        } else {
+            1e3
+        };
         let [f0, fh2, fw0, fw1] = h.fin;
         let ft = f0 + fh2 * self.fin;
-        let fin = if self.fin > 0.1 { (ax - (fw0 + (fw1 - fw0) * ((y - f0) / fh2).clamp(0.0, 1.0))).max((y - (f0 + ft) * 0.5).abs() - (ft - f0) * 0.5) } else { 1e3 };
+        let fin = if self.fin > 0.1 {
+            (ax - (fw0 + (fw1 - fw0) * ((y - f0) / fh2).clamp(0.0, 1.0)))
+                .max((y - (f0 + ft) * 0.5).abs() - (ft - f0) * 0.5)
+        } else {
+            1e3
+        };
         fus.min(wing).min(stab).min(fin) * K
     }
 }
@@ -463,7 +550,9 @@ const MAX_CHUNKS: usize = 7000;
 /// Smooth value noise in -1..1, about one bump per unit.
 fn vnoise(p: Vec2, seed: u32) -> f32 {
     let h = |x: i32, y: i32| {
-        let mut n = (x as u32).wrapping_mul(0x27d4_eb2d) ^ (y as u32).wrapping_mul(0x1656_67b1) ^ seed.wrapping_mul(0x9e37_79b9);
+        let mut n = (x as u32).wrapping_mul(0x27d4_eb2d)
+            ^ (y as u32).wrapping_mul(0x1656_67b1)
+            ^ seed.wrapping_mul(0x9e37_79b9);
         n ^= n >> 15;
         n = n.wrapping_mul(0x2c1b_3c6d);
         n ^= n >> 12;
@@ -478,7 +567,12 @@ fn vnoise(p: Vec2, seed: u32) -> f32 {
 }
 
 fn ring_area(r: &[Vec2]) -> f32 {
-    r.iter().enumerate().map(|(i, p)| p.perp_dot(r[(i + 1) % r.len()])).sum::<f32>().abs() * 0.5
+    r.iter()
+        .enumerate()
+        .map(|(i, p)| p.perp_dot(r[(i + 1) % r.len()]))
+        .sum::<f32>()
+        .abs()
+        * 0.5
 }
 
 fn inside(ring: &[Vec2], p: Vec2) -> bool {
@@ -486,7 +580,8 @@ fn inside(ring: &[Vec2], p: Vec2) -> bool {
     let mut j = ring.len() - 1;
     for i in 0..ring.len() {
         let (p0, p1) = (ring[i], ring[j]);
-        if (p0.y > p.y) != (p1.y > p.y) && p.x < (p1.x - p0.x) * (p.y - p0.y) / (p1.y - p0.y) + p0.x {
+        if (p0.y > p.y) != (p1.y > p.y) && p.x < (p1.x - p0.x) * (p.y - p0.y) / (p1.y - p0.y) + p0.x
+        {
             c = !c;
         }
         j = i;
@@ -532,11 +627,22 @@ impl Destruction {
     }
 
     /// Knock one tree over. `push` is the direction it is shoved in.
-    pub fn knock(&mut self, world: &mut World, queue: &wgpu::Queue, t: &TreeRef, push: DVec3, power: f32, delay: f32, scorch: f32) {
+    pub fn knock(
+        &mut self,
+        world: &mut World,
+        queue: &wgpu::Queue,
+        t: &TreeRef,
+        push: DVec3,
+        power: f32,
+        delay: f32,
+        scorch: f32,
+    ) {
         world.remove_tree(queue, t);
         let (e, n, _) = geo::enu(t.pos);
         let mut d = Vec2::new(push.dot(e) as f32, push.dot(n) as f32);
-        d = (d.normalize_or_zero() + Vec2::new(self.rng.range(-0.35, 0.35), self.rng.range(-0.35, 0.35))).normalize_or_zero();
+        d = (d.normalize_or_zero()
+            + Vec2::new(self.rng.range(-0.35, 0.35), self.rng.range(-0.35, 0.35)))
+        .normalize_or_zero();
         if d == Vec2::ZERO {
             d = Vec2::X;
         }
@@ -545,8 +651,24 @@ impl Destruction {
             *c = (*c as f32 * (1.0 - 0.75 * scorch)) as u8;
         }
         // It comes to rest on its crown, not flat on the trunk.
-        let rest = std::f32::consts::FRAC_PI_2 - ((t.crown_r * 0.55) / t.height.max(1.0)).atan() as f32 + self.rng.range(-0.05, 0.05);
-        self.falling.push(FallTree { pos: t.pos, mesh: t.variant as u32 * crate::trees::LODS as u32, inst, dir: d, ang: 0.0, vel: 0.2 + power * self.rng.range(0.6, 1.1), delay, rest, height: t.height as f32, crown_r: t.crown_r as f32, started: false, landed: false, done: false });
+        let rest = std::f32::consts::FRAC_PI_2
+            - ((t.crown_r * 0.55) / t.height.max(1.0)).atan() as f32
+            + self.rng.range(-0.05, 0.05);
+        self.falling.push(FallTree {
+            pos: t.pos,
+            mesh: t.variant as u32 * crate::trees::LODS as u32,
+            inst,
+            dir: d,
+            ang: 0.0,
+            vel: 0.2 + power * self.rng.range(0.6, 1.1),
+            delay,
+            rest,
+            height: t.height as f32,
+            crown_r: t.crown_r as f32,
+            started: false,
+            landed: false,
+            done: false,
+        });
         if self.falling.len() > 3600 {
             self.falling.drain(0..600);
         }
@@ -554,21 +676,42 @@ impl Destruction {
 
     /// A blast: trees inside `gone` are shredded, the rest lean away and fall
     /// in a wave that spreads out from the centre.
-    pub fn blast_trees(&mut self, world: &mut World, queue: &wgpu::Queue, center: DVec3, radius: f64, gone: f64, emit: &mut Vec<(DVec3, Particle)>) {
+    pub fn blast_trees(
+        &mut self,
+        world: &mut World,
+        queue: &wgpu::Queue,
+        center: DVec3,
+        radius: f64,
+        gone: f64,
+        emit: &mut Vec<(DVec3, Particle)>,
+    ) {
         let mut found = Vec::new();
         world.trees_near(center, radius, &mut found);
         for t in found {
             let d = (t.pos - center).length();
             if d < gone {
                 world.remove_tree(queue, &t);
-                self.leaves(t.pos + t.pos.normalize() * t.height * 0.4, t.crown_r as f32, 14, emit);
+                self.leaves(
+                    t.pos + t.pos.normalize() * t.height * 0.4,
+                    t.crown_r as f32,
+                    14,
+                    emit,
+                );
                 continue;
             }
             let k = (1.0 - d / radius) as f32;
             if self.rng.f() > k.powf(0.6) * 1.15 {
                 continue;
             }
-            self.knock(world, queue, &t, t.pos - center, 0.3 + 1.5 * k, (d / 70.0) as f32, (k * 1.6 - 0.7).clamp(0.0, 1.0));
+            self.knock(
+                world,
+                queue,
+                &t,
+                t.pos - center,
+                0.3 + 1.5 * k,
+                (d / 70.0) as f32,
+                (k * 1.6 - 0.7).clamp(0.0, 1.0),
+            );
         }
     }
 
@@ -576,45 +719,127 @@ impl Destruction {
         let up = at.normalize().as_vec3();
         for _ in 0..n {
             let d = self.rng.dir();
-            emit.push((at + (d * spread * self.rng.f()).as_dvec3(), Particle { vel: (d * self.rng.range(1.0, 7.0) + up * self.rng.range(0.0, 5.0)).into(), life: self.rng.range(2.5, 6.0), size0: self.rng.range(0.1, 0.22), size1: 0.12, kind: LEAF, drag: 1.4, seed: self.rng.f(), alpha: 1.0, ..Default::default() }));
+            emit.push((
+                at + (d * spread * self.rng.f()).as_dvec3(),
+                Particle {
+                    vel: (d * self.rng.range(1.0, 7.0) + up * self.rng.range(0.0, 5.0)).into(),
+                    life: self.rng.range(2.5, 6.0),
+                    size0: self.rng.range(0.1, 0.22),
+                    size1: 0.12,
+                    kind: LEAF,
+                    drag: 1.4,
+                    seed: self.rng.f(),
+                    alpha: 1.0,
+                    ..Default::default()
+                },
+            ));
         }
     }
 
-    fn dust(&mut self, at: DVec3, size: f32, n: usize, kind: f32, emit: &mut Vec<(DVec3, Particle)>) {
+    fn dust(
+        &mut self,
+        at: DVec3,
+        size: f32,
+        n: usize,
+        kind: f32,
+        emit: &mut Vec<(DVec3, Particle)>,
+    ) {
         let up = at.normalize().as_vec3();
         for _ in 0..n {
             let d = self.rng.dir();
             let flat = (d - up * d.dot(up)).normalize_or_zero();
-            emit.push((at + (d * size * 0.4).as_dvec3(), Particle { vel: (flat * self.rng.range(1.0, 6.0) + up * self.rng.range(0.3, 2.5)).into(), life: self.rng.range(3.0, 7.5), size0: size * self.rng.range(0.5, 0.9), size1: size * self.rng.range(2.2, 3.6), temp: 0.2, kind, drag: 1.4, buoy: 0.5, seed: self.rng.f(), alpha: self.rng.range(0.25, 0.45), ..Default::default() }));
+            emit.push((
+                at + (d * size * 0.4).as_dvec3(),
+                Particle {
+                    vel: (flat * self.rng.range(1.0, 6.0) + up * self.rng.range(0.3, 2.5)).into(),
+                    life: self.rng.range(3.0, 7.5),
+                    size0: size * self.rng.range(0.5, 0.9),
+                    size1: size * self.rng.range(2.2, 3.6),
+                    temp: 0.2,
+                    kind,
+                    drag: 1.4,
+                    buoy: 0.5,
+                    seed: self.rng.f(),
+                    alpha: self.rng.range(0.25, 0.45),
+                    ..Default::default()
+                },
+            ));
         }
     }
 
     /// A jet of masonry dust blown out of a floor as it is crushed: a few
     /// overlapping puffs at different speeds, so it streams out as a plume.
-    fn jet(&mut self, at: DVec3, out: Vec3, carry: Vec3, size: f32, emit: &mut Vec<(DVec3, Particle)>) {
+    fn jet(
+        &mut self,
+        at: DVec3,
+        out: Vec3,
+        carry: Vec3,
+        size: f32,
+        emit: &mut Vec<(DVec3, Particle)>,
+    ) {
         let up = at.normalize().as_vec3();
         let r = &mut self.rng;
         let d = (out + r.dir() * 0.3).normalize_or_zero();
         let sp = r.range(9.0, 20.0);
         for k in 0..3 {
             let f = 0.35 + 0.33 * k as f32;
-            emit.push((at + (r.dir() * size * 0.5).as_dvec3(), Particle { vel: (d * sp * f + r.dir() * 1.5 + carry * 0.25 + up * r.range(-0.5, 1.5)).into(), life: r.range(7.0, 13.0), size0: size * r.range(0.6, 0.9), size1: size * r.range(3.0, 5.0), temp: 0.1, kind: GRIT, drag: r.range(0.7, 1.0), buoy: 0.25, seed: r.f(), alpha: r.range(0.14, 0.24), ..Default::default() }));
+            emit.push((
+                at + (r.dir() * size * 0.5).as_dvec3(),
+                Particle {
+                    vel: (d * sp * f + r.dir() * 1.5 + carry * 0.25 + up * r.range(-0.5, 1.5))
+                        .into(),
+                    life: r.range(7.0, 13.0),
+                    size0: size * r.range(0.6, 0.9),
+                    size1: size * r.range(3.0, 5.0),
+                    temp: 0.1,
+                    kind: GRIT,
+                    drag: r.range(0.7, 1.0),
+                    buoy: 0.25,
+                    seed: r.f(),
+                    alpha: r.range(0.14, 0.24),
+                    ..Default::default()
+                },
+            ));
         }
     }
 
     /// Window glass bursting out of a facade.
-    fn glass(&mut self, at: DVec3, spread: f32, out: Vec3, carry: Vec3, n: usize, emit: &mut Vec<(DVec3, Particle)>) {
+    fn glass(
+        &mut self,
+        at: DVec3,
+        spread: f32,
+        out: Vec3,
+        carry: Vec3,
+        n: usize,
+        emit: &mut Vec<(DVec3, Particle)>,
+    ) {
         let up = at.normalize().as_vec3();
         for _ in 0..n {
             let r = &mut self.rng;
             let d = (out * 0.8 + r.dir()).normalize_or_zero();
-            emit.push((at + (r.dir() * spread).as_dvec3(), Particle { vel: (d * r.range(2.0, 14.0) + carry + up * r.range(0.0, 4.0)).into(), life: r.range(4.0, 11.0), size0: r.range(0.12, 0.35), size1: r.range(0.1, 0.3), kind: GLASS, drag: r.range(0.15, 0.45), seed: r.f(), alpha: r.range(0.6, 1.0), ..Default::default() }));
+            emit.push((
+                at + (r.dir() * spread).as_dvec3(),
+                Particle {
+                    vel: (d * r.range(2.0, 14.0) + carry + up * r.range(0.0, 4.0)).into(),
+                    life: r.range(4.0, 11.0),
+                    size0: r.range(0.12, 0.35),
+                    size1: r.range(0.1, 0.3),
+                    kind: GLASS,
+                    drag: r.range(0.15, 0.45),
+                    seed: r.f(),
+                    alpha: r.range(0.6, 1.0),
+                    ..Default::default()
+                },
+            ));
         }
     }
 
     fn fkey(&self, p: DVec3) -> (i32, i32) {
         let d = p - self.f_org;
-        ((d.dot(self.f_e) / CELL).floor() as i32, (d.dot(self.f_n) / CELL).floor() as i32)
+        (
+            (d.dot(self.f_e) / CELL).floor() as i32,
+            (d.dot(self.f_n) / CELL).floor() as i32,
+        )
     }
 
     /// Heap rubble up to `top` (altitude) over a disc around `p`.
@@ -636,7 +861,11 @@ impl Destruction {
     /// Where the camera should look while a tall building comes down:
     /// (middle of it, its height).
     pub fn focus(&self) -> Option<(DVec3, f64)> {
-        self.structs.iter().filter(|s| s.tall && s.done_t < 6.0).max_by(|a, b| a.height.total_cmp(&b.height)).map(|s| (s.base + s.u * (s.height as f64 * 0.42), s.height as f64))
+        self.structs
+            .iter()
+            .filter(|s| s.tall && s.done_t < 6.0)
+            .max_by(|a, b| a.height.total_cmp(&b.height))
+            .map(|s| (s.base + s.u * (s.height as f64 * 0.42), s.height as f64))
     }
 
     /// Bring a building down. `parts`: the building that was hit first, then
@@ -644,7 +873,16 @@ impl Destruction {
     /// `hit`: the aircraft itself went in here, so the wall shows its outline.
     /// `photo`: the building as the 3D tiles had it (cut out of them), which
     /// its pieces then carry.
-    pub fn collapse(&mut self, parts: &[Wreck], impact: DVec3, vel: DVec3, energy: f64, hit: Option<Hitter>, photo: Option<&SkinSrc>, emit: &mut Vec<(DVec3, Particle)>) {
+    pub fn collapse(
+        &mut self,
+        parts: &[Wreck],
+        impact: DVec3,
+        vel: DVec3,
+        energy: f64,
+        hit: Option<Hitter>,
+        photo: Option<&SkinSrc>,
+        emit: &mut Vec<(DVec3, Particle)>,
+    ) {
         let Some(w0) = parts.first() else { return };
         if w0.ring.len() < 3 {
             return;
@@ -672,13 +910,20 @@ impl Destruction {
             self.f_n = nn;
         }
         let to2 = |p: DVec3| Vec2::new((p - base).dot(e) as f32, (p - base).dot(nn) as f32);
-        let rings: Vec<Vec<Vec2>> = parts.iter().map(|w| w.ring.iter().map(|p| to2(*p)).collect()).collect();
+        let rings: Vec<Vec<Vec2>> = parts
+            .iter()
+            .map(|w| w.ring.iter().map(|p| to2(*p)).collect())
+            .collect();
         // Rubble lying on its roof (from a neighbour that came down first) falls with it.
         let on_roof = |p: DVec3| {
             let q = to2(p);
             (p - base).dot(u) > 1.0 && rings.iter().any(|r| r.len() >= 3 && inside(r, q))
         };
-        for c in self.chunks.iter_mut().filter(|c| c.state == 2 && on_roof(c.pos)) {
+        for c in self
+            .chunks
+            .iter_mut()
+            .filter(|c| c.state == 2 && on_roof(c.pos))
+        {
             c.state = 1;
             c.bounces = 0;
             c.under = Under::NONE;
@@ -708,11 +953,23 @@ impl Destruction {
             if ring.len() < 3 {
                 continue;
             }
-            let style = (w.sty[0] as u32 + 256 * (w.sty[1] as u32 & 15) + 65536 * w.sty[2] as u32) as f32;
-            let mk = |ring: Vec<Vec2>, base: f64, top: f64| Part { ring, base, top, wall: w.col.map(lin), roof: w.roof_col.map(lin), style, h: w.sty[3] as f32, gref: w.gref };
+            let style =
+                (w.sty[0] as u32 + 256 * (w.sty[1] as u32 & 15) + 65536 * w.sty[2] as u32) as f32;
+            let mk = |ring: Vec<Vec2>, base: f64, top: f64| Part {
+                ring,
+                base,
+                top,
+                wall: w.col.map(lin),
+                roof: w.roof_col.map(lin),
+                style,
+                h: w.sty[3] as f32,
+                gref: w.gref,
+            };
             let (mut r, mut z0) = (ring.clone(), w.base);
             for &(d, zt) in &w.tiers {
-                let Some(next) = crate::buildings::inset(&r, d) else { break };
+                let Some(next) = crate::buildings::inset(&r, d) else {
+                    break;
+                };
                 pg.push(mk(r, z0, zt as f64));
                 r = next;
                 z0 = zt as f64;
@@ -721,7 +978,9 @@ impl Destruction {
         }
         let areas: Vec<f32> = pg.iter().map(|p| ring_area(&p.ring)).collect();
         // Cut along the building's own grain: the longest wall of its largest part.
-        let big = (0..pg.len()).max_by(|a, b| areas[*a].total_cmp(&areas[*b])).unwrap_or(0);
+        let big = (0..pg.len())
+            .max_by(|a, b| areas[*a].total_cmp(&areas[*b]))
+            .unwrap_or(0);
         let mut a = Vec2::X;
         let mut best = 0.0;
         if let Some(rb) = pg.get(big).map(|p| &p.ring) {
@@ -734,26 +993,49 @@ impl Destruction {
             }
         }
         let b = a.perp();
-        let vol: f32 = pg.iter().zip(&areas).map(|(p, ar)| ar * (p.top - p.base) as f32).sum();
+        let vol: f32 = pg
+            .iter()
+            .zip(&areas)
+            .map(|(p, ar)| ar * (p.top - p.base) as f32)
+            .sum();
         let tall = height >= 28.0 && vol > 6000.0;
         // A storey or a few per piece; small buildings in smaller pieces.
-        let storey = |cs: f32| if cs < 2.6 { (cs * 1.4).max(1.8) } else { 3.4 * (cs / 3.4).round().max(1.0) };
+        let storey = |cs: f32| {
+            if cs < 2.6 {
+                (cs * 1.4).max(1.8)
+            } else {
+                3.4 * (cs / 3.4).round().max(1.0)
+            }
+        };
         // Finer pieces than a cube per house, but a bounded count per building:
         // floor slabs over the area and panels round the walls, per storey.
         let budget = if tall { 2800.0 } else { 1000.0 };
         let count = |cs: f32| -> f32 {
-            pg.iter().zip(&areas).map(|(p, ar)| {
-                let per: f32 = p.ring.iter().enumerate().map(|(i, q)| q.distance(p.ring[(i + 1) % p.ring.len()])).sum();
-                let nz = ((p.top - p.base) as f32 / storey(cs)).round().max(1.0);
-                nz * (ar / (cs * cs) + per / cs + 1.0)
-            }).sum()
+            pg.iter()
+                .zip(&areas)
+                .map(|(p, ar)| {
+                    let per: f32 = p
+                        .ring
+                        .iter()
+                        .enumerate()
+                        .map(|(i, q)| q.distance(p.ring[(i + 1) % p.ring.len()]))
+                        .sum();
+                    let nz = ((p.top - p.base) as f32 / storey(cs)).round().max(1.0);
+                    nz * (ar / (cs * cs) + per / cs + 1.0)
+                })
+                .sum()
         };
         let mut cs = (vol / (budget * 0.7)).cbrt().clamp(1.5, 12.0);
         while cs < 14.0 && count(cs) > budget {
             cs *= 1.08;
         }
         let lh_t = storey(cs);
-        let ext = pg.iter().flat_map(|p| p.ring.iter()).map(|p| p.length()).fold(0.0f32, f32::max).max(3.0);
+        let ext = pg
+            .iter()
+            .flat_map(|p| p.ring.iter())
+            .map(|p| p.length())
+            .fold(0.0f32, f32::max)
+            .max(3.0);
         // Wall panels and floor slabs: concrete over a few storeys has steel in it.
         let rebar = height > 10.0;
         let t_wall = (cs * 0.06).clamp(0.25, 0.45);
@@ -763,13 +1045,25 @@ impl Destruction {
         let ih = to2(impact);
         let speed = vel.length() as f32;
         let dirv = vel.normalize_or_zero().as_vec3();
-        let hole = if hit.is_some() { 4.0 + speed * 0.05 } else { 4.0 + cs * 1.3 + speed * 0.06 };
+        let hole = if hit.is_some() {
+            4.0 + speed * 0.05
+        } else {
+            4.0 + cs * 1.3 + speed * 0.06
+        };
         // What hit it, against what it takes to bring it down. Short of that
         // the building stands, with the part round the impact broken out: more
         // of it the nearer the limit. Only past it does the whole come down.
-        let sev = if energy.is_nan() { 0.0 } else { (energy / resistance(height, vol)) as f32 };
+        let sev = if energy.is_nan() {
+            0.0
+        } else {
+            (energy / resistance(height, vol)) as f32
+        };
         let global = sev >= 1.0;
-        let reach = if global { f32::INFINITY } else { hole * 0.9 * (1.0 + 3.0 * sev) };
+        let reach = if global {
+            f32::INFINITY
+        } else {
+            hole * 0.9 * (1.0 + 3.0 * sev)
+        };
         // A tower goes as one block only when it is brought down as a whole,
         // and later the closer it came to holding (fire and load work on it).
         let big = tall && global;
@@ -777,9 +1071,14 @@ impl Destruction {
         // How far into the building the aircraft's outline is cut through the floors.
         let tunnel = 8.0 + speed * 0.12;
         let nseed = (self.rng.f() * 1000.0) as u32;
-        let h3 =|v: Vec2| (e * v.x as f64 + nn * v.y as f64).as_vec3();
+        let h3 = |v: Vec2| (e * v.x as f64 + nn * v.y as f64).as_vec3();
         let (ax, bx) = (h3(a), h3(b));
-        let rot = DQuat::from_mat3(&glam::DMat3::from_cols(ax.as_dvec3(), u, ax.as_dvec3().cross(u))).normalize();
+        let rot = DQuat::from_mat3(&glam::DMat3::from_cols(
+            ax.as_dvec3(),
+            u,
+            ax.as_dvec3().cross(u),
+        ))
+        .normalize();
 
         // The block above the impact leans towards the hole, on a hinge at the far side.
         let mut dh2 = ih.normalize_or_zero();
@@ -790,7 +1089,11 @@ impl Destruction {
             dh2 = Vec2::X;
         }
         let dh = e * dh2.x as f64 + nn * dh2.y as f64;
-        let far = pg.iter().flat_map(|p| p.ring.iter()).map(|p| -p.dot(dh2)).fold(0.0f32, f32::max);
+        let far = pg
+            .iter()
+            .flat_map(|p| p.ring.iter())
+            .map(|p| -p.dot(dh2))
+            .fold(0.0f32, f32::max);
         let cut_lo = (lh_t * 1.5).min(height * 0.3);
         let cut = hi.clamp(cut_lo, (height - lh_t).max(cut_lo));
         let si = self.structs.len() as u32;
@@ -810,7 +1113,11 @@ impl Destruction {
             drop: 0.0,
             drop_v: 0.0,
             top_lower: cut,
-            delay: if big { self.rng.range(1.4, 2.6) * (1.0 + (3.0 - sev).clamp(0.0, 3.0)) } else { 0.0 },
+            delay: if big {
+                self.rng.range(1.4, 2.6) * (1.0 + (3.0 - sev).clamp(0.0, 3.0))
+            } else {
+                0.0
+            },
             reach,
             // (an aircraft-shaped hole keeps its shape until the floors give)
             hole: if hit.is_some() { 0.0 } else { hole },
@@ -852,7 +1159,12 @@ impl Destruction {
             let z_off = (p.base - base_alt) as f32;
             let nz = (hp / lh_t).round().max(1.0) as usize;
             let lh = hp / nz as f32;
-            let ccw = ring.iter().enumerate().map(|(i, q)| q.perp_dot(ring[(i + 1) % n])).sum::<f32>() > 0.0;
+            let ccw = ring
+                .iter()
+                .enumerate()
+                .map(|(i, q)| q.perp_dot(ring[(i + 1) % n]))
+                .sum::<f32>()
+                > 0.0;
 
             // The outer wall, in panels following the walls as they run (the
             // same way the walls' facade coordinate runs, from the first corner).
@@ -887,7 +1199,18 @@ impl Destruction {
                     continue;
                 }
                 let np = (len / cs).round().max(1.0) as usize;
-                let cuts: Vec<f32> = (0..=np).map(|k| s0 + len * (k as f32 + if k == 0 || k == np { 0.0 } else { self.rng.range(-0.3, 0.3) }) / np as f32).collect();
+                let cuts: Vec<f32> = (0..=np)
+                    .map(|k| {
+                        s0 + len
+                            * (k as f32
+                                + if k == 0 || k == np {
+                                    0.0
+                                } else {
+                                    self.rng.range(-0.3, 0.3)
+                                })
+                            / np as f32
+                    })
+                    .collect();
                 for k in 0..np {
                     let (sa, sb) = (cuts[k], cuts[k + 1]);
                     let (pa, pb) = (at(sa), at(sb));
@@ -901,12 +1224,26 @@ impl Destruction {
                     // Local frame: x = up x out, y = out (thin), z = down.
                     let out3 = h3(out2);
                     let x3 = u.as_vec3().cross(out3);
-                    let xs = if Vec2::new(-out2.y, out2.x).dot(dir) >= 0.0 { 1.0 } else { -1.0 };
-                    let prot = DQuat::from_mat3(&glam::DMat3::from_cols(x3.as_dvec3(), out3.as_dvec3(), -u)).normalize();
+                    let xs = if Vec2::new(-out2.y, out2.x).dot(dir) >= 0.0 {
+                        1.0
+                    } else {
+                        -1.0
+                    };
+                    let prot = DQuat::from_mat3(&glam::DMat3::from_cols(
+                        x3.as_dvec3(),
+                        out3.as_dvec3(),
+                        -u,
+                    ))
+                    .normalize();
                     for kz in 0..nz {
                         let zc = z_off + (kz as f32 + 0.5) * lh;
                         let pos = base + h3(c2).as_dvec3() + u * zc as f64;
-                        let face = [(sa + sb) * 0.5, (base_alt + zc as f64 - p.gref) as f32, xs * p.h.max(1.0), p.style];
+                        let face = [
+                            (sa + sb) * 0.5,
+                            (base_alt + zc as f64 - p.gref) as f32,
+                            xs * p.h.max(1.0),
+                            p.style,
+                        ];
                         // A piece of wall (local x0..x1 across the panel, dz down from its middle, ch high).
                         let cell = |x0: f32, x1: f32, dz: f32, ch: f32| {
                             let dx = (x0 + x1) * 0.5;
@@ -943,8 +1280,18 @@ impl Destruction {
                                     let row: Vec<f32> = (0..nx)
                                         .map(|i| {
                                             let dx = -lc * 0.5 + (i as f32 + 0.5) * cw;
-                                            let (c, t) = h.place(pos + prot * DVec3::new(dx as f64, 0.0, dz as f64), impact, dir64);
-                                            if t.abs() > 10.0 { 1e3 } else { h.sdf(c) + 0.3 * vnoise(c * 0.9, nseed) + self.rng.range(-0.06, 0.06) }
+                                            let (c, t) = h.place(
+                                                pos + prot * DVec3::new(dx as f64, 0.0, dz as f64),
+                                                impact,
+                                                dir64,
+                                            );
+                                            if t.abs() > 10.0 {
+                                                1e3
+                                            } else {
+                                                h.sdf(c)
+                                                    + 0.3 * vnoise(c * 0.9, nseed)
+                                                    + self.rng.range(-0.06, 0.06)
+                                            }
                                         })
                                         .collect();
                                     // Untouched cells in a row go back together as one piece.
@@ -956,7 +1303,12 @@ impl Destruction {
                                             continue;
                                         }
                                         if let Some(i0) = run.take() {
-                                            let mut pc = cell(-lc * 0.5 + i0 as f32 * cw, -lc * 0.5 + i as f32 * cw, dz, ch);
+                                            let mut pc = cell(
+                                                -lc * 0.5 + i0 as f32 * cw,
+                                                -lc * 0.5 + i as f32 * cw,
+                                                dz,
+                                                ch,
+                                            );
                                             pc.fine = true;
                                             pieces.push(pc);
                                         }
@@ -972,16 +1324,24 @@ impl Destruction {
                                             // Round the hole: sooted, the glass out, the
                                             // edge bent in the way the aircraft went.
                                             let c = h.place(pc.pos, impact, dir64).0;
-                                            let k = ((s + 0.6 * vnoise(c * 0.6, nseed + 7)) / 2.0).clamp(0.0, 1.0);
+                                            let k = ((s + 0.6 * vnoise(c * 0.6, nseed + 7)) / 2.0)
+                                                .clamp(0.0, 1.0);
                                             let dark = 0.4 + 0.6 * k * k * (3.0 - 2.0 * k);
                                             pc.col = pc.col.map(|v| v * dark);
-                                            if s < 0.7 + 0.5 * vnoise(c * 1.3, nseed + 3) && ((pc.face[3] as u32 >> 8) & 128) == 0 {
+                                            if s < 0.7 + 0.5 * vnoise(c * 1.3, nseed + 3)
+                                                && ((pc.face[3] as u32 >> 8) & 128) == 0
+                                            {
                                                 pc.face[3] += SMASHED;
                                             }
                                             if s < 0.9 {
                                                 let b = 1.0 - s / 0.9;
-                                                pc.pos += dir64 * (b * self.rng.range(0.1, 0.8)) as f64;
-                                                pc.rot = (DQuat::from_axis_angle(self.rng.dir().as_dvec3(), (b * self.rng.range(0.05, 0.4)) as f64) * pc.rot).normalize();
+                                                pc.pos +=
+                                                    dir64 * (b * self.rng.range(0.1, 0.8)) as f64;
+                                                pc.rot = (DQuat::from_axis_angle(
+                                                    self.rng.dir().as_dvec3(),
+                                                    (b * self.rng.range(0.05, 0.4)) as f64,
+                                                ) * pc.rot)
+                                                    .normalize();
                                             }
                                         }
                                         pieces.push(pc);
@@ -1003,10 +1363,25 @@ impl Destruction {
                 lo = lo.min(q);
                 hi2 = hi2.max(q);
             }
-            let (na, nb) = ((((hi2.x - lo.x) / cs).round().max(1.0)) as usize, (((hi2.y - lo.y) / cs).round().max(1.0)) as usize);
+            let (na, nb) = (
+                (((hi2.x - lo.x) / cs).round().max(1.0)) as usize,
+                (((hi2.y - lo.y) / cs).round().max(1.0)) as usize,
+            );
             let (sa, sb) = ((hi2.x - lo.x) / na as f32, (hi2.y - lo.y) / nb as f32);
             // Uneven cuts, so pieces come in different sizes and the pile is not a lattice.
-            let cuts = |r: &mut Rng, n: usize, s: f32, lo: f32| -> Vec<f32> { (0..=n).map(|i| lo + s * (i as f32 + if i == 0 || i == n { 0.0 } else { r.range(-0.32, 0.32) })).collect() };
+            let cuts = |r: &mut Rng, n: usize, s: f32, lo: f32| -> Vec<f32> {
+                (0..=n)
+                    .map(|i| {
+                        lo + s
+                            * (i as f32
+                                + if i == 0 || i == n {
+                                    0.0
+                                } else {
+                                    r.range(-0.32, 0.32)
+                                })
+                    })
+                    .collect()
+            };
             let ea = cuts(&mut self.rng, na, sa, lo.x);
             let eb = cuts(&mut self.rng, nb, sb, lo.y);
             let margin = t_wall + 0.1;
@@ -1022,13 +1397,22 @@ impl Destruction {
                     for _ in 0..6 {
                         let mut bad = false;
                         for (sx, sy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-                            let (cx, cy) = (if sx == 1 { x1 } else { x0 }, if sy == 1 { y1 } else { y0 });
+                            let (cx, cy) =
+                                (if sx == 1 { x1 } else { x0 }, if sy == 1 { y1 } else { y0 });
                             let c = a * cx + b * cy;
                             let away = (c - mid).normalize_or_zero() * margin;
                             if !inside(ring, c + away) {
                                 bad = true;
-                                if sx == 1 { x1 -= 0.16 * w0 } else { x0 += 0.16 * w0 }
-                                if sy == 1 { y1 -= 0.16 * h0 } else { y0 += 0.16 * h0 }
+                                if sx == 1 {
+                                    x1 -= 0.16 * w0
+                                } else {
+                                    x0 += 0.16 * w0
+                                }
+                                if sy == 1 {
+                                    y1 -= 0.16 * h0
+                                } else {
+                                    y0 += 0.16 * h0
+                                }
                             }
                         }
                         if !bad {
@@ -1047,7 +1431,12 @@ impl Destruction {
                     let p2 = a * q.x + b * q.y;
                     // At the edge: which way is out.
                     let mut o2 = Vec2::ZERO;
-                    for d in [a * (w0 + sa) * 0.5, -a * (w0 + sa) * 0.5, b * (h0 + sb) * 0.5, -b * (h0 + sb) * 0.5] {
+                    for d in [
+                        a * (w0 + sa) * 0.5,
+                        -a * (w0 + sa) * 0.5,
+                        b * (h0 + sb) * 0.5,
+                        -b * (h0 + sb) * 0.5,
+                    ] {
                         if !inside(ring, p2 + d) {
                             o2 += d.normalize();
                         }
@@ -1057,7 +1446,11 @@ impl Destruction {
                     for kz in 1..=nz {
                         let roof = kz == nz;
                         // The roof a little under the top of the walls (the parapet).
-                        let ztop = if roof { hp - (0.6f32).min(lh * 0.3) } else { kz as f32 * lh };
+                        let ztop = if roof {
+                            hp - (0.6f32).min(lh * 0.3)
+                        } else {
+                            kz as f32 * lh
+                        };
                         let zc = z_off + ztop - t_slab * 0.5;
                         let col = if roof {
                             let k = self.rng.range(0.97, 1.03);
@@ -1090,21 +1483,45 @@ impl Destruction {
         // Floors on the aircraft's way in: how close they come to its outline.
         let through = |pc: &Piece| -> f32 {
             let Some(h) = hit else { return 1e3 };
-            [(0.0, 0.0), (0.7, 0.7), (-0.7, 0.7), (0.7, -0.7), (-0.7, -0.7)]
-                .iter()
-                .map(|&(sx, sz)| {
-                    let q = pc.pos + pc.rot * DVec3::new((pc.half.x * sx) as f64, 0.0, (pc.half.z * sz) as f64);
-                    let (c, t) = h.place(q, impact, dir64);
-                    if t > -2.0 && t < tunnel + 4.0 { h.sdf(c) } else { 1e3 }
-                })
-                .fold(1e3, f32::min)
+            [
+                (0.0, 0.0),
+                (0.7, 0.7),
+                (-0.7, 0.7),
+                (0.7, -0.7),
+                (-0.7, -0.7),
+            ]
+            .iter()
+            .map(|&(sx, sz)| {
+                let q = pc.pos
+                    + pc.rot * DVec3::new((pc.half.x * sx) as f64, 0.0, (pc.half.z * sz) as f64);
+                let (c, t) = h.place(q, impact, dir64);
+                if t > -2.0 && t < tunnel + 4.0 {
+                    h.sdf(c)
+                } else {
+                    1e3
+                }
+            })
+            .fold(1e3, f32::min)
         };
         // In the zone of the 3D tiles the building's own mesh goes onto its
         // pieces: each piece of wall or roof moved onto the mesh it carries,
         // and coloured like it.
         let skin = photo.map(|src| {
-            let refs: Vec<PieceRef> = pieces.iter().map(|p| PieceRef { pos: p.pos, rot: p.rot, half: p.half, outer: p.outer }).collect();
-            let a = crate::skin::assign(src, &refs, hit.map(|_| (impact, 11.0)), (cs * 0.25).clamp(0.8, 2.5));
+            let refs: Vec<PieceRef> = pieces
+                .iter()
+                .map(|p| PieceRef {
+                    pos: p.pos,
+                    rot: p.rot,
+                    half: p.half,
+                    outer: p.outer,
+                })
+                .collect();
+            let a = crate::skin::assign(
+                src,
+                &refs,
+                hit.map(|_| (impact, 11.0)),
+                (cs * 0.25).clamp(0.8, 2.5),
+            );
             for (i, pc) in pieces.iter_mut().enumerate() {
                 if !pc.outer {
                     continue;
@@ -1116,7 +1533,12 @@ impl Destruction {
                 pc.col0 = c;
                 pc.col = [c[0] * k[0], c[1] * k[1], c[2] * k[2]];
             }
-            log::info!("3D tiles: {} triangles on {} of {} pieces", a.n_tris(), a.area.iter().filter(|&&w| w > 0.0).count(), refs.len());
+            log::info!(
+                "3D tiles: {} triangles on {} of {} pieces",
+                a.n_tris(),
+                a.area.iter().filter(|&&w| w > 0.0).count(),
+                refs.len()
+            );
             (Group::new(src), a)
         });
         let frames: Vec<(DVec3, DQuat)> = pieces.iter().map(|p| (p.pos, p.rot)).collect();
@@ -1133,7 +1555,11 @@ impl Destruction {
             let d = (pc.pos - impact).length() as f32;
             let facade = pc.mat > 1.5;
             let near_t = if facade { 1e3 } else { through(&pc) };
-            let out = if hit.is_some() { pc.cut || near_t < 0.6 } else { d < hole };
+            let out = if hit.is_some() {
+                pc.cut || near_t < 0.6
+            } else {
+                d < hole
+            };
             if let (Some(h), true) = (hit, pc.cut) {
                 t_in += h.place(pc.pos, impact, dir64).1;
                 n_in += 1;
@@ -1155,13 +1581,38 @@ impl Destruction {
                     }
                     n_bits += 1;
                     let r = &mut self.rng;
-                    let s = if pc.fine { pc.half.x.max(pc.half.z) * r.range(0.5, 0.9) } else { cs * 0.5 * r.range(0.2, 0.5) };
+                    let s = if pc.fine {
+                        pc.half.x.max(pc.half.z) * r.range(0.5, 0.9)
+                    } else {
+                        cs * 0.5 * r.range(0.2, 0.5)
+                    };
                     let flat = r.f() < 0.6;
-                    let h = if flat { Vec3::new(s, s * r.range(0.15, 0.35), s * r.range(0.6, 1.0)) } else { Vec3::splat(s * 0.6) };
-                    let v = dirv * speed * r.range(0.12, 0.45) * (0.4 + near) + (pc.pos - impact).normalize_or_zero().as_vec3() * r.range(5.0, 18.0) * (0.3 + near) + r.dir() * 3.0 + u.as_vec3() * r.range(0.0, 4.0);
+                    let h = if flat {
+                        Vec3::new(s, s * r.range(0.15, 0.35), s * r.range(0.6, 1.0))
+                    } else {
+                        Vec3::splat(s * 0.6)
+                    };
+                    let v = dirv * speed * r.range(0.12, 0.45) * (0.4 + near)
+                        + (pc.pos - impact).normalize_or_zero().as_vec3()
+                            * r.range(5.0, 18.0)
+                            * (0.3 + near)
+                        + r.dir() * 3.0
+                        + u.as_vec3() * r.range(0.0, 4.0);
                     let tone = r.range(0.85, 1.1);
-                    let mesh = if flat { M_SLAB + (r.f() * N_SLAB as f32) as u32 % N_SLAB } else { M_ROCK + (r.f() * 3.0) as u32 % 3 };
-                    let mut c = Chunk::loose(pc.pos + (r.dir() * pc.half * 0.5).as_dvec3(), h, DQuat::from_axis_angle(r.dir().as_dvec3(), r.range(0.0, 6.0) as f64) * rot, v.as_dvec3(), (r.dir() * r.range(1.0, 7.0)).as_dvec3(), [0.33 * tone, 0.32 * tone, 0.3 * tone], mesh);
+                    let mesh = if flat {
+                        M_SLAB + (r.f() * N_SLAB as f32) as u32 % N_SLAB
+                    } else {
+                        M_ROCK + (r.f() * 3.0) as u32 % 3
+                    };
+                    let mut c = Chunk::loose(
+                        pc.pos + (r.dir() * pc.half * 0.5).as_dvec3(),
+                        h,
+                        DQuat::from_axis_angle(r.dir().as_dvec3(), r.range(0.0, 6.0) as f64) * rot,
+                        v.as_dvec3(),
+                        (r.dir() * r.range(1.0, 7.0)).as_dvec3(),
+                        [0.33 * tone, 0.32 * tone, 0.3 * tone],
+                        mesh,
+                    );
                     c.dimp = d;
                     self.chunks.push(c);
                 }
@@ -1185,7 +1636,11 @@ impl Destruction {
                 col: pc.col,
                 mesh: M_CUBE,
                 mat: pc.mat,
-                hold: if big { 0.0 } else { 0.08 + d / 24.0 + self.rng.range(0.0, 0.35) },
+                hold: if big {
+                    0.0
+                } else {
+                    0.08 + d / 24.0 + self.rng.range(0.0, 0.35)
+                },
                 state: 0,
                 bounces: 0,
                 group: si,
@@ -1218,27 +1673,53 @@ impl Destruction {
         if let (Some(h), true) = (hit, n_in > 0) {
             let depth = t_in / n_in as f32 + 4.0;
             let fwd = h.up.cross(h.right).normalize();
-            let at_c = |x: f32, y: f32| impact + dir64 * depth as f64 + h.right * x as f64 + h.up * y as f64;
+            let at_c = |x: f32, y: f32| {
+                impact + dir64 * depth as f64 + h.right * x as f64 + h.up * y as f64
+            };
             let (y0, y1) = (-1.5f32, 2.5f32);
             let inb1 = |q: DVec3| {
                 let q2 = to2(q);
-                pg.iter().any(|p| inside(&p.ring, q2) && (q - base).dot(u) >= p.base - base_alt && (q - base).dot(u) <= p.top - base_alt)
+                pg.iter().any(|p| {
+                    inside(&p.ring, q2)
+                        && (q - base).dot(u) >= p.base - base_alt
+                        && (q - base).dot(u) <= p.top - base_alt
+                })
             };
             // (with room to spare: its corners well inside the walls)
-            let inb = |x: f32| [y0, y1].iter().all(|&y| [-0.8, 0.8].iter().all(|&dd| inb1(at_c(x, y) + dir64 * dd)));
+            let inb = |x: f32| {
+                [y0, y1]
+                    .iter()
+                    .all(|&y| [-0.8, 0.8].iter().all(|&dd| inb1(at_c(x, y) + dir64 * dd)))
+            };
             // How far it reaches each way, staying inside.
-            let reach = |sgn: f32| (1..=20).map(|k| k as f32 * 0.5 * sgn).take_while(|&x| inb(x)).last().unwrap_or(0.0);
+            let reach = |sgn: f32| {
+                (1..=20)
+                    .map(|k| k as f32 * 0.5 * sgn)
+                    .take_while(|&x| inb(x))
+                    .last()
+                    .unwrap_or(0.0)
+            };
             let (xl, xr) = (reach(-1.0), reach(1.0));
             if xr - xl > 1.0 && inb(0.0) {
                 let c = at_c((xl + xr) * 0.5, (y0 + y1) * 0.5);
-                let prot = DQuat::from_mat3(&glam::DMat3::from_cols(h.right, fwd, h.right.cross(fwd))).normalize();
+                let prot =
+                    DQuat::from_mat3(&glam::DMat3::from_cols(h.right, fwd, h.right.cross(fwd)))
+                        .normalize();
                 let zc = (c - base).dot(u) as f32;
                 let half = Vec3::new((xr - xl) * 0.5, 0.15, (y1 - y0) * 0.5);
                 // (it stays, the dark inside of the hole, while the building does)
                 if global {
                     st.left += 1;
                 }
-                let mut ch = Chunk::loose(c, half, prot, DVec3::ZERO, DVec3::ZERO, [0.012, 0.011, 0.01], M_CUBE);
+                let mut ch = Chunk::loose(
+                    c,
+                    half,
+                    prot,
+                    DVec3::ZERO,
+                    DVec3::ZERO,
+                    [0.012, 0.011, 0.01],
+                    M_CUBE,
+                );
                 ch.state = 0;
                 ch.bit = false;
                 ch.group = si;
@@ -1257,12 +1738,25 @@ impl Destruction {
             if facade && n_glass < 900 {
                 let o = if out == Vec3::ZERO { dirv } else { out };
                 let n = if fine { 3 } else { 14 };
-                self.glass(pos, half.max_element(), o, dirv * speed * 0.15 * near, n, emit);
+                self.glass(
+                    pos,
+                    half.max_element(),
+                    o,
+                    dirv * speed * 0.15 * near,
+                    n,
+                    emit,
+                );
                 n_glass += n;
             }
             if self.rng.f() < if fine { 0.06 } else { 0.6 } {
                 let o = (pos - impact).normalize_or_zero().as_vec3();
-                self.jet(pos, o, dirv * speed * 0.4, half.max_element().clamp(1.5, 4.0), emit);
+                self.jet(
+                    pos,
+                    o,
+                    dirv * speed * 0.4,
+                    half.max_element().clamp(1.5, 4.0),
+                    emit,
+                );
             }
         }
         if tall {
@@ -1271,7 +1765,22 @@ impl Destruction {
             for _ in 0..40 {
                 let r = &mut self.rng;
                 let d = (r.dir() + dh.as_vec3() * 0.8).normalize();
-                emit.push((impact + (r.dir() * hole * 0.5).as_dvec3(), Particle { vel: (d * r.range(4.0, 16.0) + up * r.range(0.0, 3.0)).into(), life: r.range(8.0, 16.0), size0: r.range(3.0, 6.0), size1: r.range(14.0, 26.0), temp: 0.1, kind: GRIT, drag: 0.9, buoy: 0.25, seed: r.f(), alpha: r.range(0.3, 0.5), ..Default::default() }));
+                emit.push((
+                    impact + (r.dir() * hole * 0.5).as_dvec3(),
+                    Particle {
+                        vel: (d * r.range(4.0, 16.0) + up * r.range(0.0, 3.0)).into(),
+                        life: r.range(8.0, 16.0),
+                        size0: r.range(3.0, 6.0),
+                        size1: r.range(14.0, 26.0),
+                        temp: 0.1,
+                        kind: GRIT,
+                        drag: 0.9,
+                        buoy: 0.25,
+                        seed: r.f(),
+                        alpha: r.range(0.3, 0.5),
+                        ..Default::default()
+                    },
+                ));
             }
         } else {
             self.rumble += 0.3;
@@ -1284,21 +1793,50 @@ impl Destruction {
     }
 
     /// Rock and earth thrown out of a fresh crater.
-    pub fn eject(&mut self, site: DVec3, radius: f32, vel: DVec3, emit: &mut Vec<(DVec3, Particle)>) {
+    pub fn eject(
+        &mut self,
+        site: DVec3,
+        radius: f32,
+        vel: DVec3,
+        emit: &mut Vec<(DVec3, Particle)>,
+    ) {
         let up = site.normalize();
         let along = (vel - up * vel.dot(up)) * 0.12;
         for k in 0..(10.0 + radius * 2.2) as u32 {
             let d = (self.rng.dir() + up.as_vec3() * 1.3).normalize();
             let r = self.rng.range(0.25, 0.5 + radius * 0.09);
             let tone = self.rng.range(0.6, 1.2);
-            let mut c = Chunk::loose(site + up * 0.5 + (self.rng.dir() * radius * 0.5).as_dvec3(), Vec3::splat(r), DQuat::from_axis_angle(self.rng.dir().as_dvec3(), self.rng.range(0.0, 6.0) as f64), (d * self.rng.range(7.0, 26.0)).as_dvec3() + along, self.rng.dir().as_dvec3() * self.rng.range(2.0, 9.0) as f64, [0.17 * tone, 0.14 * tone, 0.11 * tone], M_ROCK + k % 3);
+            let mut c = Chunk::loose(
+                site + up * 0.5 + (self.rng.dir() * radius * 0.5).as_dvec3(),
+                Vec3::splat(r),
+                DQuat::from_axis_angle(self.rng.dir().as_dvec3(), self.rng.range(0.0, 6.0) as f64),
+                (d * self.rng.range(7.0, 26.0)).as_dvec3() + along,
+                self.rng.dir().as_dvec3() * self.rng.range(2.0, 9.0) as f64,
+                [0.17 * tone, 0.14 * tone, 0.11 * tone],
+                M_ROCK + k % 3,
+            );
             c.home = site;
             self.chunks.push(c);
         }
         // A fountain of dirt.
         for _ in 0..(26.0 + radius * 3.0) as usize {
             let d = (self.rng.dir() + up.as_vec3() * 1.6).normalize();
-            emit.push((site + up, Particle { vel: (d * self.rng.range(6.0, 30.0)).into(), life: self.rng.range(3.0, 7.0), size0: self.rng.range(1.0, 2.0), size1: self.rng.range(5.0, 10.0), temp: 0.2, kind: DUST, drag: 1.5, buoy: 0.3, seed: self.rng.f(), alpha: self.rng.range(0.35, 0.6), ..Default::default() }));
+            emit.push((
+                site + up,
+                Particle {
+                    vel: (d * self.rng.range(6.0, 30.0)).into(),
+                    life: self.rng.range(3.0, 7.0),
+                    size0: self.rng.range(1.0, 2.0),
+                    size1: self.rng.range(5.0, 10.0),
+                    temp: 0.2,
+                    kind: DUST,
+                    drag: 1.5,
+                    buoy: 0.3,
+                    seed: self.rng.f(),
+                    alpha: self.rng.range(0.35, 0.6),
+                    ..Default::default()
+                },
+            ));
         }
         self.trim();
     }
@@ -1381,12 +1919,29 @@ impl Destruction {
         let mut rests: Vec<(DVec3, f32, f64)> = Vec::new();
         let mut left_dec: Vec<(u32, usize)> = Vec::new();
         let n_chunks = self.chunks.len();
-        let Self { chunks, structs, rng, field, f_org, f_e, f_n, crush, crush_cool, rumble, .. } = self;
+        let Self {
+            chunks,
+            structs,
+            rng,
+            field,
+            f_org,
+            f_e,
+            f_n,
+            crush,
+            crush_cool,
+            rumble,
+            ..
+        } = self;
         let fkey = |p: DVec3| {
             let d = p - *f_org;
-            ((d.dot(*f_e) / CELL).floor() as i32, (d.dot(*f_n) / CELL).floor() as i32)
+            (
+                (d.dot(*f_e) / CELL).floor() as i32,
+                (d.dot(*f_n) / CELL).floor() as i32,
+            )
         };
-        let fat = |field: &HashMap<(i32, i32), f32>, p: DVec3| field.get(&fkey(p)).map(|h| *h as f64).unwrap_or(-1e9);
+        let fat = |field: &HashMap<(i32, i32), f32>, p: DVec3| {
+            field.get(&fkey(p)).map(|h| *h as f64).unwrap_or(-1e9)
+        };
         let mut bits: Vec<Chunk> = Vec::new();
         let mut shatter: Vec<(DVec3, Vec3, Vec3, Vec3)> = Vec::new();
         let mut mounds: Vec<(DVec3, DVec3, f32, [f32; 3])> = Vec::new();
@@ -1409,21 +1964,31 @@ impl Destruction {
                         let prev = c.pos;
                         c.pos = s.pivot - s.u * s.drop as f64 + s.q * (c.home - s.pivot);
                         c.rot = (s.q * c.home_rot).normalize();
-                        let v = if dt > 0.0 { (c.pos - prev) / dt as f64 } else { DVec3::ZERO };
+                        let v = if dt > 0.0 {
+                            (c.pos - prev) / dt as f64
+                        } else {
+                            DVec3::ZERO
+                        };
                         let hb = (c.pos - s.base).dot(s.u) as f32 - c.vh;
                         if !(s.gave && hb < s.top_lower + 0.3) && !dribble {
                             continue;
                         }
                         let sp = v.length() as f32;
                         // Crushed out sideways: the faster it comes down, the harder.
-                        c.vel = v + (c.out * (2.5 + 0.32 * sp) * rng.range(0.4, 1.3) + rng.dir() * (1.0 + sp * 0.08)).as_dvec3();
+                        c.vel = v
+                            + (c.out * (2.5 + 0.32 * sp) * rng.range(0.4, 1.3)
+                                + rng.dir() * (1.0 + sp * 0.08))
+                                .as_dvec3();
                         c.omega = (rng.dir() * rng.range(0.4, 2.5)).as_dvec3();
                     } else {
                         if !(s.gave && c.z1 > s.top_lower) && !dribble {
                             continue;
                         }
                         let dv = s.drop_v;
-                        c.vel = (c.out * (2.0 + 0.3 * dv) * rng.range(0.4, 1.2) - s.u.as_vec3() * (dv * 0.3) + rng.dir() * (1.2 + dv * 0.05)).as_dvec3();
+                        c.vel = (c.out * (2.0 + 0.3 * dv) * rng.range(0.4, 1.2)
+                            - s.u.as_vec3() * (dv * 0.3)
+                            + rng.dir() * (1.2 + dv * 0.05))
+                            .as_dvec3();
                         c.omega = (rng.dir() * rng.range(0.3, 2.0)).as_dvec3();
                     }
                 } else {
@@ -1441,7 +2006,13 @@ impl Destruction {
                     continue;
                 }
                 // (the dust a floor throws out scales with how wide the building is)
-                released.push((c.pos, c.out, c.half.max_element().max(s.ext * 0.12), c.vel.as_vec3(), c.mat > 1.5));
+                released.push((
+                    c.pos,
+                    c.out,
+                    c.half.max_element().max(s.ext * 0.12),
+                    c.vel.as_vec3(),
+                    c.mat > 1.5,
+                ));
                 *rumble += 0.012 * c.half.max_element().min(5.0);
                 // Broken now: no longer a clean box but a ragged slab or panel,
                 // and the glass of a piece of facade is out.
@@ -1463,7 +2034,18 @@ impl Destruction {
                 if n_chunks + bits.len() < MAX_CHUNKS - 400 && rng.f() < 0.55 {
                     for k in 0..1 + (rng.f() * 2.0) as u32 {
                         let tone = rng.range(0.7, 1.1);
-                        let mut lump = Chunk::loose(c.pos + (rng.dir() * c.half).as_dvec3(), Vec3::splat(rng.range(0.25, 0.4 + c.half.x.min(c.half.z) * 0.12)), DQuat::from_axis_angle(rng.dir().as_dvec3(), rng.range(0.0, 6.0) as f64), c.vel + (rng.dir() * 3.0).as_dvec3(), (rng.dir() * rng.range(2.0, 8.0)).as_dvec3(), [0.27 * tone, 0.26 * tone, 0.245 * tone], M_ROCK + k % 3);
+                        let mut lump = Chunk::loose(
+                            c.pos + (rng.dir() * c.half).as_dvec3(),
+                            Vec3::splat(rng.range(0.25, 0.4 + c.half.x.min(c.half.z) * 0.12)),
+                            DQuat::from_axis_angle(
+                                rng.dir().as_dvec3(),
+                                rng.range(0.0, 6.0) as f64,
+                            ),
+                            c.vel + (rng.dir() * 3.0).as_dvec3(),
+                            (rng.dir() * rng.range(2.0, 8.0)).as_dvec3(),
+                            [0.27 * tone, 0.26 * tone, 0.245 * tone],
+                            M_ROCK + k % 3,
+                        );
                         lump.home = c.pos;
                         bits.push(lump);
                     }
@@ -1481,8 +2063,16 @@ impl Destruction {
             }
             let (lat, lon, h) = geo::pos_to_lla(c.pos);
             if (c.pos - c.under.at).length_squared() > 9.0 {
-                let Some(g) = world.ground(lat, lon) else { continue };
-                let mut un = Under { at: c.pos, ground: g.h, water: g.water, roof: -1e9, hit: None };
+                let Some(g) = world.ground(lat, lon) else {
+                    continue;
+                };
+                let mut un = Under {
+                    at: c.pos,
+                    ground: g.h,
+                    water: g.water,
+                    roof: -1e9,
+                    hit: None,
+                };
                 if let Some(b) = world.building(lat, lon) {
                     if !b.bridge || h > b.base {
                         un.roof = b.top;
@@ -1495,7 +2085,11 @@ impl Destruction {
             }
             let un = c.under;
             let slab = !c.bit && (c.mesh == M_CUBE || is_slab(c.mesh));
-            let r = if is_rock(c.mesh) { c.half.x * 0.7 } else { c.half.min_element() } as f64;
+            let r = if is_rock(c.mesh) {
+                c.half.x * 0.7
+            } else {
+                c.half.min_element()
+            } as f64;
             let fh = fat(field, c.pos);
             let mut floor = un.ground.max(fh);
             if un.roof > floor && h > un.roof - 4.0 {
@@ -1504,8 +2098,21 @@ impl Destruction {
                 if let Some((t, i, bh)) = un.hit {
                     let vol = c.mass;
                     let sp2 = c.vel.length_squared() as f32;
-                    if !c.bit && vn > 6.0 && h < un.roof + r + 1.0 && vol * sp2 > 3000.0 * bh * (bh / 10.0).max(1.0) && *crush_cool <= 0.0 && crush.len() < 4 && !crush.iter().any(|x| x.0 == t && x.1 == i) {
-                        crush.push((t, i, c.pos, c.vel, 0.5 * c.mass as f64 * 200.0 * c.vel.length_squared()));
+                    if !c.bit
+                        && vn > 6.0
+                        && h < un.roof + r + 1.0
+                        && vol * sp2 > 3000.0 * bh * (bh / 10.0).max(1.0)
+                        && *crush_cool <= 0.0
+                        && crush.len() < 4
+                        && !crush.iter().any(|x| x.0 == t && x.1 == i)
+                    {
+                        crush.push((
+                            t,
+                            i,
+                            c.pos,
+                            c.vel,
+                            0.5 * c.mass as f64 * 200.0 * c.vel.length_squared(),
+                        ));
                         *crush_cool = 0.2;
                         c.under = Under::NONE;
                         continue;
@@ -1528,11 +2135,16 @@ impl Destruction {
                     // Coulomb friction: a sliding contact loses at most mu times the
                     // normal impulse, so a hard hit stops its slide and a graze keeps it.
                     let tl = tang.length();
-                    let keep = if tl > 1e-6 { (1.0 - 0.6 * (1.0 + rest) * -vn / tl).clamp(0.15, 0.95) } else { 0.0 };
+                    let keep = if tl > 1e-6 {
+                        (1.0 - 0.6 * (1.0 + rest) * -vn / tl).clamp(0.15, 0.95)
+                    } else {
+                        0.0
+                    };
                     c.vel = tang * keep - up * vn * rest;
                     // The contact spins the piece: round lumps pick up a roll, blocks a little.
                     let roll = if is_rock(c.mesh) { 0.6 } else { 0.25 };
-                    c.omega = c.omega * 0.5 + up.cross(c.vel - up * c.vel.dot(up)) * (roll / r.max(0.2));
+                    c.omega =
+                        c.omega * 0.5 + up.cross(c.vel - up * c.vel.dot(up)) * (roll / r.max(0.2));
                     let spin = c.omega.length();
                     if spin > 20.0 {
                         c.omega *= 20.0 / spin;
@@ -1542,8 +2154,19 @@ impl Destruction {
                     }
                     *rumble += 0.03;
                     // A big piece hitting hard breaks in two, unevenly, along its longest side.
-                    if slab && c.bounces == 1 && -vn > 6.0 && n_chunks + bits.len() < MAX_CHUNKS - 600 && rng.f() < 0.8 {
-                        let i = if c.half.x >= c.half.y.max(c.half.z) { 0 } else if c.half.y >= c.half.z { 1 } else { 2 };
+                    if slab
+                        && c.bounces == 1
+                        && -vn > 6.0
+                        && n_chunks + bits.len() < MAX_CHUNKS - 600
+                        && rng.f() < 0.8
+                    {
+                        let i = if c.half.x >= c.half.y.max(c.half.z) {
+                            0
+                        } else if c.half.y >= c.half.z {
+                            1
+                        } else {
+                            2
+                        };
                         let hl = c.half[i];
                         if hl > 1.2 {
                             let f = rng.range(0.3, 0.7);
@@ -1562,7 +2185,15 @@ impl Destruction {
                             o.var = (rng.f() * N_SLAB as f32) as u32 % N_SLAB;
                             o.mesh = M_SLAB + o.var;
                             if c.skin != NO_SKIN {
-                                splits.push((bits.len(), c.group, c.skin, i, -hl + 2.0 * h1, hl - h1, hl - h2));
+                                splits.push((
+                                    bits.len(),
+                                    c.group,
+                                    c.skin,
+                                    i,
+                                    -hl + 2.0 * h1,
+                                    hl - h1,
+                                    hl - h2,
+                                ));
                             }
                             let k = h2 / hl;
                             o.mass = c.mass * k;
@@ -1591,7 +2222,16 @@ impl Destruction {
                         let reach = (c.half.x.max(c.half.z) as f64 * 1.6).max(2.0);
                         let (e, n, _) = geo::enu(c.pos);
                         let mut low = (floor, DVec3::ZERO);
-                        for d in [e, -e, n, -n, (e + n) * 0.7071, (e - n) * 0.7071, (-e + n) * 0.7071, (-e - n) * 0.7071] {
+                        for d in [
+                            e,
+                            -e,
+                            n,
+                            -n,
+                            (e + n) * 0.7071,
+                            (e - n) * 0.7071,
+                            (-e + n) * 0.7071,
+                            (-e - n) * 0.7071,
+                        ] {
                             let hn = fat(field, c.pos + d * reach).max(un.ground);
                             if hn < low.0 {
                                 low = (hn, d);
@@ -1614,12 +2254,29 @@ impl Destruction {
                     if slab {
                         // Slabs end up lying roughly flat, at odd angles.
                         let yaw = DQuat::from_axis_angle(up, rng.range(0.0, 6.28) as f64);
-                        let tilt = DQuat::from_axis_angle(rng.dir().as_dvec3(), rng.range(-0.45, 0.45) as f64);
+                        let tilt = DQuat::from_axis_angle(
+                            rng.dir().as_dvec3(),
+                            rng.range(-0.45, 0.45) as f64,
+                        );
                         let (e, n, _) = geo::enu(c.pos);
                         // Shortest side up.
-                        let flat = if c.half.y <= c.half.x.min(c.half.z) { DQuat::from_mat3(&glam::DMat3::from_cols(e, up, e.cross(up))) } else if c.half.x <= c.half.z { DQuat::from_mat3(&glam::DMat3::from_cols(up, n, up.cross(n))) } else { DQuat::from_mat3(&glam::DMat3::from_cols(e, e.cross(up).cross(e).normalize(), up)) };
+                        let flat = if c.half.y <= c.half.x.min(c.half.z) {
+                            DQuat::from_mat3(&glam::DMat3::from_cols(e, up, e.cross(up)))
+                        } else if c.half.x <= c.half.z {
+                            DQuat::from_mat3(&glam::DMat3::from_cols(up, n, up.cross(n)))
+                        } else {
+                            DQuat::from_mat3(&glam::DMat3::from_cols(
+                                e,
+                                e.cross(up).cross(e).normalize(),
+                                up,
+                            ))
+                        };
                         // Either face up (a piece of facade shows its windows or its inside).
-                        let flip = if rng.f() < 0.5 { DQuat::from_axis_angle(DVec3::X, std::f64::consts::PI) } else { DQuat::IDENTITY };
+                        let flip = if rng.f() < 0.5 {
+                            DQuat::from_axis_angle(DVec3::X, std::f64::consts::PI)
+                        } else {
+                            DQuat::IDENTITY
+                        };
                         c.rot = (tilt * yaw * flat * flip).normalize();
                     }
                     // Covered in the dust it fell through.
@@ -1630,10 +2287,24 @@ impl Destruction {
                     // The heap grows by a fraction of each piece and no higher than
                     // a few storeys: past that, pieces sink into it.
                     // (a thin slab stands for the storey of building around it)
-                    let rb = if slab { (0.5 * c.mass.cbrt()).max(r as f32) as f64 } else { r };
-                    let grow = if slab { 2.0 * rb * if on_heap { 0.12 } else { 0.5 } } else { r * 0.5 };
-                    let top = (floor + grow).min(un.ground + 28.0).max(floor.min(un.ground + 28.0));
-                    rests.push((c.pos, c.half.max_element() * if slab { 0.85 } else { 0.6 }, top));
+                    let rb = if slab {
+                        (0.5 * c.mass.cbrt()).max(r as f32) as f64
+                    } else {
+                        r
+                    };
+                    let grow = if slab {
+                        2.0 * rb * if on_heap { 0.12 } else { 0.5 }
+                    } else {
+                        r * 0.5
+                    };
+                    let top = (floor + grow)
+                        .min(un.ground + 28.0)
+                        .max(floor.min(un.ground + 28.0));
+                    rests.push((
+                        c.pos,
+                        c.half.max_element() * if slab { 0.85 } else { 0.6 },
+                        top,
+                    ));
                     if slab && rng.f() < 0.8 {
                         mounds.push((c.pos - up * r, up, c.half.max_element(), c.col));
                     }
@@ -1646,7 +2317,15 @@ impl Destruction {
         for &(p, half, out, v) in &shatter {
             if rng.f() < 0.6 && chunks.len() + bits.len() < MAX_CHUNKS - 300 {
                 let len = (half.x.max(half.z) * rng.range(0.3, 0.6)).min(1.8);
-                let mut m = Chunk::loose(p + (rng.dir() * half).as_dvec3(), Vec3::new(len, 0.035, 0.07), DQuat::from_axis_angle(rng.dir().as_dvec3(), rng.range(0.0, 6.0) as f64), (v + out * rng.range(1.0, 4.0) + rng.dir() * 2.0).as_dvec3(), (rng.dir() * rng.range(1.0, 5.0)).as_dvec3(), [0.2, 0.21, 0.22], M_CUBE);
+                let mut m = Chunk::loose(
+                    p + (rng.dir() * half).as_dvec3(),
+                    Vec3::new(len, 0.035, 0.07),
+                    DQuat::from_axis_angle(rng.dir().as_dvec3(), rng.range(0.0, 6.0) as f64),
+                    (v + out * rng.range(1.0, 4.0) + rng.dir() * 2.0).as_dvec3(),
+                    (rng.dir() * rng.range(1.0, 5.0)).as_dvec3(),
+                    [0.2, 0.21, 0.22],
+                    M_CUBE,
+                );
                 m.bit = true;
                 bits.push(m);
             }
@@ -1665,10 +2344,27 @@ impl Destruction {
                 break;
             }
             let w = s * rng.range(0.8, 1.25);
-            let half = Vec3::new(w * rng.range(0.9, 1.3), w * rng.range(0.12, 0.25), w * rng.range(0.9, 1.3));
-            let rot = DQuat::from_rotation_arc(DVec3::Y, up) * DQuat::from_axis_angle(DVec3::Y, rng.range(0.0, 6.28) as f64);
+            let half = Vec3::new(
+                w * rng.range(0.9, 1.3),
+                w * rng.range(0.12, 0.25),
+                w * rng.range(0.9, 1.3),
+            );
+            let rot = DQuat::from_rotation_arc(DVec3::Y, up)
+                * DQuat::from_axis_angle(DVec3::Y, rng.range(0.0, 6.28) as f64);
             let tone = rng.range(0.8, 1.05);
-            let mut m = Chunk::loose(p + up * (half.y * 0.25) as f64, half, rot, DVec3::ZERO, DVec3::ZERO, [(col[0] * 0.4 + 0.12) * tone, (col[1] * 0.4 + 0.115) * tone, (col[2] * 0.4 + 0.11) * tone], M_ROCK + (rng.f() * 3.0) as u32 % 3);
+            let mut m = Chunk::loose(
+                p + up * (half.y * 0.25) as f64,
+                half,
+                rot,
+                DVec3::ZERO,
+                DVec3::ZERO,
+                [
+                    (col[0] * 0.4 + 0.12) * tone,
+                    (col[1] * 0.4 + 0.115) * tone,
+                    (col[2] * 0.4 + 0.11) * tone,
+                ],
+                M_ROCK + (rng.f() * 3.0) as u32 % 3,
+            );
             m.state = 2;
             m.bit = false;
             chunks.push(m);
@@ -1684,7 +2380,10 @@ impl Destruction {
         for (p, rad, top) in rests {
             self.raise(p, rad, top);
         }
-        if !self.structs.is_empty() && self.structs.iter().all(|s| s.done_t > 15.0) && !self.chunks.iter().any(|c| c.state == 0) {
+        if !self.structs.is_empty()
+            && self.structs.iter().all(|s| s.done_t > 15.0)
+            && !self.chunks.iter().any(|c| c.state == 0)
+        {
             self.structs.clear();
         }
 
@@ -1722,7 +2421,24 @@ impl Destruction {
             {
                 let d = r.dir();
                 let flat = (d - up * d.dot(up)).normalize_or_zero();
-                emit.push((p, Particle { vel: (flat * r.range(3.0, 10.0) * (0.5 + vn / 30.0) + up * r.range(0.5, 3.0)).into(), life: r.range(6.0, 12.0), size0: sz * r.range(0.6, 1.0), size1: sz * r.range(3.0, 5.0), temp: 0.1, kind: GRIT, drag: 0.9, buoy: 0.3, seed: r.f(), alpha: r.range(0.3, 0.5), ..Default::default() }));
+                emit.push((
+                    p,
+                    Particle {
+                        vel: (flat * r.range(3.0, 10.0) * (0.5 + vn / 30.0)
+                            + up * r.range(0.5, 3.0))
+                        .into(),
+                        life: r.range(6.0, 12.0),
+                        size0: sz * r.range(0.6, 1.0),
+                        size1: sz * r.range(3.0, 5.0),
+                        temp: 0.1,
+                        kind: GRIT,
+                        drag: 0.9,
+                        buoy: 0.3,
+                        seed: r.f(),
+                        alpha: r.range(0.3, 0.5),
+                        ..Default::default()
+                    },
+                ));
             }
         }
     }
@@ -1742,8 +2458,26 @@ impl Destruction {
             let r = &mut self.rng;
             let a = j as f64 * 2.39996 + r.f() as f64;
             let d = e * a.cos() + n * a.sin();
-            let at = base + d * (ext as f64 * r.range(0.5, 1.0) as f64) + u * r.range(1.0, 8.0) as f64;
-            emit.push((at, Particle { vel: (d.as_vec3() * r.range(10.0, 26.0) * k.sqrt() + u.as_vec3() * r.range(0.5, 5.0)).into(), life: r.range(14.0, 26.0), size0: r.range(5.0, 9.0), size1: r.range(22.0, 40.0) * k.sqrt(), temp: 0.08, kind: GRIT, drag: r.range(0.3, 0.45), buoy: 0.12, seed: r.f(), alpha: r.range(0.35, 0.55), ..Default::default() }));
+            let at =
+                base + d * (ext as f64 * r.range(0.5, 1.0) as f64) + u * r.range(1.0, 8.0) as f64;
+            emit.push((
+                at,
+                Particle {
+                    vel: (d.as_vec3() * r.range(10.0, 26.0) * k.sqrt()
+                        + u.as_vec3() * r.range(0.5, 5.0))
+                    .into(),
+                    life: r.range(14.0, 26.0),
+                    size0: r.range(5.0, 9.0),
+                    size1: r.range(22.0, 40.0) * k.sqrt(),
+                    temp: 0.08,
+                    kind: GRIT,
+                    drag: r.range(0.3, 0.45),
+                    buoy: 0.12,
+                    seed: r.f(),
+                    alpha: r.range(0.35, 0.55),
+                    ..Default::default()
+                },
+            ));
         }
         // And a column of it standing where the building was.
         for _ in 0..(24.0 * k) as usize {
@@ -1751,7 +2485,22 @@ impl Destruction {
             let d = r.dir();
             let at = base + (d * ext).as_dvec3() + u * (r.f() * r.f() * height * 0.3) as f64;
             let flat = (d - u.as_vec3() * d.dot(u.as_vec3())).normalize_or_zero();
-            emit.push((at, Particle { vel: (flat * r.range(3.0, 8.0) + u.as_vec3() * r.range(1.0, 4.0)).into(), life: r.range(12.0, 20.0), size0: r.range(6.0, 10.0), size1: r.range(22.0, 38.0), temp: 0.1, kind: GRIT, drag: 0.6, buoy: 0.2, seed: r.f(), alpha: r.range(0.18, 0.32), ..Default::default() }));
+            emit.push((
+                at,
+                Particle {
+                    vel: (flat * r.range(3.0, 8.0) + u.as_vec3() * r.range(1.0, 4.0)).into(),
+                    life: r.range(12.0, 20.0),
+                    size0: r.range(6.0, 10.0),
+                    size1: r.range(22.0, 38.0),
+                    temp: 0.1,
+                    kind: GRIT,
+                    drag: 0.6,
+                    buoy: 0.2,
+                    seed: r.f(),
+                    alpha: r.range(0.18, 0.32),
+                    ..Default::default()
+                },
+            ));
         }
         self.rumble += 1.0;
     }
@@ -1766,7 +2515,11 @@ impl Destruction {
             }
             if !t.started {
                 t.started = true;
-                puffs.push((t.pos + t.pos.normalize() * (t.height * 0.6) as f64, t.crown_r, true));
+                puffs.push((
+                    t.pos + t.pos.normalize() * (t.height * 0.6) as f64,
+                    t.crown_r,
+                    true,
+                ));
             }
             t.vel += 1.7 * 9.81 / (t.height * 0.55).max(1.5) * (t.ang.max(0.04)).sin() * dt;
             t.ang += t.vel * dt;
@@ -1775,7 +2528,8 @@ impl Destruction {
                 if !t.landed {
                     t.landed = true;
                     let (e, n, _) = geo::enu(t.pos);
-                    let tip = t.pos + (e * t.dir.x as f64 + n * t.dir.y as f64) * (t.height * 0.7) as f64;
+                    let tip =
+                        t.pos + (e * t.dir.x as f64 + n * t.dir.y as f64) * (t.height * 0.7) as f64;
                     puffs.push((tip, t.crown_r, false));
                     self.rumble += 0.15;
                 }
@@ -1796,7 +2550,12 @@ impl Destruction {
         }
     }
 
-    pub fn instances(&self, cam: DVec3, insts: &mut Vec<(u32, Inst)>, trees: &mut Vec<(u32, TreeInst)>) {
+    pub fn instances(
+        &self,
+        cam: DVec3,
+        insts: &mut Vec<(u32, Inst)>,
+        trees: &mut Vec<(u32, TreeInst)>,
+    ) {
         let mut n_bars = 0;
         for c in &self.chunks {
             let o = (c.pos - cam).as_vec3();
@@ -1813,18 +2572,42 @@ impl Destruction {
             let m = r3 * Mat3::from_diagonal(c.half);
             // Far off, a broken piece is a few pixels: the plain box will do.
             let d2 = o.length_squared();
-            let mesh = if is_slab(c.mesh) && d2 > (160.0 * c.half.max_element()).powi(2) { M_CUBE } else { c.mesh };
+            let mesh = if is_slab(c.mesh) && d2 > (160.0 * c.half.max_element()).powi(2) {
+                M_CUBE
+            } else {
+                c.mesh
+            };
             // (its pieces are bare: the mesh on them shows the wall)
-            let (mat, face) = if photo { (1.0, [0.0; 4]) } else { (c.mat, c.face) };
-            insts.push((mesh, Inst { m: [[m.x_axis.x, m.y_axis.x, m.z_axis.x, o.x], [m.x_axis.y, m.y_axis.y, m.z_axis.y, o.y], [m.x_axis.z, m.y_axis.z, m.z_axis.z, o.z]], tint: [c.col[0], c.col[1], c.col[2], mat], ext: face }));
+            let (mat, face) = if photo {
+                (1.0, [0.0; 4])
+            } else {
+                (c.mat, c.face)
+            };
+            insts.push((
+                mesh,
+                Inst {
+                    m: [
+                        [m.x_axis.x, m.y_axis.x, m.z_axis.x, o.x],
+                        [m.x_axis.y, m.y_axis.y, m.z_axis.y, o.y],
+                        [m.x_axis.z, m.y_axis.z, m.z_axis.z, o.z],
+                    ],
+                    tint: [c.col[0], c.col[1], c.col[2], mat],
+                    ext: face,
+                },
+            ));
             // Bars sticking out of its broken edges, close enough to be seen.
             if c.rebar && mesh != M_CUBE && is_slab(mesh) && d2 < 320.0 * 320.0 && n_bars < 3000 {
                 let up = r3 * Vec3::Y;
-                for (k, ed) in self.edges[c.var as usize % self.edges.len()].iter().enumerate() {
+                for (k, ed) in self.edges[c.var as usize % self.edges.len()]
+                    .iter()
+                    .enumerate()
+                {
                     let t = ed.n.perp();
-                    let along = (r3 * Vec3::new(t.x * c.half.x, 0.0, t.y * c.half.z)).normalize_or_zero();
+                    let along =
+                        (r3 * Vec3::new(t.x * c.half.x, 0.0, t.y * c.half.z)).normalize_or_zero();
                     let hl = Vec2::new(t.x * c.half.x, t.y * c.half.z).length() * ed.half;
-                    let nw = (r3 * Vec3::new(ed.n.x / c.half.x, 0.0, ed.n.y / c.half.z)).normalize_or_zero();
+                    let nw = (r3 * Vec3::new(ed.n.x / c.half.x, 0.0, ed.n.y / c.half.z))
+                        .normalize_or_zero();
                     if hl < 0.4 || nw == Vec3::ZERO {
                         continue;
                     }
@@ -1838,7 +2621,18 @@ impl Destruction {
                         let p = mid + along * off;
                         let (x, y, z) = (nw * sc, up * sc, z * sc);
                         let var = (c.var + k as u32 + j as u32) % N_REBAR;
-                        insts.push((M_REBAR + var, Inst { m: [[x.x, y.x, z.x, p.x], [x.y, y.y, z.y, p.y], [x.z, y.z, z.z, p.z]], tint: [c.col[0], c.col[1], c.col[2], 1.0], ext: [0.0; 4] }));
+                        insts.push((
+                            M_REBAR + var,
+                            Inst {
+                                m: [
+                                    [x.x, y.x, z.x, p.x],
+                                    [x.y, y.y, z.y, p.y],
+                                    [x.z, y.z, z.z, p.z],
+                                ],
+                                tint: [c.col[0], c.col[1], c.col[2], 1.0],
+                                ext: [0.0; 4],
+                            },
+                        ));
                         n_bars += 1;
                     }
                 }
@@ -1872,7 +2666,13 @@ impl Destruction {
             if c.skin == NO_SKIN {
                 continue;
             }
-            let Some(g) = self.structs.get_mut(c.group as usize).and_then(|s| s.skin.as_mut()) else { continue };
+            let Some(g) = self
+                .structs
+                .get_mut(c.group as usize)
+                .and_then(|s| s.skin.as_mut())
+            else {
+                continue;
+            };
             if (c.skin as usize) < g.xf.len() {
                 let o = (c.pos - cam).as_vec3();
                 g.xf[c.skin as usize] = g.slot_xf(c.skin, o, c.rot, c.col);

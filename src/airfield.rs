@@ -2,7 +2,7 @@
 //! the (levelled) terrain, the lights, and the fixed objects around it.
 //! See airfield.wgsl and lights.wgsl for how they are shaded.
 use crate::airmodels as am;
-use crate::airports::{hold_dist, right_of, Geo, Runway};
+use crate::airports::{Geo, Runway, hold_dist, right_of};
 use bytemuck::{Pod, Zeroable};
 use glam::{Vec2, Vec3};
 
@@ -81,14 +81,30 @@ const CELL: f32 = 120.0;
 
 impl<'a> B<'a> {
     fn v(&mut self, p: Vec2, lift: f32, q: [f32; 4], r: [f32; 4], kind: f32) -> u32 {
-        self.m.verts.push(AirVertex { pos: self.g.rel(p, lift).into(), q, r, kind, loc: p.into() });
+        self.m.verts.push(AirVertex {
+            pos: self.g.rel(p, lift).into(),
+            q,
+            r,
+            kind,
+            loc: p.into(),
+        });
         self.m.verts.len() as u32 - 1
     }
     fn quad(&mut self, a: u32, b: u32, c: u32, d: u32) {
         self.m.idx.extend([a, b, c, a, c, d]);
     }
     /// A ribbon along a polyline: `strips` quads across, cut every `step` metres.
-    fn ribbon(&mut self, pts: &[Vec2], half: f32, strips: usize, step: f32, lift: f32, kind: f32, r: [f32; 4], qw: f32) {
+    fn ribbon(
+        &mut self,
+        pts: &[Vec2],
+        half: f32,
+        strips: usize,
+        step: f32,
+        lift: f32,
+        kind: f32,
+        r: [f32; 4],
+        qw: f32,
+    ) {
         // Resample so no stretch is longer than `step`.
         let mut line: Vec<Vec2> = vec![pts[0]];
         for w in pts.windows(2) {
@@ -104,8 +120,16 @@ impl<'a> B<'a> {
         let mut along = 0.0;
         let mut prev: Option<u32> = None;
         for k in 0..line.len() {
-            let d0 = if k > 0 { (line[k] - line[k - 1]).normalize_or_zero() } else { Vec2::ZERO };
-            let d1 = if k + 1 < line.len() { (line[k + 1] - line[k]).normalize_or_zero() } else { Vec2::ZERO };
+            let d0 = if k > 0 {
+                (line[k] - line[k - 1]).normalize_or_zero()
+            } else {
+                Vec2::ZERO
+            };
+            let d1 = if k + 1 < line.len() {
+                (line[k + 1] - line[k]).normalize_or_zero()
+            } else {
+                Vec2::ZERO
+            };
             let d = (d0 + d1).normalize_or_zero();
             // Mitre: wider where the line turns, so the edges stay parallel.
             let cosh = d.dot(if d1 == Vec2::ZERO { d0 } else { d1 }).max(0.5);
@@ -141,8 +165,20 @@ impl<'a> B<'a> {
         for k in 0..=n {
             let u = total * k as f32 / n as f32;
             let p = a + d * (u - ext);
-            let i0 = self.v(p - side, LIFT + 0.02, [u, 0.0, total, w], [col, pattern, 0.0, 0.0], K_PAINT);
-            self.v(p + side, LIFT + 0.02, [u, w, total, w], [col, pattern, 0.0, 0.0], K_PAINT);
+            let i0 = self.v(
+                p - side,
+                LIFT + 0.02,
+                [u, 0.0, total, w],
+                [col, pattern, 0.0, 0.0],
+                K_PAINT,
+            );
+            self.v(
+                p + side,
+                LIFT + 0.02,
+                [u, w, total, w],
+                [col, pattern, 0.0, 0.0],
+                K_PAINT,
+            );
             if let Some(p0) = prev {
                 self.quad(p0, p0 + 1, i0 + 1, i0);
             }
@@ -157,8 +193,15 @@ impl<'a> B<'a> {
         let c = ((p.x / CELL).floor() as i32, (p.y / CELL).floor() as i32);
         for dy in -1..=1 {
             for dx in -1..=1 {
-                for (a, b, half) in self.cells.get(&(c.0 + dx, c.1 + dy)).map(|v| &v[..]).unwrap_or(&[]) {
-                    if skip_taxi.is_some_and(|s| (s.0 - *a).length() < 0.01 && (s.1 - *b).length() < 0.01) {
+                for (a, b, half) in self
+                    .cells
+                    .get(&(c.0 + dx, c.1 + dy))
+                    .map(|v| &v[..])
+                    .unwrap_or(&[])
+                {
+                    if skip_taxi
+                        .is_some_and(|s| (s.0 - *a).length() < 0.01 && (s.1 - *b).length() < 0.01)
+                    {
                         continue;
                     }
                     let d = *b - *a;
@@ -169,18 +212,50 @@ impl<'a> B<'a> {
                 }
             }
         }
-        self.g.aprons.iter().zip(&self.boxes).any(|(a, bb)| p.cmpge(bb.0).all() && p.cmple(bb.1).all() && in_poly(p, a))
+        self.g
+            .aprons
+            .iter()
+            .zip(&self.boxes)
+            .any(|(a, bb)| p.cmpge(bb.0).all() && p.cmple(bb.1).all() && in_poly(p, a))
     }
-    fn light(&mut self, p: Vec2, lift: f32, inten: f32, col: [u8; 3], kind: u8, dir: Vec3, spread: f32, fx: [u8; 4]) {
-        let d = if dir == Vec3::ZERO { Vec3::ZERO } else { self.g.dir3(dir).normalize() };
-        self.m.lights.push(Light { pos: self.g.rel(p, lift).into(), inten, dir: d.into(), spread, col: [col[0], col[1], col[2], kind], fx });
+    fn light(
+        &mut self,
+        p: Vec2,
+        lift: f32,
+        inten: f32,
+        col: [u8; 3],
+        kind: u8,
+        dir: Vec3,
+        spread: f32,
+        fx: [u8; 4],
+    ) {
+        let d = if dir == Vec3::ZERO {
+            Vec3::ZERO
+        } else {
+            self.g.dir3(dir).normalize()
+        };
+        self.m.lights.push(Light {
+            pos: self.g.rel(p, lift).into(),
+            inten,
+            dir: d.into(),
+            spread,
+            col: [col[0], col[1], col[2], kind],
+            fx,
+        });
     }
     fn prop(&mut self, mesh: u32, p: Vec2, lift: f32, fwd: Vec2, scale: Vec3, tint: [f32; 3]) {
         let g = self.g;
         let f = g.dir3(Vec3::new(fwd.x, fwd.y, 0.0));
         let up = g.dir3(Vec3::Z);
         let right = f.cross(up);
-        self.m.props.push(Prop { mesh, pos: g.rel(p, lift), x: right * scale.x, y: up * scale.y, z: -f * scale.z, tint });
+        self.m.props.push(Prop {
+            mesh,
+            pos: g.rel(p, lift),
+            x: right * scale.x,
+            y: up * scale.y,
+            z: -f * scale.z,
+            tint,
+        });
     }
 }
 
@@ -202,20 +277,124 @@ fn in_poly(p: Vec2, rings: &[Vec<Vec2>]) -> bool {
 /// Strokes of the runway numerals and letters on a grid 2 wide and 6 tall.
 fn glyph(c: char) -> &'static [&'static [[f32; 2]]] {
     match c {
-        '0' => &[&[[0.5, 0.0], [1.5, 0.0], [2.0, 0.6], [2.0, 5.4], [1.5, 6.0], [0.5, 6.0], [0.0, 5.4], [0.0, 0.6], [0.5, 0.0]]],
+        '0' => &[&[
+            [0.5, 0.0],
+            [1.5, 0.0],
+            [2.0, 0.6],
+            [2.0, 5.4],
+            [1.5, 6.0],
+            [0.5, 6.0],
+            [0.0, 5.4],
+            [0.0, 0.6],
+            [0.5, 0.0],
+        ]],
         '1' => &[&[[1.0, 0.0], [1.0, 6.0], [0.35, 5.1]]],
-        '2' => &[&[[0.0, 5.3], [0.5, 6.0], [1.5, 6.0], [2.0, 5.3], [2.0, 3.9], [0.0, 1.1], [0.0, 0.0], [2.0, 0.0]]],
-        '3' => &[&[[0.0, 6.0], [2.0, 6.0], [0.8, 3.6], [1.5, 3.6], [2.0, 3.0], [2.0, 0.6], [1.5, 0.0], [0.5, 0.0], [0.0, 0.6]]],
+        '2' => &[&[
+            [0.0, 5.3],
+            [0.5, 6.0],
+            [1.5, 6.0],
+            [2.0, 5.3],
+            [2.0, 3.9],
+            [0.0, 1.1],
+            [0.0, 0.0],
+            [2.0, 0.0],
+        ]],
+        '3' => &[&[
+            [0.0, 6.0],
+            [2.0, 6.0],
+            [0.8, 3.6],
+            [1.5, 3.6],
+            [2.0, 3.0],
+            [2.0, 0.6],
+            [1.5, 0.0],
+            [0.5, 0.0],
+            [0.0, 0.6],
+        ]],
         '4' => &[&[[1.55, 0.0], [1.55, 6.0], [0.0, 1.9], [2.0, 1.9]]],
-        '5' => &[&[[2.0, 6.0], [0.0, 6.0], [0.0, 3.5], [1.5, 3.5], [2.0, 2.9], [2.0, 0.6], [1.5, 0.0], [0.5, 0.0], [0.0, 0.6]]],
-        '6' => &[&[[2.0, 5.4], [1.5, 6.0], [0.5, 6.0], [0.0, 5.4], [0.0, 0.6], [0.5, 0.0], [1.5, 0.0], [2.0, 0.6], [2.0, 2.8], [1.5, 3.4], [0.0, 3.4]]],
+        '5' => &[&[
+            [2.0, 6.0],
+            [0.0, 6.0],
+            [0.0, 3.5],
+            [1.5, 3.5],
+            [2.0, 2.9],
+            [2.0, 0.6],
+            [1.5, 0.0],
+            [0.5, 0.0],
+            [0.0, 0.6],
+        ]],
+        '6' => &[&[
+            [2.0, 5.4],
+            [1.5, 6.0],
+            [0.5, 6.0],
+            [0.0, 5.4],
+            [0.0, 0.6],
+            [0.5, 0.0],
+            [1.5, 0.0],
+            [2.0, 0.6],
+            [2.0, 2.8],
+            [1.5, 3.4],
+            [0.0, 3.4],
+        ]],
         '7' => &[&[[0.0, 6.0], [2.0, 6.0], [0.6, 0.0]]],
-        '8' => &[&[[0.5, 3.2], [0.0, 2.7], [0.0, 0.6], [0.5, 0.0], [1.5, 0.0], [2.0, 0.6], [2.0, 2.7], [1.5, 3.2], [0.5, 3.2], [0.0, 3.7], [0.0, 5.4], [0.5, 6.0], [1.5, 6.0], [2.0, 5.4], [2.0, 3.7], [1.5, 3.2]]],
-        '9' => &[&[[0.0, 0.6], [0.5, 0.0], [1.5, 0.0], [2.0, 0.6], [2.0, 5.4], [1.5, 6.0], [0.5, 6.0], [0.0, 5.4], [0.0, 3.2], [0.5, 2.6], [2.0, 2.6]]],
+        '8' => &[&[
+            [0.5, 3.2],
+            [0.0, 2.7],
+            [0.0, 0.6],
+            [0.5, 0.0],
+            [1.5, 0.0],
+            [2.0, 0.6],
+            [2.0, 2.7],
+            [1.5, 3.2],
+            [0.5, 3.2],
+            [0.0, 3.7],
+            [0.0, 5.4],
+            [0.5, 6.0],
+            [1.5, 6.0],
+            [2.0, 5.4],
+            [2.0, 3.7],
+            [1.5, 3.2],
+        ]],
+        '9' => &[&[
+            [0.0, 0.6],
+            [0.5, 0.0],
+            [1.5, 0.0],
+            [2.0, 0.6],
+            [2.0, 5.4],
+            [1.5, 6.0],
+            [0.5, 6.0],
+            [0.0, 5.4],
+            [0.0, 3.2],
+            [0.5, 2.6],
+            [2.0, 2.6],
+        ]],
         'L' => &[&[[0.0, 6.0], [0.0, 0.0], [2.0, 0.0]]],
-        'C' => &[&[[2.0, 5.4], [1.5, 6.0], [0.5, 6.0], [0.0, 5.4], [0.0, 0.6], [0.5, 0.0], [1.5, 0.0], [2.0, 0.6]]],
-        'R' => &[&[[0.0, 0.0], [0.0, 6.0], [1.5, 6.0], [2.0, 5.4], [2.0, 3.7], [1.5, 3.1], [0.0, 3.1]], &[[1.0, 3.1], [2.0, 0.0]]],
-        'H' => &[&[[0.0, 0.0], [0.0, 6.0]], &[[2.0, 0.0], [2.0, 6.0]], &[[0.0, 3.0], [2.0, 3.0]]],
+        'C' => &[&[
+            [2.0, 5.4],
+            [1.5, 6.0],
+            [0.5, 6.0],
+            [0.0, 5.4],
+            [0.0, 0.6],
+            [0.5, 0.0],
+            [1.5, 0.0],
+            [2.0, 0.6],
+        ]],
+        'R' => &[
+            &[
+                [0.0, 0.0],
+                [0.0, 6.0],
+                [1.5, 6.0],
+                [2.0, 5.4],
+                [2.0, 3.7],
+                [1.5, 3.1],
+                [0.0, 3.1],
+            ],
+            &[[1.0, 3.1], [2.0, 0.0]],
+        ],
+        'H' => &[
+            &[[0.0, 0.0], [0.0, 6.0]],
+            &[[2.0, 0.0], [2.0, 6.0]],
+            &[[0.0, 3.0], [2.0, 3.0]],
+        ],
         _ => &[],
     }
 }
@@ -225,26 +404,51 @@ fn glyph(c: char) -> &'static [&'static [[f32; 2]]] {
 /// number base, number top, centreline start). Must match airfield.wgsl.
 pub fn mark_layout(r: &Runway) -> [f32; 6] {
     let ks = r.mark_scale();
-    let (k0, k1) = if r.class >= 1 { (6.0 * ks, 51.0 * ks) } else { (0.0, 0.0) };
-    let yl = if r.class >= 1 { k1 + 12.0 * ks } else { 6.0 * ks };
+    let (k0, k1) = if r.class >= 1 {
+        (6.0 * ks, 51.0 * ks)
+    } else {
+        (0.0, 0.0)
+    };
+    let yl = if r.class >= 1 {
+        k1 + 12.0 * ks
+    } else {
+        6.0 * ks
+    };
     let yn = if r.has_letter() { yl + 24.0 * ks } else { yl };
     [k0, k1, yl, yn, yn + 18.0 * ks, yn + 30.0 * ks]
 }
 
 pub fn build(g: &Geo) -> FieldMesh {
     let apt = g.apt();
-    let mut b = B { g, m: FieldMesh::default(), cells: Default::default(), boxes: Vec::new() };
+    let mut b = B {
+        g,
+        m: FieldMesh::default(),
+        cells: Default::default(),
+        boxes: Vec::new(),
+    };
     for (pts, w) in &g.taxiways {
         for s in pts.windows(2) {
             let (lo, hi) = (s[0].min(s[1]) - *w, s[0].max(s[1]) + *w);
             for cy in (lo.y / CELL).floor() as i32..=(hi.y / CELL).floor() as i32 {
                 for cx in (lo.x / CELL).floor() as i32..=(hi.x / CELL).floor() as i32 {
-                    b.cells.entry((cx, cy)).or_default().push((s[0], s[1], *w * 0.5));
+                    b.cells
+                        .entry((cx, cy))
+                        .or_default()
+                        .push((s[0], s[1], *w * 0.5));
                 }
             }
         }
     }
-    b.boxes = g.aprons.iter().map(|a| a[0].iter().fold((Vec2::splat(f32::MAX), Vec2::splat(f32::MIN)), |(lo, hi), p| (lo.min(*p), hi.max(*p)))).collect();
+    b.boxes = g
+        .aprons
+        .iter()
+        .map(|a| {
+            a[0].iter().fold(
+                (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN)),
+                |(lo, hi), p| (lo.min(*p), hi.max(*p)),
+            )
+        })
+        .collect();
     let concrete_field = g.runways.iter().filter(|r| r.paved).any(|r| r.concrete);
     let concrete_apron = concrete_field || apt.kind == 2;
     let any_paved = g.runways.iter().any(|r| r.paved);
@@ -278,14 +482,23 @@ pub fn build(g: &Geo) -> FieldMesh {
                 pts.push(*p);
             }
         }
-        let Ok(tris) = earcutr::earcut(&flat, &holes, 2) else { continue };
+        let Ok(tris) = earcutr::earcut(&flat, &holes, 2) else {
+            continue;
+        };
         let seed = (ai as f32 * 0.377).fract();
         // Split until no edge is long enough to cut through the ground it lies on.
-        let mut stack: Vec<[Vec2; 3]> = tris.chunks(3).map(|t| [pts[t[0]], pts[t[1]], pts[t[2]]]).collect();
+        let mut stack: Vec<[Vec2; 3]> = tris
+            .chunks(3)
+            .map(|t| [pts[t[0]], pts[t[1]], pts[t[2]]])
+            .collect();
         let mut guard = 0;
         while let Some(t) = stack.pop() {
             guard += 1;
-            let l = [(t[1] - t[0]).length(), (t[2] - t[1]).length(), (t[0] - t[2]).length()];
+            let l = [
+                (t[1] - t[0]).length(),
+                (t[2] - t[1]).length(),
+                (t[0] - t[2]).length(),
+            ];
             let k = (0..3).max_by(|x, y| l[*x].total_cmp(&l[*y])).unwrap();
             if l[k] > 36.0 && guard < 60_000 {
                 let (p, q, o) = (t[k], t[(k + 1) % 3], t[(k + 2) % 3]);
@@ -294,30 +507,71 @@ pub fn build(g: &Geo) -> FieldMesh {
                 stack.push([mid, q, o]);
                 continue;
             }
-            let ids = t.map(|p| b.v(p, LIFT - 0.03, [p.dot(axis), p.dot(side), flood, seed], [if concrete_apron { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0], K_APRON));
+            let ids = t.map(|p| {
+                b.v(
+                    p,
+                    LIFT - 0.03,
+                    [p.dot(axis), p.dot(side), flood, seed],
+                    [if concrete_apron { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
+                    K_APRON,
+                )
+            });
             b.m.idx.extend(ids);
         }
     }
     // ---- taxiways, then runways over them, then the paint over both
     if any_paved {
         for (ti, (pts, w)) in g.taxiways.iter().enumerate() {
-            b.ribbon(pts, w * 0.5, 2, 12.0, LIFT - 0.02, K_TAXI, [if concrete_field { 1.0 } else { 0.0 }, 0.0, 0.0, (ti as f32 * 0.137).fract()], 0.0);
+            b.ribbon(
+                pts,
+                w * 0.5,
+                2,
+                12.0,
+                LIFT - 0.02,
+                K_TAXI,
+                [
+                    if concrete_field { 1.0 } else { 0.0 },
+                    0.0,
+                    0.0,
+                    (ti as f32 * 0.137).fract(),
+                ],
+                0.0,
+            );
         }
     }
     if any_paved {
-            // Rounded joins where taxiways meet or end, so corners are not cut.
+        // Rounded joins where taxiways meet or end, so corners are not cut.
         let tw = crate::airports::taxi_width(apt.kind);
         for nd in &g.graph.nodes {
-            let taxi = nd.edges.iter().filter(|e| g.graph.edges[**e as usize].rwy.is_none()).count();
-            if taxi == 0 || (taxi == 2 && nd.edges.len() == 2) || g.on_runway(nd.p, tw * 0.3).is_some() {
+            let taxi = nd
+                .edges
+                .iter()
+                .filter(|e| g.graph.edges[**e as usize].rwy.is_none())
+                .count();
+            if taxi == 0
+                || (taxi == 2 && nd.edges.len() == 2)
+                || g.on_runway(nd.p, tw * 0.3).is_some()
+            {
                 continue;
             }
             let rad = tw * if nd.edges.len() >= 3 { 0.62 } else { 0.5 };
-            let c = b.v(nd.p, LIFT - 0.025, [0.0, 0.0, rad, 0.0], [if concrete_field { 1.0 } else { 0.0 }, 1.0, 0.0, 0.0], K_TAXI);
+            let c = b.v(
+                nd.p,
+                LIFT - 0.025,
+                [0.0, 0.0, rad, 0.0],
+                [if concrete_field { 1.0 } else { 0.0 }, 1.0, 0.0, 0.0],
+                K_TAXI,
+            );
             let n = 16;
             for k in 0..=n {
                 let a = k as f32 / n as f32 * std::f32::consts::TAU;
-                let i = b.v(nd.p + Vec2::new(a.cos(), a.sin()) * rad, LIFT - 0.025, [rad, 0.0, rad, 0.0], [if concrete_field { 1.0 } else { 0.0 }, 1.0, 0.0, 0.0], K_TAXI);
+                let i = b.v(
+                    nd.p + Vec2::new(a.cos(), a.sin()) * rad,
+                    LIFT - 0.025,
+                    [rad, 0.0, rad, 0.0],
+                    [if concrete_field { 1.0 } else { 0.0 }, 1.0, 0.0, 0.0],
+                    K_TAXI,
+                );
                 if k > 0 {
                     b.m.idx.extend([c, i - 1, i]);
                 }
@@ -328,8 +582,19 @@ pub fn build(g: &Geo) -> FieldMesh {
         if !r.paved {
             continue;
         }
-        let flags = r.class as f32 + if r.concrete { 4.0 } else { 0.0 } + if r.has_letter() { 8.0 } else { 0.0 };
-        b.ribbon(&[r.a, r.b], r.width * 0.5, 4, 10.0, LIFT, K_RUNWAY, [r.thr[0], r.thr[1], flags, (ri as f32 * 0.31 + 0.1).fract()], r.len);
+        let flags = r.class as f32
+            + if r.concrete { 4.0 } else { 0.0 }
+            + if r.has_letter() { 8.0 } else { 0.0 };
+        b.ribbon(
+            &[r.a, r.b],
+            r.width * 0.5,
+            4,
+            10.0,
+            LIFT,
+            K_RUNWAY,
+            [r.thr[0], r.thr[1], flags, (ri as f32 * 0.31 + 0.1).fract()],
+            r.len,
+        );
     }
     if any_paved {
         // Yellow centrelines, stopping at the runway edge.
@@ -369,7 +634,10 @@ pub fn build(g: &Geo) -> FieldMesh {
             let right = right_of(dir);
             let id = &r.ident[e];
             let digits: Vec<char> = id.chars().filter(|c| c.is_ascii_digit()).collect();
-            let letter = id.chars().last().filter(|c| matches!(c, 'L' | 'R' | 'C') && id.len() > 1);
+            let letter = id
+                .chars()
+                .last()
+                .filter(|c| matches!(c, 'L' | 'R' | 'C') && id.len() > 1);
             let u = 3.0 * ks;
             let draw = |b: &mut B, chars: &[char], base: f32| {
                 let total = chars.len() as f32 * 2.0 * u + (chars.len() as f32 - 1.0) * 1.5 * u;
@@ -377,7 +645,9 @@ pub fn build(g: &Geo) -> FieldMesh {
                     let x0 = -total * 0.5 + k as f32 * 3.5 * u;
                     for stroke in glyph(*c) {
                         for s in stroke.windows(2) {
-                            let p = |g: [f32; 2]| thr + dir * (base + g[1] * u) + right * (x0 + g[0] * u);
+                            let p = |g: [f32; 2]| {
+                                thr + dir * (base + g[1] * u) + right * (x0 + g[0] * u)
+                            };
                             b.bar(p(s[0]), p(s[1]), 0.5 * u, 0.0, 0.0, true);
                         }
                     }
@@ -408,8 +678,18 @@ pub fn build(g: &Geo) -> FieldMesh {
     for (c, rad) in &g.helipads {
         let r = rad.min(12.0) * 0.8;
         for k in 0..24 {
-            let (a0, a1) = (k as f32 / 24.0 * std::f32::consts::TAU, (k + 1) as f32 / 24.0 * std::f32::consts::TAU);
-            b.bar(*c + Vec2::new(a0.cos(), a0.sin()) * r, *c + Vec2::new(a1.cos(), a1.sin()) * r, 0.4, 0.0, 0.0, true);
+            let (a0, a1) = (
+                k as f32 / 24.0 * std::f32::consts::TAU,
+                (k + 1) as f32 / 24.0 * std::f32::consts::TAU,
+            );
+            b.bar(
+                *c + Vec2::new(a0.cos(), a0.sin()) * r,
+                *c + Vec2::new(a1.cos(), a1.sin()) * r,
+                0.4,
+                0.0,
+                0.0,
+                true,
+            );
         }
         let u = r * 0.16;
         for stroke in glyph('H') {
@@ -435,7 +715,11 @@ fn lights(b: &mut B, lit_field: bool) {
         // Edge lights every 60 m; over the last 600 m they show yellow to an
         // aircraft rolling toward that end.
         let n = (r.len / 60.0).round().max(2.0) as usize;
-        let caution = if r.class >= 1 { 600f32.min(r.len * 0.33) } else { 0.0 };
+        let caution = if r.class >= 1 {
+            600f32.min(r.len * 0.33)
+        } else {
+            0.0
+        };
         for k in 0..=n {
             let s = r.len * k as f32 / n as f32;
             for sx in [-1.0f32, 1.0] {
@@ -461,14 +745,38 @@ fn lights(b: &mut B, lit_field: bool) {
             let nt = ((r.width / 3.0) as usize).clamp(6, 18);
             for k in 0..nt {
                 let x = (k as f32 / (nt - 1) as f32 * 2.0 - 1.0) * half;
-                b.light(thr + rt * x - dir * 1.0, 0.25, 36.0, L_GREEN, 0, -d3 + Vec3::Z * 0.06, 0.1, DAY);
-                b.light(end + rt * x - dir * 2.0, 0.25, 30.0, L_RED, 0, d3 + Vec3::Z * 0.06, 0.1, DAY);
+                b.light(
+                    thr + rt * x - dir * 1.0,
+                    0.25,
+                    36.0,
+                    L_GREEN,
+                    0,
+                    -d3 + Vec3::Z * 0.06,
+                    0.1,
+                    DAY,
+                );
+                b.light(
+                    end + rt * x - dir * 2.0,
+                    0.25,
+                    30.0,
+                    L_RED,
+                    0,
+                    d3 + Vec3::Z * 0.06,
+                    0.1,
+                    DAY,
+                );
             }
             if !r.paved {
                 continue;
             }
             // PAPI: four units left of the runway beside the aiming point.
-            let ap = if r.len >= 2400.0 { 400.0 } else if r.len >= 1200.0 { 300.0 } else { (r.len * 0.22).max(120.0) };
+            let ap = if r.len >= 2400.0 {
+                400.0
+            } else if r.len >= 1200.0 {
+                300.0
+            } else {
+                (r.len * 0.22).max(120.0)
+            };
             for k in 0..4 {
                 let p = thr + dir * ap - rt * (half + 15.0 + 9.0 * k as f32);
                 let angle = (3.5f32 - 0.333 * k as f32).to_radians();
@@ -485,25 +793,62 @@ fn lights(b: &mut B, lit_field: bool) {
                     let d = 30.0 * k as f32;
                     let c = thr - dir * d;
                     for x in [-1.5f32, 0.0, 1.5] {
-                        b.light(c + rt * x, lift(g, c, d), 70.0, L_WHITE, 0, -d3 + Vec3::Z * 0.1, 0.2, DAY);
+                        b.light(
+                            c + rt * x,
+                            lift(g, c, d),
+                            70.0,
+                            L_WHITE,
+                            0,
+                            -d3 + Vec3::Z * 0.1,
+                            0.2,
+                            DAY,
+                        );
                     }
                     if k == 10 {
                         for x in [-13.5f32, -10.5, -7.5, -4.5, 4.5, 7.5, 10.5, 13.5] {
-                            b.light(c + rt * x, lift(g, c, d), 70.0, L_WHITE, 0, -d3 + Vec3::Z * 0.1, 0.2, DAY);
+                            b.light(
+                                c + rt * x,
+                                lift(g, c, d),
+                                70.0,
+                                L_WHITE,
+                                0,
+                                -d3 + Vec3::Z * 0.1,
+                                0.2,
+                                DAY,
+                            );
                         }
                     }
                 }
                 for k in 0..8 {
                     let d = 480.0 + 60.0 * k as f32;
                     let c = thr - dir * d;
-                    b.light(c, lift(g, c, d), 900.0, L_STROBE, 0, -d3 + Vec3::Z * 0.1, 0.3, [5, (255 - k * 28) as u8, 12, 1]);
+                    b.light(
+                        c,
+                        lift(g, c, d),
+                        900.0,
+                        L_STROBE,
+                        0,
+                        -d3 + Vec3::Z * 0.1,
+                        0.3,
+                        [5, (255 - k * 28) as u8, 12, 1],
+                    );
                 }
                 // Touchdown zone: bars of three either side of the centreline.
                 if apt.kind == 2 {
                     for k in 1..=(900f32.min(r.len * 0.4) / 60.0) as usize {
                         for sx in [-1.0f32, 1.0] {
                             for j in 0..3 {
-                                b.light(thr + dir * (60.0 * k as f32) + rt * sx * (9.5 + 1.5 * j as f32), 0.08, 14.0, L_WHITE, 0, -d3 + Vec3::Z * 0.12, 0.15, STEADY);
+                                b.light(
+                                    thr + dir * (60.0 * k as f32)
+                                        + rt * sx * (9.5 + 1.5 * j as f32),
+                                    0.08,
+                                    14.0,
+                                    L_WHITE,
+                                    0,
+                                    -d3 + Vec3::Z * 0.12,
+                                    0.15,
+                                    STEADY,
+                                );
                             }
                         }
                     }
@@ -511,7 +856,16 @@ fn lights(b: &mut B, lit_field: bool) {
             } else {
                 // Runway end identifier lights: a pair of strobes at the threshold.
                 for sx in [-1.0f32, 1.0] {
-                    b.light(thr + rt * sx * (half + 12.0), 0.8, 500.0, L_STROBE, 0, -d3 + Vec3::Z * 0.1, 0.0, [8, 0, 10, 1]);
+                    b.light(
+                        thr + rt * sx * (half + 12.0),
+                        0.8,
+                        500.0,
+                        L_STROBE,
+                        0,
+                        -d3 + Vec3::Z * 0.1,
+                        0.0,
+                        [8, 0, 10, 1],
+                    );
                 }
             }
         }
@@ -523,9 +877,22 @@ fn lights(b: &mut B, lit_field: bool) {
                 let s = k as f32 * 30.0;
                 let p = r.a + r.dir * s;
                 for (to_go, sgn) in [(r.len - s, 1.0f32), (s, -1.0)] {
-                    let col = if to_go < 300.0 || (to_go < 900.0 && k % 2 == 0) { L_RED } else { L_WHITE };
+                    let col = if to_go < 300.0 || (to_go < 900.0 && k % 2 == 0) {
+                        L_RED
+                    } else {
+                        L_WHITE
+                    };
                     // Shines back toward whoever is rolling this way.
-                    b.light(p, 0.07, 12.0, col, 0, Vec3::new(r.dir.x, r.dir.y, 0.0) * -sgn + Vec3::Z * 0.1, 0.0, STEADY);
+                    b.light(
+                        p,
+                        0.07,
+                        12.0,
+                        col,
+                        0,
+                        Vec3::new(r.dir.x, r.dir.y, 0.0) * -sgn + Vec3::Z * 0.1,
+                        0.0,
+                        STEADY,
+                    );
                 }
             }
         }
@@ -564,15 +931,47 @@ fn lights(b: &mut B, lit_field: bool) {
         for h in &g.holds {
             for (sx, phase) in [(-1.0f32, 0u8), (1.0, 128)] {
                 let p = h.p + right_of(h.dir) * sx * (h.half + 2.5);
-                b.light(p, 0.6, 30.0, L_YELLOW, 0, Vec3::new(-h.dir.x, -h.dir.y, 0.15), 0.2, [10, phase, 115, 1]);
+                b.light(
+                    p,
+                    0.6,
+                    30.0,
+                    L_YELLOW,
+                    0,
+                    Vec3::new(-h.dir.x, -h.dir.y, 0.15),
+                    0.2,
+                    [10, phase, 115, 1],
+                );
             }
         }
     }
     // The beacon: green and white, turn about.
     if g.runways.iter().any(|r| r.lighted) {
-        let at = g.aprons.iter().max_by(|a, b| a[0].len().cmp(&b[0].len())).map(|a| a[0].iter().copied().sum::<Vec2>() / a[0].len() as f32).unwrap_or(Vec2::ZERO);
-        b.light(at, 26.0, 2500.0, L_STROBE, 0, Vec3::ZERO, 0.0, [50, 0, 10, 0]);
-        b.light(at, 26.0, 2500.0, L_GREEN, 0, Vec3::ZERO, 0.0, [50, 128, 10, 0]);
+        let at = g
+            .aprons
+            .iter()
+            .max_by(|a, b| a[0].len().cmp(&b[0].len()))
+            .map(|a| a[0].iter().copied().sum::<Vec2>() / a[0].len() as f32)
+            .unwrap_or(Vec2::ZERO);
+        b.light(
+            at,
+            26.0,
+            2500.0,
+            L_STROBE,
+            0,
+            Vec3::ZERO,
+            0.0,
+            [50, 0, 10, 0],
+        );
+        b.light(
+            at,
+            26.0,
+            2500.0,
+            L_GREEN,
+            0,
+            Vec3::ZERO,
+            0.0,
+            [50, 128, 10, 0],
+        );
     }
 }
 
@@ -583,7 +982,13 @@ fn furniture(b: &mut B) {
     for r in g.runways.iter().take(2) {
         for e in 0..2 {
             let (thr, dir) = r.end(e);
-            let spot = [1.0f32, -1.0].iter().map(|sx| thr + dir * (r.len * 0.12).min(260.0) + right_of(dir) * *sx * (r.width * 0.5 + 45.0)).find(|p| !b.paved(*p, 12.0, None));
+            let spot = [1.0f32, -1.0]
+                .iter()
+                .map(|sx| {
+                    thr + dir * (r.len * 0.12).min(260.0)
+                        + right_of(dir) * *sx * (r.width * 0.5 + 45.0)
+                })
+                .find(|p| !b.paved(*p, 12.0, None));
             if let Some(p) = spot {
                 if b.m.socks.len() < 4 {
                     b.prop(am::M_SOCK_POLE, p, 0.0, Vec2::Y, Vec3::ONE, [1.0; 3]);
@@ -602,7 +1007,14 @@ fn furniture(b: &mut B) {
         if !s.terminal || s.size < 3 {
             continue;
         }
-        let Some((gp, _)) = g.gates.iter().filter(|gt| (gt.0 - s.pos).length() < 95.0).min_by(|a, b| (a.0 - s.pos).length().total_cmp(&(b.0 - s.pos).length())) else { continue };
+        let Some((gp, _)) = g
+            .gates
+            .iter()
+            .filter(|gt| (gt.0 - s.pos).length() < 95.0)
+            .min_by(|a, b| (a.0 - s.pos).length().total_cmp(&(b.0 - s.pos).length()))
+        else {
+            continue;
+        };
         let ty = am::TYPES[s.size as usize];
         // Passengers board on the left.
         let left = -right_of(s.dir);
@@ -615,7 +1027,14 @@ fn furniture(b: &mut B) {
         }
         let d = run / len;
         let sill = ty.sill - 0.2;
-        b.prop(am::M_BRIDGE, *gp, sill, d, Vec3::new(1.0, 1.0, len), [1.0; 3]);
+        b.prop(
+            am::M_BRIDGE,
+            *gp,
+            sill,
+            d,
+            Vec3::new(1.0, 1.0, len),
+            [1.0; 3],
+        );
         b.prop(am::M_BRIDGE_HEAD, door, sill, -left, Vec3::ONE, [1.0; 3]);
         b.m.doors[si] = Some(door - left * 2.6);
     }
@@ -624,7 +1043,11 @@ fn furniture(b: &mut B) {
         let mut n = 0;
         for a in &g.aprons {
             let r0 = &a[0];
-            let area = (0..r0.len()).map(|i| r0[i].perp_dot(r0[(i + 1) % r0.len()])).sum::<f32>().abs() * 0.5;
+            let area = (0..r0.len())
+                .map(|i| r0[i].perp_dot(r0[(i + 1) % r0.len()]))
+                .sum::<f32>()
+                .abs()
+                * 0.5;
             if area < 12_000.0 {
                 continue;
             }
@@ -638,9 +1061,22 @@ fn furniture(b: &mut B) {
                     let at = p + (q - p) * (t / len);
                     let inward = (c - at).normalize_or_zero();
                     let spot = at - inward * 3.0;
-                    if !b.paved(spot, 6.0, None) && !b.m.props.iter().any(|pr| pr.mesh == am::M_MAST && (pr.pos - g.rel(spot, 0.0)).length() < 100.0) {
+                    if !b.paved(spot, 6.0, None)
+                        && !b.m.props.iter().any(|pr| {
+                            pr.mesh == am::M_MAST && (pr.pos - g.rel(spot, 0.0)).length() < 100.0
+                        })
+                    {
                         b.prop(am::M_MAST, spot, 0.0, inward, Vec3::ONE, [1.0; 3]);
-                        b.light(spot + inward * 0.5, 22.0, 420.0, L_FLOOD, 2, Vec3::new(inward.x, inward.y, -0.9), -0.3, STEADY);
+                        b.light(
+                            spot + inward * 0.5,
+                            22.0,
+                            420.0,
+                            L_FLOOD,
+                            2,
+                            Vec3::new(inward.x, inward.y, -0.9),
+                            -0.3,
+                            STEADY,
+                        );
                         n += 1;
                     }
                     t += 150.0;

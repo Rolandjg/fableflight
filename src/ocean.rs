@@ -141,20 +141,37 @@ impl Spec {
         let m0 = (swell_hs / 4.0).powi(2);
         let salpha = 5.0 * swp.powi(4) * m0 / (GRAV * GRAV * gamma_gain(sgamma));
         let tail = (0.1 + u / 9.0).clamp(0.15, 1.3);
-        Self { wp, alpha, gamma: 3.3, swp, salpha, sgamma, sbeta: 5.0, dir, sdir, tail }
+        Self {
+            wp,
+            alpha,
+            gamma: 3.3,
+            swp,
+            salpha,
+            sgamma,
+            sbeta: 5.0,
+            dir,
+            sdir,
+            tail,
+        }
     }
     /// Energy per unit kx, ky (m^4), as ocean.wgsl `energy`.
     fn energy(&self, kv: DVec2, k: f64) -> f64 {
         let w = (GRAV * k).sqrt();
         let kh = kv / k;
-        let e = jonswap(w, self.wp, self.alpha, self.gamma) * spread(angle(self.dir, kh), db_beta(w / self.wp))
-            + jonswap(w, self.swp, self.salpha, self.sgamma) * spread(angle(self.sdir, kh), self.sbeta);
+        let e = jonswap(w, self.wp, self.alpha, self.gamma)
+            * spread(angle(self.dir, kh), db_beta(w / self.wp))
+            + jonswap(w, self.swp, self.salpha, self.sgamma)
+                * spread(angle(self.sdir, kh), self.sbeta);
         e * self.tail_at(k) * GRAV / (2.0 * w) / k
     }
     /// Omnidirectional energy per unit k.
     fn omni(&self, k: f64) -> f64 {
         let w = (GRAV * k).sqrt();
-        (jonswap(w, self.wp, self.alpha, self.gamma) + jonswap(w, self.swp, self.salpha, self.sgamma)) * self.tail_at(k) * GRAV / (2.0 * w)
+        (jonswap(w, self.wp, self.alpha, self.gamma)
+            + jonswap(w, self.swp, self.salpha, self.sgamma))
+            * self.tail_at(k)
+            * GRAV
+            / (2.0 * w)
     }
     fn tail_at(&self, k: f64) -> f64 {
         1.0 + (self.tail - 1.0) * smoothstep(2.0, 20.0, k)
@@ -267,7 +284,18 @@ impl Ocean {
     /// frame the GPU draws this frame with, `off` the ocean's coordinates of
     /// the camera (wrapped at WRAP).
     #[allow(clippy::too_many_arguments)]
-    pub fn update(&mut self, dt: f64, time: f64, wind: f64, wind_from: f64, sinlat: f64, cam: DVec3, east: DVec3, north: DVec3, off: DVec2) {
+    pub fn update(
+        &mut self,
+        dt: f64,
+        time: f64,
+        wind: f64,
+        wind_from: f64,
+        sinlat: f64,
+        cam: DVec3,
+        east: DVec3,
+        north: DVec3,
+        off: DVec2,
+    ) {
         let to = (wind_from + 180.0).to_radians();
         let target = DVec2::new(to.sin(), to.cos());
         if !self.started {
@@ -279,10 +307,14 @@ impl Ocean {
             // The sea takes a while to answer the wind.
             let k = (dt / 20.0).clamp(0.0, 1.0);
             self.wind += (wind - self.wind) * k;
-            self.dir = (self.dir + (target - self.dir) * k).try_normalize().unwrap_or(target);
+            self.dir = (self.dir + (target - self.dir) * k)
+                .try_normalize()
+                .unwrap_or(target);
             let ks = (dt / 600.0).clamp(0.0, 1.0);
             let st = DVec2::from_angle(0.6).rotate(target);
-            self.sdir = (self.sdir + (st - self.sdir) * ks).try_normalize().unwrap_or(st);
+            self.sdir = (self.sdir + (st - self.sdir) * ks)
+                .try_normalize()
+                .unwrap_or(st);
         }
         // The southern ocean and the far north run a bigger swell.
         let swell_hs = 0.7 + 0.6 * smoothstep(0.55, 0.85, sinlat.abs()) + 0.02 * self.wind;
@@ -296,11 +328,26 @@ impl Ocean {
         self.stats();
         // The spectrum drifts slowly (the sea answers the wind over tens of
         // seconds): redo the roughness only once it has moved.
-        let key = [self.wind, self.dir.x, self.dir.y, self.sdir.x, self.sdir.y, swell_hs];
-        let moved = key.iter().zip(&self.lost_for).enumerate().any(|(i, (a, b))| {
-            let tol = if i == 0 || i == 5 { 0.03 * a.abs().max(1.0) } else { 0.01 };
-            !((a - b).abs() <= tol)
-        });
+        let key = [
+            self.wind,
+            self.dir.x,
+            self.dir.y,
+            self.sdir.x,
+            self.sdir.y,
+            swell_hs,
+        ];
+        let moved = key
+            .iter()
+            .zip(&self.lost_for)
+            .enumerate()
+            .any(|(i, (a, b))| {
+                let tol = if i == 0 || i == 5 {
+                    0.03 * a.abs().max(1.0)
+                } else {
+                    0.01
+                };
+                !((a - b).abs() <= tol)
+            });
         if moved {
             self.lost_for = key;
             self.lost_slopes();
@@ -313,7 +360,10 @@ impl Ocean {
         let mut m0 = 0.0;
         for c in 0..3 {
             let (a, b) = band(c);
-            let (lo, hi) = (a.max(2.0 * PI / SIZES[c]), b.min(127.0 * 2.0 * PI / SIZES[c]));
+            let (lo, hi) = (
+                a.max(2.0 * PI / SIZES[c]),
+                b.min(127.0 * 2.0 * PI / SIZES[c]),
+            );
             let steps = 96;
             let (la, lb) = (lo.ln(), hi.ln());
             for i in 0..steps {
@@ -346,12 +396,18 @@ impl Ocean {
         let keep = |u: f64, m: usize| {
             let s = (1u32 << m) as f64;
             let h = (0.5 * u).sin();
-            let d = if m == 0 || h.abs() < 1e-9 { 1.0 } else { (0.5 * s * u).sin() / (s * h) };
+            let d = if m == 0 || h.abs() < 1e-9 {
+                1.0
+            } else {
+                (0.5 * s * u).sin() / (s * h)
+            };
             d * d * (2.0 + (s * u).cos()) / 3.0
         };
         let h = N as i64 / 2;
         // keep(u) for every grid step along an axis (the same in every cascade)
-        let kt: Vec<[f64; ML]> = (1 - h..h).map(|n| std::array::from_fn(|m| keep(2.0 * PI * n as f64 / N as f64, m))).collect();
+        let kt: Vec<[f64; ML]> = (1 - h..h)
+            .map(|n| std::array::from_fn(|m| keep(2.0 * PI * n as f64 / N as f64, m)))
+            .collect();
         for c in 0..3 {
             let dk = 2.0 * PI / SIZES[c];
             let (klo, khi) = band(c);
@@ -364,7 +420,15 @@ impl Ocean {
                     // for its neighbours (the mips that would tell them apart
                     // hold almost none of them anyway).
                     let r = nx.abs().max(ny.abs());
-                    let st = if r <= 16 { 1 } else if r <= 32 { 2 } else if r <= 64 { 4 } else { 8 };
+                    let st = if r <= 16 {
+                        1
+                    } else if r <= 32 {
+                        2
+                    } else if r <= 64 {
+                        4
+                    } else {
+                        8
+                    };
                     if nx % st != 0 || ny % st != 0 {
                         continue;
                     }
@@ -391,7 +455,12 @@ impl Ocean {
             }
             for m in 0..ML {
                 let l = if m == ML - 1 { [0.0; 3] } else { kept[m] };
-                self.lost[c][m] = [(tot[0] - l[0]).max(0.0) as f32, (tot[1] - l[1]).max(0.0) as f32, (tot[2] - l[2]) as f32, 0.0];
+                self.lost[c][m] = [
+                    (tot[0] - l[0]).max(0.0) as f32,
+                    (tot[1] - l[1]).max(0.0) as f32,
+                    (tot[2] - l[2]) as f32,
+                    0.0,
+                ];
             }
         }
         // Ripples: everything outside the finest grid, up to capillary waves of
@@ -475,7 +544,11 @@ impl Ocean {
             for x in 0..M {
                 let sg = if (x + y) & 1 == 1 { -1.0 } else { 1.0 };
                 let d = fd[y * M + x];
-                self.field[y * M + x] = [(d[0] * sg * CHOP[0]) as f32, (d[1] * sg * CHOP[0]) as f32, (fh[y * M + x][0] * sg) as f32];
+                self.field[y * M + x] = [
+                    (d[0] * sg * CHOP[0]) as f32,
+                    (d[1] * sg * CHOP[0]) as f32,
+                    (fh[y * M + x][0] * sg) as f32,
+                ];
             }
         }
     }
@@ -487,11 +560,20 @@ impl Ocean {
         let u = (p - DVec2::splat(SIZES[0] / (2.0 * N as f64))) * s;
         let (x0, y0) = (u.x.floor(), u.y.floor());
         let (fx, fy) = (u.x - x0, u.y - y0);
-        let at = |i: f64, j: f64| self.field[(j.rem_euclid(M as f64) as usize % M) * M + (i.rem_euclid(M as f64) as usize % M)];
-        let (a, b, c, d) = (at(x0, y0), at(x0 + 1.0, y0), at(x0, y0 + 1.0), at(x0 + 1.0, y0 + 1.0));
+        let at = |i: f64, j: f64| {
+            self.field
+                [(j.rem_euclid(M as f64) as usize % M) * M + (i.rem_euclid(M as f64) as usize % M)]
+        };
+        let (a, b, c, d) = (
+            at(x0, y0),
+            at(x0 + 1.0, y0),
+            at(x0, y0 + 1.0),
+            at(x0 + 1.0, y0 + 1.0),
+        );
         let mut o = [0.0; 3];
         for i in 0..3 {
-            o[i] = (a[i] as f64 * (1.0 - fx) + b[i] as f64 * fx) * (1.0 - fy) + (c[i] as f64 * (1.0 - fx) + d[i] as f64 * fx) * fy;
+            o[i] = (a[i] as f64 * (1.0 - fx) + b[i] as f64 * fx) * (1.0 - fy)
+                + (c[i] as f64 * (1.0 - fx) + d[i] as f64 * fx) * fy;
         }
         o
     }
@@ -518,14 +600,39 @@ impl Ocean {
         let mut casc = [[0f32; 4]; 3];
         for (c, o) in casc.iter_mut().enumerate() {
             let (lo, hi) = band(c);
-            *o = [SIZES[c] as f32, lo as f32, hi.min(1e6) as f32, CHOP[c] as f32];
+            *o = [
+                SIZES[c] as f32,
+                lo as f32,
+                hi.min(1e6) as f32,
+                CHOP[c] as f32,
+            ];
         }
         OceanU {
             casc,
-            sea: [self.wind as f32, s.wp as f32, s.alpha as f32, s.gamma as f32],
-            swell: [s.swp as f32, s.salpha as f32, s.sgamma as f32, s.sbeta as f32],
-            dir: [s.dir.x as f32, s.dir.y as f32, s.sdir.x as f32, s.sdir.y as f32],
-            t: [self.t as f32, (2.0 * PI / PERIOD) as f32, s.tail as f32, self.dt as f32],
+            sea: [
+                self.wind as f32,
+                s.wp as f32,
+                s.alpha as f32,
+                s.gamma as f32,
+            ],
+            swell: [
+                s.swp as f32,
+                s.salpha as f32,
+                s.sgamma as f32,
+                s.sbeta as f32,
+            ],
+            dir: [
+                s.dir.x as f32,
+                s.dir.y as f32,
+                s.sdir.x as f32,
+                s.sdir.y as f32,
+            ],
+            t: [
+                self.t as f32,
+                (2.0 * PI / PERIOD) as f32,
+                s.tail as f32,
+                self.dt as f32,
+            ],
         }
     }
 
@@ -538,7 +645,12 @@ impl Ocean {
         // Whitecap cover (Monahan & O'Muircheartaigh 1980).
         let wc = (3.84e-6 * u.max(0.0).powf(3.41)).min(0.3);
         let mut g = [[0f32; 4]; OCEAN_G];
-        g[0] = [self.off.x as f32, self.off.y as f32, self.dir.x as f32, self.dir.y as f32];
+        g[0] = [
+            self.off.x as f32,
+            self.off.y as f32,
+            self.dir.x as f32,
+            self.dir.y as f32,
+        ];
         g[1] = [u as f32, self.hs as f32, wc as f32, 1.0];
         g[2] = self.ripple;
         for c in 0..3 {
@@ -600,18 +712,49 @@ pub const OCEAN_G: usize = 3 + 3 * MIPS as usize;
 
 impl OceanGpu {
     pub fn new(d: &wgpu::Device, q: &wgpu::Queue) -> Self {
-        let m = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("ocean"), source: wgpu::ShaderSource::Wgsl(include_str!("shaders/ocean.wgsl").into()) });
-        let pipe = |e: &str| d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: Some(e), layout: None, module: &m, entry_point: Some(e), compilation_options: Default::default(), cache: None });
+        let m = d.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("ocean"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/ocean.wgsl").into()),
+        });
+        let pipe = |e: &str| {
+            d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(e),
+                layout: None,
+                module: &m,
+                entry_point: Some(e),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        };
         let (p_rows, p_cols, p_mip) = (pipe("rows"), pipe("cols"), pipe("mip"));
         let (p_foam, p_ctl) = (pipe("foam"), pipe("foam_ctl"));
-        let ub = d.create_buffer(&wgpu::BufferDescriptor { label: Some("ocean u"), size: std::mem::size_of::<OceanU>() as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        let ub = d.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("ocean u"),
+            size: std::mem::size_of::<OceanU>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let nz = noise();
-        let noise_buf = d.create_buffer(&wgpu::BufferDescriptor { label: Some("ocean noise"), size: (nz.len() * 8) as u64, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        let noise_buf = d.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("ocean noise"),
+            size: (nz.len() * 8) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         q.write_buffer(&noise_buf, 0, bytemuck::cast_slice(&nz));
-        let spec = d.create_buffer(&wgpu::BufferDescriptor { label: Some("ocean spectrum"), size: (3 * 4 * N * N * 8) as u64, usage: wgpu::BufferUsages::STORAGE, mapped_at_creation: false });
+        let spec = d.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("ocean spectrum"),
+            size: (3 * 4 * N * N * 8) as u64,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
         let tex = d.create_texture(&wgpu::TextureDescriptor {
             label: Some("ocean"),
-            size: wgpu::Extent3d { width: N as u32, height: N as u32, depth_or_array_layers: LAYERS },
+            size: wgpu::Extent3d {
+                width: N as u32,
+                height: N as u32,
+                depth_or_array_layers: LAYERS,
+            },
             mip_level_count: MIPS,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -619,40 +762,117 @@ impl OceanGpu {
             usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
-        let level = |m: u32| tex.create_view(&wgpu::TextureViewDescriptor { dimension: Some(wgpu::TextureViewDimension::D2Array), base_mip_level: m, mip_level_count: Some(1), ..Default::default() });
-        let view = tex.create_view(&wgpu::TextureViewDescriptor { dimension: Some(wgpu::TextureViewDimension::D2Array), ..Default::default() });
+        let level = |m: u32| {
+            tex.create_view(&wgpu::TextureViewDescriptor {
+                dimension: Some(wgpu::TextureViewDimension::D2Array),
+                base_mip_level: m,
+                mip_level_count: Some(1),
+                ..Default::default()
+            })
+        };
+        let view = tex.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
         fn buf(b: u32, buf: &wgpu::Buffer) -> wgpu::BindGroupEntry<'_> {
-            wgpu::BindGroupEntry { binding: b, resource: buf.as_entire_binding() }
+            wgpu::BindGroupEntry {
+                binding: b,
+                resource: buf.as_entire_binding(),
+            }
         }
         use crate::render::tex_res as tv;
         let top = level(0);
-        let bg = d.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("ocean"), layout: &p_rows.get_bind_group_layout(0), entries: &[buf(0, &ub), buf(1, &noise_buf), buf(2, &spec)] });
-        let bg_cols = d.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("ocean cols"), layout: &p_cols.get_bind_group_layout(0), entries: &[buf(0, &ub), buf(2, &spec), tv(3, &top)] });
+        let bg = d.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("ocean"),
+            layout: &p_rows.get_bind_group_layout(0),
+            entries: &[buf(0, &ub), buf(1, &noise_buf), buf(2, &spec)],
+        });
+        let bg_cols = d.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("ocean cols"),
+            layout: &p_cols.get_bind_group_layout(0),
+            entries: &[buf(0, &ub), buf(2, &spec), tv(3, &top)],
+        });
         // Foam: this frame's waves (layers 0-5 of level 0) in, layer 6 out.
-        let layers = |m: u32, base: u32, n: u32| tex.create_view(&wgpu::TextureViewDescriptor { dimension: Some(wgpu::TextureViewDimension::D2Array), base_mip_level: m, mip_level_count: Some(1), base_array_layer: base, array_layer_count: Some(n), ..Default::default() });
+        let layers = |m: u32, base: u32, n: u32| {
+            tex.create_view(&wgpu::TextureViewDescriptor {
+                dimension: Some(wgpu::TextureViewDimension::D2Array),
+                base_mip_level: m,
+                mip_level_count: Some(1),
+                base_array_layer: base,
+                array_layer_count: Some(n),
+                ..Default::default()
+            })
+        };
         let (waves, foam_out) = (layers(0, 0, 6), layers(0, 6, 1));
-        let state = |l: &str| d.create_buffer(&wgpu::BufferDescriptor { label: Some(l), size: (N * N * 8) as u64, usage: wgpu::BufferUsages::STORAGE, mapped_at_creation: false });
+        let state = |l: &str| {
+            d.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(l),
+                size: (N * N * 8) as u64,
+                usage: wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: false,
+            })
+        };
         let (fa, fb) = (state("foam a"), state("foam b"));
         // ocean.wgsl `Ctl`: histogram, sum, threshold, log share.
-        let ctl = d.create_buffer(&wgpu::BufferDescriptor { label: Some("foam ctl"), size: 528, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        let ctl = d.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("foam ctl"),
+            size: 528,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         q.write_buffer(&ctl, 516, bytemuck::cast_slice(&[0.3f32, (0.003f32).ln()]));
         let foam_bg = |src: &wgpu::Buffer, dst: &wgpu::Buffer| {
-            d.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("ocean foam"), layout: &p_foam.get_bind_group_layout(0), entries: &[buf(0, &ub), tv(4, &foam_out), tv(5, &waves), buf(7, src), buf(8, dst), buf(9, &ctl)] })
+            d.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("ocean foam"),
+                layout: &p_foam.get_bind_group_layout(0),
+                entries: &[
+                    buf(0, &ub),
+                    tv(4, &foam_out),
+                    tv(5, &waves),
+                    buf(7, src),
+                    buf(8, dst),
+                    buf(9, &ctl),
+                ],
+            })
         };
         let bg_foam = [foam_bg(&fa, &fb), foam_bg(&fb, &fa)];
-        let bg_ctl = d.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("foam ctl"), layout: &p_ctl.get_bind_group_layout(0), entries: &[buf(0, &ub), buf(9, &ctl)] });
+        let bg_ctl = d.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("foam ctl"),
+            layout: &p_ctl.get_bind_group_layout(0),
+            entries: &[buf(0, &ub), buf(9, &ctl)],
+        });
         let mut bg_mips = vec![bg_cols];
         for m in 1..MIPS {
             let (src, dst) = (level(m - 1), level(m));
-            bg_mips.push(d.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("ocean mip"), layout: &p_mip.get_bind_group_layout(0), entries: &[tv(5, &src), tv(6, &dst)] }));
+            bg_mips.push(d.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("ocean mip"),
+                layout: &p_mip.get_bind_group_layout(0),
+                entries: &[tv(5, &src), tv(6, &dst)],
+            }));
         }
-        Self { ub, p_rows, p_cols, p_mip, p_foam, p_ctl, bg, bg_mips, bg_foam, bg_ctl, flip: std::cell::Cell::new(0), view }
+        Self {
+            ub,
+            p_rows,
+            p_cols,
+            p_mip,
+            p_foam,
+            p_ctl,
+            bg,
+            bg_mips,
+            bg_foam,
+            bg_ctl,
+            flip: std::cell::Cell::new(0),
+            view,
+        }
     }
 
     /// Rebuild the waves for this frame.
     pub fn compute(&self, q: &wgpu::Queue, enc: &mut wgpu::CommandEncoder, u: &OceanU) {
         q.write_buffer(&self.ub, 0, bytemuck::bytes_of(u));
-        let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("ocean"), timestamp_writes: None });
+        let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("ocean"),
+            timestamp_writes: None,
+        });
         cp.set_pipeline(&self.p_rows);
         cp.set_bind_group(0, &self.bg, &[]);
         cp.dispatch_workgroups(N as u32, 3, 1);
@@ -688,7 +908,17 @@ mod tests {
         let mut last = 0.0;
         for wind in [2.0, 7.0, 14.0] {
             let mut o = Ocean::new();
-            o.update(0.0, 10.0, wind, 270.0, 0.6, DVec3::ZERO, DVec3::X, DVec3::Y, DVec2::ZERO);
+            o.update(
+                0.0,
+                10.0,
+                wind,
+                270.0,
+                0.6,
+                DVec3::ZERO,
+                DVec3::X,
+                DVec3::Y,
+                DVec2::ZERO,
+            );
             // Variance the band should hold, against what the grid holds.
             let (lo, hi) = band(0);
             let (lo, hi) = (lo.max(2.0 * PI / SIZES[0]), hi);
@@ -698,9 +928,15 @@ mod tests {
                 let k = lo + (hi - lo) * (i as f64 + 0.5) / steps as f64;
                 m0 += o.spec.omni(k) * (hi - lo) / steps as f64;
             }
-            let var = o.field.iter().map(|f| (f[2] as f64).powi(2)).sum::<f64>() / o.field.len() as f64;
+            let var =
+                o.field.iter().map(|f| (f[2] as f64).powi(2)).sum::<f64>() / o.field.len() as f64;
             let hmax = o.field.iter().map(|f| f[2].abs()).fold(0.0, f32::max);
-            eprintln!("wind {wind}: Hs {:.2} m, long-wave rms {:.2} m (band {:.2}), max {hmax:.2}", o.hs, var.sqrt(), m0.sqrt());
+            eprintln!(
+                "wind {wind}: Hs {:.2} m, long-wave rms {:.2} m (band {:.2}), max {hmax:.2}",
+                o.hs,
+                var.sqrt(),
+                m0.sqrt()
+            );
             assert!(o.hs > last);
             assert!(var > m0 * 0.3 && var < m0 * 3.0);
             last = o.hs;
@@ -717,7 +953,17 @@ mod tests {
     fn lost_slopes() {
         for wind in [2.0, 7.0, 14.0] {
             let mut o = Ocean::new();
-            o.update(0.0, 10.0, wind, 270.0, 0.6, DVec3::ZERO, DVec3::X, DVec3::Y, DVec2::ZERO);
+            o.update(
+                0.0,
+                10.0,
+                wind,
+                270.0,
+                0.6,
+                DVec3::ZERO,
+                DVec3::X,
+                DVec3::Y,
+                DVec2::ZERO,
+            );
             let t0 = std::time::Instant::now();
             o.lost_slopes();
             let dt = t0.elapsed();
@@ -725,23 +971,38 @@ mod tests {
             for c in 0..3 {
                 let l = &o.lost[c];
                 for m in 1..MIPS as usize {
-                    assert!(l[m][0] + l[m][1] >= (l[m - 1][0] + l[m - 1][1]) * 0.999, "cascade {c} level {m}: {:?}", l);
+                    assert!(
+                        l[m][0] + l[m][1] >= (l[m - 1][0] + l[m - 1][1]) * 0.999,
+                        "cascade {c} level {m}: {:?}",
+                        l
+                    );
                 }
                 // Against the omnidirectional spectrum over the cascade's band.
                 let (a, b) = band(c);
-                let (lo, hi) = (a.max(2.0 * PI / SIZES[c]), b.min(127.5 * 2.0 * PI / SIZES[c]));
+                let (lo, hi) = (
+                    a.max(2.0 * PI / SIZES[c]),
+                    b.min(127.5 * 2.0 * PI / SIZES[c]),
+                );
                 let mut mss = 0.0;
                 for i in 0..2000 {
                     let k = lo + (hi - lo) * (i as f64 + 0.5) / 2000.0;
                     mss += o.spec.omni(k) * k * k * (hi - lo) / 2000.0;
                 }
                 let all = (l[8][0] + l[8][1]) as f64;
-                eprintln!("wind {wind} cascade {c}: lost {:?} / all {all:.5} (spectrum {mss:.5})", l.iter().map(|v| format!("{:.5}", v[0] + v[1])).collect::<Vec<_>>());
+                eprintln!(
+                    "wind {wind} cascade {c}: lost {:?} / all {all:.5} (spectrum {mss:.5})",
+                    l.iter()
+                        .map(|v| format!("{:.5}", v[0] + v[1]))
+                        .collect::<Vec<_>>()
+                );
                 assert!(all > mss * 0.6 && all < mss * 1.6);
                 total += all;
             }
             let cox = 0.003 + 0.00512 * wind;
-            eprintln!("wind {wind}: ripples {:?}, total mss {total:.4} (Cox-Munk {cox:.4}), {dt:?}", o.ripple);
+            eprintln!(
+                "wind {wind}: ripples {:?}, total mss {total:.4} (Cox-Munk {cox:.4}), {dt:?}",
+                o.ripple
+            );
             assert!(total > cox * 0.3 && total < cox * 3.0);
         }
     }

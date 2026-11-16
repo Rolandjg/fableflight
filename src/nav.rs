@@ -70,7 +70,8 @@ pub fn db() -> &'static [Station] {
     static DB: OnceLock<Vec<Station>> = OnceLock::new();
     DB.get_or_init(|| {
         let mut text = String::new();
-        let _ = flate2::read::GzDecoder::new(&include_bytes!("../assets/navaids.tsv.gz")[..]).read_to_string(&mut text);
+        let _ = flate2::read::GzDecoder::new(&include_bytes!("../assets/navaids.tsv.gz")[..])
+            .read_to_string(&mut text);
         text.lines()
             .filter_map(|l| {
                 let f: Vec<&str> = l.split('\t').collect();
@@ -119,7 +120,9 @@ pub fn near(lat: f64, lon: f64, radius: f64, kind: Kind) -> Vec<(Station, f64)> 
         let dlat = radius / 111_000.0;
         let dlon = dlat / lat.to_radians().cos().max(0.05);
         db().iter()
-            .filter(|s| s.kind == kind && (s.lat - lat).abs() < dlat && wrap(s.lon - lon).abs() < dlon)
+            .filter(|s| {
+                s.kind == kind && (s.lat - lat).abs() < dlat && wrap(s.lon - lon).abs() < dlon
+            })
             .map(|s| (s.clone(), dist_m((lat, lon), (s.lat, s.lon))))
             .filter(|(_, d)| *d < radius)
             .collect()
@@ -139,13 +142,27 @@ fn ils_near(lat: f64, lon: f64, radius: f64) -> Vec<(Station, f64)> {
             continue;
         }
         for r in a.rwys.iter().filter(|r| r.paved && r.len >= 1500.0) {
-            let (Some(p0), Some(p1)) = (r.pos[0], r.pos[1]) else { continue };
+            let (Some(p0), Some(p1)) = (r.pos[0], r.pos[1]) else {
+                continue;
+            };
             for e in 0..2 {
                 let (thr, far) = if e == 0 { (p0, p1) } else { (p1, p0) };
                 let elev = a.elev as f64 / 3.28084;
                 let t = geo::lla_to_pos(thr.0.to_radians(), thr.1.to_radians(), elev);
                 let f = geo::lla_to_pos(far.0.to_radians(), far.1.to_radians(), elev);
-                let st = Station { kind: Kind::Ils, ident: r.ident[e].clone(), name: a.ident.clone(), freq_khz: 0, lat: far.0, lon: far.1, elev, dme: true, course: bearing(t, f), thr, aim: crate::traffic::aim_dist(r.len) as f64 };
+                let st = Station {
+                    kind: Kind::Ils,
+                    ident: r.ident[e].clone(),
+                    name: a.ident.clone(),
+                    freq_khz: 0,
+                    lat: far.0,
+                    lon: far.1,
+                    elev,
+                    dme: true,
+                    course: bearing(t, f),
+                    thr,
+                    aim: crate::traffic::aim_dist(r.len) as f64,
+                };
                 out.push((st, dist_m((lat, lon), thr)));
             }
         }
@@ -197,7 +214,8 @@ pub fn nav_reading(st: &Station, obs: f64, pos: DVec3) -> NavReading {
             let horiz = (to_gs - u * to_gs.dot(u)).length();
             let h = (pos - gs_ant).dot(u);
             let elev_angle = h.atan2(horiz).to_degrees();
-            let gs_live = live && horiz < 10.0 * 1852.0 && angle.abs() < 8.0 && to_gs.dot(fwd) > 0.0;
+            let gs_live =
+                live && horiz < 10.0 * 1852.0 && angle.abs() < 8.0 && to_gs.dot(fwd) > 0.0;
             NavReading {
                 live,
                 cdi: (-angle / 2.5).clamp(-1.0, 1.0),
@@ -214,8 +232,19 @@ pub fn nav_reading(st: &Station, obs: f64, pos: DVec3) -> NavReading {
             let live = st.kind == Kind::Vor && dist_nm < los.min(130.0);
             let to_bearing = (radial + 180.0).rem_euclid(360.0);
             let to = wrap(obs - to_bearing).abs() < 90.0;
-            let dev = if to { wrap(to_bearing - obs) } else { wrap(obs - radial) };
-            NavReading { live, cdi: (dev / 10.0).clamp(-1.0, 1.0), to: Some(to), gs: None, dme: (live && st.dme).then_some(dist_nm), radial }
+            let dev = if to {
+                wrap(to_bearing - obs)
+            } else {
+                wrap(obs - radial)
+            };
+            NavReading {
+                live,
+                cdi: (dev / 10.0).clamp(-1.0, 1.0),
+                to: Some(to),
+                gs: None,
+                dme: (live && st.dme).then_some(dist_nm),
+                radial,
+            }
         }
     }
 }
@@ -240,7 +269,13 @@ pub struct Radios {
 
 impl Default for Radios {
     fn default() -> Self {
-        Self { nav: None, obs: 0.0, adf: None, show: false, baro: None }
+        Self {
+            nav: None,
+            obs: 0.0,
+            adf: None,
+            show: false,
+            baro: None,
+        }
     }
 }
 
@@ -290,18 +325,41 @@ mod tests {
 
     #[test]
     fn database() {
-        let bub = near(50.9, 4.5, 20_000.0, Kind::Vor).into_iter().find(|s| s.0.ident == "BUB").unwrap().0;
+        let bub = near(50.9, 4.5, 20_000.0, Kind::Vor)
+            .into_iter()
+            .find(|s| s.0.ident == "BUB")
+            .unwrap()
+            .0;
         assert_eq!((bub.freq_text().as_str(), bub.dme), ("114.60", true));
         assert!(!near(50.9, 4.5, 60_000.0, Kind::Ndb).is_empty());
-        let ils: Vec<_> = near(50.9, 4.5, 15_000.0, Kind::Ils).into_iter().filter(|s| s.0.name == "EBBR").collect();
+        let ils: Vec<_> = near(50.9, 4.5, 15_000.0, Kind::Ils)
+            .into_iter()
+            .filter(|s| s.0.name == "EBBR")
+            .collect();
         assert!(ils.len() >= 4, "{} ILS at EBBR", ils.len());
         let r25l = ils.iter().find(|s| s.0.ident == "25L").unwrap();
-        assert!(wrap(r25l.0.course - 245.0).abs() < 5.0, "25L course {}", r25l.0.course);
+        assert!(
+            wrap(r25l.0.course - 245.0).abs() < 5.0,
+            "25L course {}",
+            r25l.0.course
+        );
     }
 
     #[test]
     fn vor_needle() {
-        let st = Station { kind: Kind::Vor, ident: "TST".into(), name: "Test".into(), freq_khz: 113_000, lat: 45.0, lon: 5.0, elev: 0.0, dme: true, course: 0.0, thr: (0.0, 0.0), aim: 0.0 };
+        let st = Station {
+            kind: Kind::Vor,
+            ident: "TST".into(),
+            name: "Test".into(),
+            freq_khz: 113_000,
+            lat: 45.0,
+            lon: 5.0,
+            elev: 0.0,
+            dme: true,
+            course: 0.0,
+            thr: (0.0, 0.0),
+            aim: 0.0,
+        };
         let s = st.pos();
         // 20 NM west of the station at 5000 ft, OBS 090: on course, TO.
         let p = off(s, 270.0, 20.0 * 1852.0, 1524.0);
@@ -326,7 +384,19 @@ mod tests {
         let thr = at(45.0, 5.0, 100.0);
         let far = off(thr, 90.0, 3000.0, 100.0);
         let (fl, fo, _) = geo::pos_to_lla(far);
-        let st = Station { kind: Kind::Ils, ident: "09".into(), name: "TEST".into(), freq_khz: 0, lat: fl.to_degrees(), lon: fo.to_degrees(), elev: 100.0, dme: true, course: 90.0, thr: (45.0, 5.0), aim: 300.0 };
+        let st = Station {
+            kind: Kind::Ils,
+            ident: "09".into(),
+            name: "TEST".into(),
+            freq_khz: 0,
+            lat: fl.to_degrees(),
+            lon: fo.to_degrees(),
+            elev: 100.0,
+            dme: true,
+            course: 90.0,
+            thr: (45.0, 5.0),
+            aim: 300.0,
+        };
         let gs = off(thr, 90.0, 300.0, 100.0);
         // 5 NM out on the centreline, on the 3° slope: both centred (within
         // the 0.06° the Earth's curve puts between a slope over the ground
@@ -334,11 +404,22 @@ mod tests {
         let d = 5.0 * 1852.0;
         let on = off(gs, 270.0, d, 100.0 + d * 3f64.to_radians().tan());
         let r = nav_reading(&st, 0.0, on);
-        assert!(r.live && r.cdi.abs() < 0.05 && r.gs.unwrap().abs() < 0.15, "{r:?}");
+        assert!(
+            r.live && r.cdi.abs() < 0.05 && r.gs.unwrap().abs() < 0.15,
+            "{r:?}"
+        );
         // High: fly down. Left of the centreline (north): fly right.
-        let r = nav_reading(&st, 0.0, off(gs, 270.0, d, 100.0 + d * 4f64.to_radians().tan()));
+        let r = nav_reading(
+            &st,
+            0.0,
+            off(gs, 270.0, d, 100.0 + d * 4f64.to_radians().tan()),
+        );
         assert!(r.gs.unwrap() < -0.9, "{r:?}");
-        let r = nav_reading(&st, 0.0, off(gs, 272.0, d, 100.0 + d * 3f64.to_radians().tan()));
+        let r = nav_reading(
+            &st,
+            0.0,
+            off(gs, 272.0, d, 100.0 + d * 3f64.to_radians().tan()),
+        );
         assert!(r.cdi > 0.5, "{r:?}");
         // Behind the antenna (past the far end): dead.
         assert!(!nav_reading(&st, 0.0, off(far, 90.0, 2000.0, 400.0)).live);
@@ -346,7 +427,19 @@ mod tests {
 
     #[test]
     fn adf_and_altimeter() {
-        let st = Station { kind: Kind::Ndb, ident: "N".into(), name: "N".into(), freq_khz: 350, lat: 45.0, lon: 5.0, elev: 0.0, dme: false, course: 0.0, thr: (0.0, 0.0), aim: 0.0 };
+        let st = Station {
+            kind: Kind::Ndb,
+            ident: "N".into(),
+            name: "N".into(),
+            freq_khz: 350,
+            lat: 45.0,
+            lon: 5.0,
+            elev: 0.0,
+            dme: false,
+            course: 0.0,
+            thr: (0.0, 0.0),
+            aim: 0.0,
+        };
         // 10 NM south heading north: the needle points ahead; heading east, 90° left.
         let p = off(st.pos(), 180.0, 10.0 * 1852.0, 1000.0);
         assert!(wrap(adf_bearing(&st, p, 0.0).unwrap()).abs() < 1.0);

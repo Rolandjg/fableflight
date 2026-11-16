@@ -52,7 +52,17 @@ pub fn look(yaw: f64, pitch: f64) -> DQuat {
 
 impl Head {
     pub fn new(yaw: f64, pitch: f64) -> Head {
-        Head { yaw, pitch, lean: DVec3::ZERO, roll: 0.0, zoom: 1.0, zoom_s: 1.0, adapt: 0.55, inside: 0.5, rear: false }
+        Head {
+            yaw,
+            pitch,
+            lean: DVec3::ZERO,
+            roll: 0.0,
+            zoom: 1.0,
+            zoom_s: 1.0,
+            adapt: 0.55,
+            inside: 0.5,
+            rear: false,
+        }
     }
 
     /// Snap to the asked-for look at once (entering the cockpit, respawning).
@@ -71,13 +81,32 @@ impl Head {
     /// vertical field of view setting (deg), `shake` the head's sway on its
     /// neck from the physics (body frame), `rot` the aircraft's attitude and
     /// `up` the local vertical (world). Returns the eye for this frame.
-    pub fn update(&mut self, spec: &'static Spec, dt: f64, want: (f64, f64), fov: f32, shake: DVec3, rot: DQuat, up: DVec3, aspect: f32, day: f32) -> View {
+    pub fn update(
+        &mut self,
+        spec: &'static Spec,
+        dt: f64,
+        want: (f64, f64),
+        fov: f32,
+        shake: DVec3,
+        rot: DQuat,
+        up: DVec3,
+        aspect: f32,
+        day: f32,
+    ) -> View {
         // Keep the head the short way round from where it is.
         let wy = self.yaw + (want.0 - self.yaw + PI).rem_euclid(2.0 * PI) - PI;
         self.yaw = follow(self.yaw, wy, 22.0, dt);
         self.pitch = follow(self.pitch, want.1, 22.0, dt);
         self.zoom_s = follow(self.zoom_s, self.zoom, 10.0, dt);
-        let (y, p) = (self.yaw.rem_euclid(2.0 * PI) - if self.yaw.rem_euclid(2.0 * PI) > PI { 2.0 * PI } else { 0.0 }, self.pitch);
+        let (y, p) = (
+            self.yaw.rem_euclid(2.0 * PI)
+                - if self.yaw.rem_euclid(2.0 * PI) > PI {
+                    2.0 * PI
+                } else {
+                    0.0
+                },
+            self.pitch,
+        );
 
         // Lean: toward the side window (not far: the door is close), across
         // to the right one, turned round in the seat to look back, forward
@@ -98,7 +127,15 @@ impl Head {
 
         let q = look(self.yaw, self.pitch);
         // The eyes swing round the neck joint behind them.
-        let eye = spec.eye2.filter(|_| self.rear).unwrap_or(spec.eye).as_dvec3() + shake + self.lean - NECK + q * NECK;
+        let eye = spec
+            .eye2
+            .filter(|_| self.rear)
+            .unwrap_or(spec.eye)
+            .as_dvec3()
+            + shake
+            + self.lean
+            - NECK
+            + q * NECK;
 
         // Tilt part of the way back toward the horizon (only near level).
         let d = rot * (q * DVec3::NEG_Z);
@@ -121,7 +158,11 @@ impl Head {
         // Opening up for the dark takes longer than stopping down for the light.
         let rate = if want > self.adapt { 1.4 } else { 3.5 };
         self.adapt += (want - self.adapt) * (1.0 - (-rate * dt as f32).exp());
-        View { eye, rot: rot_b, fov: fov_now }
+        View {
+            eye,
+            rot: rot_b,
+            fov: fov_now,
+        }
     }
 }
 
@@ -134,7 +175,8 @@ fn interior(spec: &'static Spec, rot: DQuat, fov: f32, aspect: f32) -> f32 {
     for j in 0..7 {
         for i in 0..9 {
             let (sx, sy) = (i as f32 / 4.0 - 1.0, j as f32 / 3.0 - 1.0);
-            let d = (rot * DVec3::new((sx * tx * 0.9) as f64, (sy * ty * 0.9) as f64, -1.0)).normalize();
+            let d = (rot * DVec3::new((sx * tx * 0.9) as f64, (sy * ty * 0.9) as f64, -1.0))
+                .normalize();
             let w = 1.0 - 0.6 * (sx * sx + sy * sy) * 0.5;
             sum += w * lookup(t, d);
             wsum += w;
@@ -146,7 +188,11 @@ fn interior(spec: &'static Spec, rot: DQuat, fov: f32, aspect: f32) -> f32 {
 const LW: usize = 96;
 const LH: usize = 48;
 fn dir_of(yaw: f32, pitch: f32) -> Vec3 {
-    Vec3::new(pitch.cos() * yaw.sin(), -pitch.sin(), -pitch.cos() * yaw.cos())
+    Vec3::new(
+        pitch.cos() * yaw.sin(),
+        -pitch.sin(),
+        -pitch.cos() * yaw.cos(),
+    )
 }
 fn lookup(t: &[f32], d: DVec3) -> f32 {
     let d = d.as_vec3();
@@ -172,7 +218,8 @@ fn table(spec: &'static Spec) -> &'static [f32] {
                 s.spawn(move || {
                     for (i, c) in row.iter_mut().enumerate() {
                         let mut n = 0;
-                        for (a, b) in [(0.25f32, 0.25f32), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)] {
+                        for (a, b) in [(0.25f32, 0.25f32), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)]
+                        {
                             let yaw = ((i as f32 + a) / LW as f32 - 0.5) * std::f32::consts::TAU;
                             let pitch = ((j as f32 + b) / LH as f32 - 0.5) * std::f32::consts::PI;
                             n += (spec.sees_inside)(spec.eye, dir_of(yaw, pitch)) as u32;

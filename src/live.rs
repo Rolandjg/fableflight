@@ -5,7 +5,7 @@
 //! than making it jump. They are drawn with the airport traffic's models
 //! (the nearest of five sizes) and carry their navigation lights.
 
-use crate::airfield::{Light, L_GREEN, L_RED, L_STROBE, L_WHITE};
+use crate::airfield::{L_GREEN, L_RED, L_STROBE, L_WHITE, Light};
 use crate::airmodels::{self as am, TYPES};
 use crate::render::Inst;
 use crate::{geo, sources::Sources};
@@ -88,7 +88,14 @@ pub struct Live {
 
 impl Live {
     pub fn new(on: bool) -> Self {
-        Self { shared: Arc::default(), on: Arc::new(AtomicBool::new(on)), thread: false, last_got: None, last_step: None, planes: Vec::new() }
+        Self {
+            shared: Arc::default(),
+            on: Arc::new(AtomicBool::new(on)),
+            thread: false,
+            last_got: None,
+            last_step: None,
+            planes: Vec::new(),
+        }
     }
 
     pub fn enabled(&self) -> bool {
@@ -112,7 +119,11 @@ impl Live {
     /// aircraft on to now, taking in a new report if one has come.
     pub fn step(&mut self, src: &Arc<Sources>, at: Option<DVec3>) {
         let now = Instant::now();
-        let dt = self.last_step.map(|t| (now - t).as_secs_f64()).unwrap_or(0.0).min(0.5);
+        let dt = self
+            .last_step
+            .map(|t| (now - t).as_secs_f64())
+            .unwrap_or(0.0)
+            .min(0.5);
         self.last_step = Some(now);
         if !self.enabled() {
             return;
@@ -124,7 +135,10 @@ impl Live {
         let got = {
             let mut s = self.shared.lock();
             s.want = want;
-            s.got.as_ref().filter(|(t, _)| Some(*t) != self.last_got).cloned()
+            s.got
+                .as_ref()
+                .filter(|(t, _)| Some(*t) != self.last_got)
+                .cloned()
         };
         if !self.thread && want.is_some() {
             self.thread = true;
@@ -134,7 +148,8 @@ impl Live {
             self.last_got = Some(t);
             self.take(t, &reports);
         }
-        self.planes.retain(|p| (now - p.seen).as_secs_f64() < FORGET);
+        self.planes
+            .retain(|p| (now - p.seen).as_secs_f64() < FORGET);
         let fade = (-dt / 1.5).exp();
         let turn = (dt * 1.5).min(1.0);
         for p in &mut self.planes {
@@ -151,7 +166,9 @@ impl Live {
     fn take(&mut self, t: Instant, reports: &[Report]) {
         let now = Instant::now();
         for r in reports {
-            let at = t.checked_sub(Duration::from_secs_f64(r.age.clamp(0.0, 60.0))).unwrap_or(t);
+            let at = t
+                .checked_sub(Duration::from_secs_f64(r.age.clamp(0.0, 60.0)))
+                .unwrap_or(t);
             let fix = geo::lla_to_pos(r.lat.to_radians(), r.lon.to_radians(), r.alt_m);
             let (e, n, u) = geo::enu(fix);
             let (s, c) = r.trk.to_radians().sin_cos();
@@ -161,13 +178,24 @@ impl Live {
             if let Some(p) = self.planes.iter_mut().find(|p| p.hex == r.hex) {
                 // Keep it where it was drawn and let the difference fade.
                 let jump = p.pos - predicted;
-                p.off = if jump.length() < 3000.0 { jump } else { DVec3::ZERO };
+                p.off = if jump.length() < 3000.0 {
+                    jump
+                } else {
+                    DVec3::ZERO
+                };
                 (p.fix, p.vel, p.at, p.seen) = (fix, vel, at, now);
                 (p.call, p.ty, p.size) = (r.call.clone(), r.ty.clone(), r.size);
                 (p.alt_ft, p.gs_kt, p.vs_fpm) = (alt_ft, gs_kt, vs_fpm);
             } else {
-                let h = r.hex.bytes().fold(2166136261u32, |h, b| (h ^ b as u32).wrapping_mul(16777619));
-                let fwd = if vel.length() > 1.0 { vel.normalize() } else { n };
+                let h = r
+                    .hex
+                    .bytes()
+                    .fold(2166136261u32, |h, b| (h ^ b as u32).wrapping_mul(16777619));
+                let fwd = if vel.length() > 1.0 {
+                    vel.normalize()
+                } else {
+                    n
+                };
                 self.planes.push(Plane {
                     hex: r.hex.clone(),
                     call: r.call.clone(),
@@ -178,7 +206,10 @@ impl Live {
                     at,
                     off: DVec3::ZERO,
                     seen: now,
-                    livery: ((h % crate::traffic::BODY.len() as u32) as u8, ((h >> 8) % crate::traffic::FIN.len() as u32) as u8),
+                    livery: (
+                        (h % crate::traffic::BODY.len() as u32) as u8,
+                        ((h >> 8) % crate::traffic::FIN.len() as u32) as u8,
+                    ),
                     pos: predicted,
                     fwd,
                     alt_ft,
@@ -204,7 +235,15 @@ impl Live {
             }
             let (x, y, z) = (fwd.cross(upv).as_vec3(), upv.as_vec3(), (-fwd).as_vec3());
             let o = (p.pos - cam).as_vec3();
-            let inst = |tint: [f32; 3]| Inst { m: [[x.x, y.x, z.x, o.x], [x.y, y.y, z.y, o.y], [x.z, y.z, z.z, o.z]], tint: [tint[0], tint[1], tint[2], 0.0], ext: [0.0; 4] };
+            let inst = |tint: [f32; 3]| Inst {
+                m: [
+                    [x.x, y.x, z.x, o.x],
+                    [x.y, y.y, z.y, o.y],
+                    [x.z, y.z, z.z, o.z],
+                ],
+                tint: [tint[0], tint[1], tint[2], 0.0],
+                ext: [0.0; 4],
+            };
             let base = am::M_BODY + 3 * p.size as u32;
             out.push((base, inst(crate::traffic::BODY[p.livery.0 as usize])));
             out.push((base + 1, inst(crate::traffic::FIN[p.livery.1 as usize])));
@@ -219,17 +258,49 @@ impl Live {
             let at = |q: Vec3| -> [f32; 3] { (o + x * q.x + y * q.y - z * q.z).into() };
             let mut l = |q: Vec3, inten: f32, col: [u8; 3], fx: [u8; 4]| {
                 if lights.len() < crate::render::MAX_DYN_LIGHTS {
-                    lights.push(Light { pos: at(q), inten, dir: [0.0; 3], spread: 0.0, col: [col[0], col[1], col[2], 0], fx });
+                    lights.push(Light {
+                        pos: at(q),
+                        inten,
+                        dir: [0.0; 3],
+                        spread: 0.0,
+                        col: [col[0], col[1], col[2], 0],
+                        fx,
+                    });
                 }
             };
             let steady = [0, 0, 255, 1];
             let ph = ((i * 53) % 255) as u8;
-            l(Vec3::new(-ty.tip.x, ty.tip.y, -ty.tip.z), 40.0, L_RED, steady);
-            l(Vec3::new(ty.tip.x, ty.tip.y, -ty.tip.z), 40.0, L_GREEN, steady);
-            l(Vec3::new(0.0, ty.tail.y * 0.35, -ty.tail.z), 25.0, L_WHITE, steady);
-            l(Vec3::new(0.0, ty.cy + ty.rf + 0.1, 0.0), 120.0, L_RED, [12, ph, 25, 1]);
+            l(
+                Vec3::new(-ty.tip.x, ty.tip.y, -ty.tip.z),
+                40.0,
+                L_RED,
+                steady,
+            );
+            l(
+                Vec3::new(ty.tip.x, ty.tip.y, -ty.tip.z),
+                40.0,
+                L_GREEN,
+                steady,
+            );
+            l(
+                Vec3::new(0.0, ty.tail.y * 0.35, -ty.tail.z),
+                25.0,
+                L_WHITE,
+                steady,
+            );
+            l(
+                Vec3::new(0.0, ty.cy + ty.rf + 0.1, 0.0),
+                120.0,
+                L_RED,
+                [12, ph, 25, 1],
+            );
             for sx in [-1.0f32, 1.0] {
-                l(Vec3::new(sx * ty.tip.x, ty.tip.y, -ty.tip.z), 1600.0, L_STROBE, [11, ph.wrapping_add(60), 7, 1]);
+                l(
+                    Vec3::new(sx * ty.tip.x, ty.tip.y, -ty.tip.z),
+                    1600.0,
+                    L_STROBE,
+                    [11, ph.wrapping_add(60), 7, 1],
+                );
             }
         }
     }
@@ -244,7 +315,11 @@ fn spawn(src: Arc<Sources>, shared: Arc<Mutex<Shared>>, on: Arc<AtomicBool>) {
             let want = shared.lock().want;
             if let (true, Some((lat, lon))) = (on.load(Ordering::Relaxed), want) {
                 let url = format!("https://api.adsb.lol/v2/point/{lat:.4}/{lon:.4}/{RADIUS_NM}");
-                let res = src.fetch.get(&url).map_err(|e| e.to_string()).and_then(|d| parse(&d).ok_or_else(|| "unreadable answer".to_string()));
+                let res = src
+                    .fetch
+                    .get(&url)
+                    .map_err(|e| e.to_string())
+                    .and_then(|d| parse(&d).ok_or_else(|| "unreadable answer".to_string()));
                 let mut s = shared.lock();
                 match res {
                     Ok(r) => {
@@ -259,7 +334,11 @@ fn spawn(src: Arc<Sources>, shared: Arc<Mutex<Shared>>, on: Arc<AtomicBool>) {
                     }
                 }
             }
-            std::thread::sleep(PERIOD.saturating_sub(started.elapsed()).max(Duration::from_millis(500)));
+            std::thread::sleep(
+                PERIOD
+                    .saturating_sub(started.elapsed())
+                    .max(Duration::from_millis(500)),
+            );
         }
     });
 }
@@ -274,7 +353,12 @@ fn parse(data: &[u8]) -> Option<Vec<Report>> {
         ac.iter()
             .filter_map(|a| {
                 let num = |k: &str| a.get(k).and_then(|v| v.as_f64());
-                let text = |k: &str| a.get(k).and_then(|v| v.as_str()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+                let text = |k: &str| {
+                    a.get(k)
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                };
                 if a.get("alt_baro").and_then(|v| v.as_str()) == Some("ground") {
                     return None;
                 }
@@ -282,7 +366,9 @@ fn parse(data: &[u8]) -> Option<Vec<Report>> {
                 let ty = text("t").unwrap_or_default();
                 let cat = text("category").unwrap_or_default();
                 Some(Report {
-                    call: text("flight").or_else(|| text("r")).unwrap_or_else(|| hex.to_uppercase()),
+                    call: text("flight")
+                        .or_else(|| text("r"))
+                        .unwrap_or_else(|| hex.to_uppercase()),
                     size: size_of(&ty, &cat),
                     lat: num("lat")?,
                     lon: num("lon")?,
@@ -303,10 +389,22 @@ fn parse(data: &[u8]) -> Option<Vec<Report>> {
 /// 1 business jet, 2 regional, 3 narrow-body, 4 wide-body. From the ICAO
 /// type code when it is a known family, else the ADS-B emitter category.
 fn size_of(ty: &str, cat: &str) -> u8 {
-    const WIDE: &[&str] = &["A30", "A31", "A33", "A34", "A35", "A38", "B74", "B76", "B77", "B78", "MD11", "DC10", "IL96", "A124", "A225", "C5M", "KC10"];
-    const NARROW: &[&str] = &["A318", "A319", "A32", "A20N", "A21N", "A19N", "B73", "B37M", "B38M", "B39M", "B3XM", "B75", "BCS", "MD8", "MD9", "B71", "C919", "T204", "SU95"];
-    const REGIONAL: &[&str] = &["E1", "E2", "E7", "CRJ", "AT4", "AT7", "DH8", "SF34", "SB20", "F70", "F100", "RJ", "B46", "J328", "D328"];
-    const BIZ: &[&str] = &["C25", "C5", "C6", "C7", "CL30", "CL35", "CL60", "GLF", "GL5", "GL7", "GLEX", "FA", "LJ", "E50", "E55", "PC24", "H25", "HDJT", "PRM", "SF50", "BE40", "G150", "G280"];
+    const WIDE: &[&str] = &[
+        "A30", "A31", "A33", "A34", "A35", "A38", "B74", "B76", "B77", "B78", "MD11", "DC10",
+        "IL96", "A124", "A225", "C5M", "KC10",
+    ];
+    const NARROW: &[&str] = &[
+        "A318", "A319", "A32", "A20N", "A21N", "A19N", "B73", "B37M", "B38M", "B39M", "B3XM",
+        "B75", "BCS", "MD8", "MD9", "B71", "C919", "T204", "SU95",
+    ];
+    const REGIONAL: &[&str] = &[
+        "E1", "E2", "E7", "CRJ", "AT4", "AT7", "DH8", "SF34", "SB20", "F70", "F100", "RJ", "B46",
+        "J328", "D328",
+    ];
+    const BIZ: &[&str] = &[
+        "C25", "C5", "C6", "C7", "CL30", "CL35", "CL60", "GLF", "GL5", "GL7", "GLEX", "FA", "LJ",
+        "E50", "E55", "PC24", "H25", "HDJT", "PRM", "SF50", "BE40", "G150", "G280",
+    ];
     let has = |l: &[&str]| l.iter().any(|p| ty.starts_with(p));
     // (The narrow-bodies go first: "A318"/"A319" are listed whole so that the
     // A310 and A300 fall through to the wide-bodies.)

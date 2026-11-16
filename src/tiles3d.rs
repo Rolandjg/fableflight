@@ -30,7 +30,7 @@ use crate::geo;
 use crate::gmaps::{Detail, Google};
 use crate::render::{PhotoGpu, Renderer};
 use crate::world::Frustum;
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use bytemuck::{Pod, Zeroable};
 use glam::{DMat4, DVec3, Mat4, Vec3};
 use parking_lot::{Condvar, Mutex};
@@ -92,7 +92,12 @@ impl Params {
             Detail::High => (16.0, ZONE_R, 640, 8),
             Detail::Ultra => (11.0, ZONE_R, 1024, 12),
         };
-        Self { sse_px, zone_r, gpu_budget: mb << 20, fetches }
+        Self {
+            sse_px,
+            zone_r,
+            gpu_budget: mb << 20,
+            fetches,
+        }
     }
 
     /// The band at the zone's edge over which the mesh dissolves into our
@@ -113,7 +118,11 @@ pub fn lla_to_ecef(lat: f64, lon: f64, h: f64) -> DVec3 {
     let (sl, cl) = lat.sin_cos();
     let (so, co) = lon.sin_cos();
     let n = WA / (1.0 - e2 * sl * sl).sqrt();
-    DVec3::new((n + h) * cl * co, (n + h) * cl * so, (n * (1.0 - e2) + h) * sl)
+    DVec3::new(
+        (n + h) * cl * co,
+        (n + h) * cl * so,
+        (n * (1.0 - e2) + h) * sl,
+    )
 }
 
 /// Latitude, longitude (radians) and ellipsoid height (m) of an Earth-centred
@@ -163,7 +172,8 @@ impl Obb {
         s.sqrt()
     }
     fn radius(&self) -> f64 {
-        (self.h[0].length_squared() + self.h[1].length_squared() + self.h[2].length_squared()).sqrt()
+        (self.h[0].length_squared() + self.h[1].length_squared() + self.h[2].length_squared())
+            .sqrt()
     }
 }
 
@@ -253,14 +263,20 @@ fn session_of(url: &str) -> Option<&str> {
 /// tileset it came from, carrying the session along when it has none.
 fn resolve(base: &str, uri: &str, session: Option<&str>) -> String {
     let uri = match uri.find("://") {
-        Some(i) => uri[i + 3..].find('/').map(|j| &uri[i + 3 + j..]).unwrap_or("/"),
+        Some(i) => uri[i + 3..]
+            .find('/')
+            .map(|j| &uri[i + 3 + j..])
+            .unwrap_or("/"),
         None => uri,
     };
     let mut path = if uri.starts_with('/') {
         uri.to_string()
     } else {
         let dir = base.split('?').next().unwrap_or("");
-        format!("{}{uri}", &dir[..dir.rfind('/').map(|i| i + 1).unwrap_or(0)])
+        format!(
+            "{}{uri}",
+            &dir[..dir.rfind('/').map(|i| i + 1).unwrap_or(0)]
+        )
     };
     if session_of(&path).is_none() {
         if let Some(s) = session {
@@ -279,8 +295,14 @@ fn parse_node(j: &serde_json::Value, base: &str, session: Option<&str>) -> Optio
     }
     let f: Vec<f64> = b.iter().map(|v| v.as_f64().unwrap_or(0.0)).collect();
     let v = |i: usize| DVec3::new(f[i], f[i + 1], f[i + 2]);
-    let obb = Obb { c: v(0), h: [v(3), v(6), v(9)] };
-    let kind = match j["content"]["uri"].as_str().or(j["content"]["url"].as_str()) {
+    let obb = Obb {
+        c: v(0),
+        h: [v(3), v(6), v(9)],
+    };
+    let kind = match j["content"]["uri"]
+        .as_str()
+        .or(j["content"]["url"].as_str())
+    {
         Some(u) => {
             let p = resolve(base, u, session);
             if p.split('?').next().unwrap_or("").ends_with(".json") {
@@ -291,14 +313,27 @@ fn parse_node(j: &serde_json::Value, base: &str, session: Option<&str>) -> Optio
         }
         None => Kind::Group,
     };
-    let children = j["children"].as_array().map(|c| c.iter().filter_map(|c| parse_node(c, base, session)).collect()).unwrap_or_default();
-    Some(PNode { obb, error: j["geometricError"].as_f64().unwrap_or(0.0), kind, children })
+    let children = j["children"]
+        .as_array()
+        .map(|c| {
+            c.iter()
+                .filter_map(|c| parse_node(c, base, session))
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(PNode {
+        obb,
+        error: j["geometricError"].as_f64().unwrap_or(0.0),
+        kind,
+        children,
+    })
 }
 
 /// A tileset JSON fetched from `url` (path and query).
 fn parse_tileset(data: &[u8], url: &str) -> Result<PNode> {
     let j: serde_json::Value = serde_json::from_slice(data).context("tileset json")?;
-    parse_node(&j["root"], url, session_of(url)).ok_or_else(|| anyhow!("tileset without a root box"))
+    parse_node(&j["root"], url, session_of(url))
+        .ok_or_else(|| anyhow!("tileset without a root box"))
 }
 
 // ------------------------------------------------------------ decoded tiles
@@ -330,7 +365,9 @@ pub struct MeshData {
 }
 impl MeshData {
     pub fn gpu_bytes(&self) -> usize {
-        self.verts.len() * std::mem::size_of::<PVertex>() + self.idx.len() * 4 + self.mips.iter().map(|m| m.2.len()).sum::<usize>()
+        self.verts.len() * std::mem::size_of::<PVertex>()
+            + self.idx.len() * 4
+            + self.mips.iter().map(|m| m.2.len()).sum::<usize>()
     }
 }
 
@@ -374,21 +411,25 @@ impl Streets<'_> {
             return None;
         }
         let h0 = h - self.datum;
-        self.boxes.iter().zip(&self.tiles).find_map(|((o, e, n, b), t)| {
-            let q = p - *o;
-            let (x, y) = (q.dot(*e) as f32, q.dot(*n) as f32);
-            if x < b[0] || y < b[1] || x > b[2] || y > b[3] {
-                return None;
-            }
-            match t.surfaces(p, h0 + 3.0, h0 + 8.0) {
-                (None, None) => None,
-                (Some(b), _) if b > h0 - 4.0 => Some(b),
-                (_, Some(a)) => Some(a),
-                // Only ground far below (the mesh's deck is missing or much
-                // higher): our own road's height.
-                (Some(_), None) => Some(h0),
-            }
-        }).map(|t| t + self.datum)
+        self.boxes
+            .iter()
+            .zip(&self.tiles)
+            .find_map(|((o, e, n, b), t)| {
+                let q = p - *o;
+                let (x, y) = (q.dot(*e) as f32, q.dot(*n) as f32);
+                if x < b[0] || y < b[1] || x > b[2] || y > b[3] {
+                    return None;
+                }
+                match t.surfaces(p, h0 + 3.0, h0 + 8.0) {
+                    (None, None) => None,
+                    (Some(b), _) if b > h0 - 4.0 => Some(b),
+                    (_, Some(a)) => Some(a),
+                    // Only ground far below (the mesh's deck is missing or much
+                    // higher): our own road's height.
+                    (Some(_), None) => Some(h0),
+                }
+            })
+            .map(|t| t + self.datum)
     }
 }
 
@@ -396,8 +437,15 @@ impl ColMesh {
     fn build(o: DVec3, pos: &[Vec3], idx: &[u32]) -> Self {
         let (e, n, u) = geo::enu(o);
         let (e3, n3, u3) = (e.as_vec3(), n.as_vec3(), u.as_vec3());
-        let v: Vec<Vec3> = pos.iter().map(|p| Vec3::new(p.dot(e3), p.dot(n3), p.dot(u3))).collect();
-        let t: Vec<[u32; 3]> = idx.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).filter(|c| c.iter().all(|&i| (i as usize) < v.len())).collect();
+        let v: Vec<Vec3> = pos
+            .iter()
+            .map(|p| Vec3::new(p.dot(e3), p.dot(n3), p.dot(u3)))
+            .collect();
+        let t: Vec<[u32; 3]> = idx
+            .chunks_exact(3)
+            .map(|c| [c[0], c[1], c[2]])
+            .filter(|c| c.iter().all(|&i| (i as usize) < v.len()))
+            .collect();
         let (mut min, mut max) = ([f32::MAX; 2], [f32::MIN; 2]);
         for p in &v {
             min = [min[0].min(p.x), min[1].min(p.y)];
@@ -440,7 +488,19 @@ impl ColMesh {
                 count[k] += 1;
             });
         }
-        Self { o, axes: [e, n, u], v, t, min, max, cell, nx, ny, start, list }
+        Self {
+            o,
+            axes: [e, n, u],
+            v,
+            t,
+            min,
+            max,
+            cell,
+            nx,
+            ny,
+            start,
+            list,
+        }
     }
 
     /// Height above our sphere of the highest surface on the vertical through
@@ -461,8 +521,15 @@ impl ColMesh {
         let foot = self.o + self.axes[0] * x as f64 + self.axes[1] * y as f64;
         // Limits in the tile's own z (its up axis is radial to within a
         // fraction of a degree, so a height is z plus that of z = 0).
-        let base = if ceil < f64::MAX { foot.length() - geo::R } else { 0.0 };
-        let (zc, zh) = ((ceil - base).min(f32::MAX as f64) as f32, (hi - base).min(f32::MAX as f64) as f32);
+        let base = if ceil < f64::MAX {
+            foot.length() - geo::R
+        } else {
+            0.0
+        };
+        let (zc, zh) = (
+            (ceil - base).min(f32::MAX as f64) as f32,
+            (hi - base).min(f32::MAX as f64) as f32,
+        );
         let cx = (((x - self.min[0]) / self.cell) as usize).min(self.nx - 1);
         let cy = (((y - self.min[1]) / self.cell) as usize).min(self.ny - 1);
         let k = cy * self.nx + cx;
@@ -495,7 +562,10 @@ impl ColMesh {
     fn near(&self, p: DVec3, r: f64) -> bool {
         let q = p - self.o;
         let (x, y) = (q.dot(self.axes[0]), q.dot(self.axes[1]));
-        x > self.min[0] as f64 - r && y > self.min[1] as f64 - r && x < self.max[0] as f64 + r && y < self.max[1] as f64 + r
+        x > self.min[0] as f64 - r
+            && y > self.min[1] as f64 - r
+            && x < self.max[0] as f64 + r
+            && y < self.max[1] as f64 + r
     }
 }
 
@@ -517,7 +587,12 @@ fn pack(sizes: &[(u32, u32)]) -> (u32, u32, Vec<(u32, u32)>) {
     let mut free: Vec<(u32, u32, u32, u32)> = Vec::new();
     for &i in &order[1..] {
         let (pw, ph) = pad(sizes[i]);
-        let best = free.iter().enumerate().filter(|(_, f)| f.2 >= pw && f.3 >= ph).min_by_key(|(_, f)| f.2 * f.3).map(|(k, _)| k);
+        let best = free
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.2 >= pw && f.3 >= ph)
+            .min_by_key(|(_, f)| f.2 * f.3)
+            .map(|(k, _)| k);
         if let Some(k) = best {
             let f = free.swap_remove(k);
             at[i] = (f.0, f.1);
@@ -599,7 +674,9 @@ fn mips(w: u32, h: u32, data: Vec<u8>) -> Vec<(u32, u32, Vec<u8>)> {
 /// Reads an accessor as floats (`comps` per element), normalising integer ones.
 fn accessor_f32(j: &serde_json::Value, bin: &[u8], i: usize, comps: usize) -> Result<Vec<f32>> {
     let a = &j["accessors"][i];
-    let bv = &j["bufferViews"][a["bufferView"].as_u64().ok_or_else(|| anyhow!("sparse accessor"))? as usize];
+    let bv = &j["bufferViews"][a["bufferView"]
+        .as_u64()
+        .ok_or_else(|| anyhow!("sparse accessor"))? as usize];
     let count = a["count"].as_u64().unwrap_or(0) as usize;
     let ct = a["componentType"].as_u64().unwrap_or(0);
     let norm = a["normalized"].as_bool().unwrap_or(false);
@@ -609,8 +686,12 @@ fn accessor_f32(j: &serde_json::Value, bin: &[u8], i: usize, comps: usize) -> Re
         5121 | 5120 => 1,
         _ => bail!("component type {ct}"),
     };
-    let off = bv["byteOffset"].as_u64().unwrap_or(0) as usize + a["byteOffset"].as_u64().unwrap_or(0) as usize;
-    let stride = bv["byteStride"].as_u64().map(|s| s as usize).unwrap_or(size * comps);
+    let off = bv["byteOffset"].as_u64().unwrap_or(0) as usize
+        + a["byteOffset"].as_u64().unwrap_or(0) as usize;
+    let stride = bv["byteStride"]
+        .as_u64()
+        .map(|s| s as usize)
+        .unwrap_or(size * comps);
     if count > 0 && off + stride * (count - 1) + size * comps > bin.len() {
         bail!("accessor out of range");
     }
@@ -637,20 +718,31 @@ fn accessor_f32(j: &serde_json::Value, bin: &[u8], i: usize, comps: usize) -> Re
 
 fn accessor_idx(j: &serde_json::Value, bin: &[u8], i: usize) -> Result<Vec<u32>> {
     let a = &j["accessors"][i];
-    let bv = &j["bufferViews"][a["bufferView"].as_u64().ok_or_else(|| anyhow!("sparse indices"))? as usize];
+    let bv = &j["bufferViews"][a["bufferView"]
+        .as_u64()
+        .ok_or_else(|| anyhow!("sparse indices"))? as usize];
     let count = a["count"].as_u64().unwrap_or(0) as usize;
-    let off = bv["byteOffset"].as_u64().unwrap_or(0) as usize + a["byteOffset"].as_u64().unwrap_or(0) as usize;
+    let off = bv["byteOffset"].as_u64().unwrap_or(0) as usize
+        + a["byteOffset"].as_u64().unwrap_or(0) as usize;
     let size = match a["componentType"].as_u64() {
         Some(5121) => 1,
         Some(5123) => 2,
         Some(5125) => 4,
         c => bail!("index type {c:?}"),
     };
-    let d = bin.get(off..off + count * size).ok_or_else(|| anyhow!("indices out of range"))?;
+    let d = bin
+        .get(off..off + count * size)
+        .ok_or_else(|| anyhow!("indices out of range"))?;
     Ok(match size {
         1 => d.iter().map(|&v| v as u32).collect(),
-        2 => d.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]]) as u32).collect(),
-        _ => d.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect(),
+        2 => d
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]) as u32)
+            .collect(),
+        _ => d
+            .chunks_exact(4)
+            .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect(),
     })
 }
 
@@ -659,9 +751,26 @@ fn node_matrix(n: &serde_json::Value) -> DMat4 {
         let f: Vec<f64> = m.iter().map(|v| v.as_f64().unwrap_or(0.0)).collect();
         return DMat4::from_cols_slice(&f);
     }
-    let v = |k: &str, d: &[f64]| n[k].as_array().map(|a| a.iter().map(|v| v.as_f64().unwrap_or(0.0)).collect::<Vec<_>>()).filter(|a| a.len() == d.len()).unwrap_or(d.to_vec());
-    let (t, r, s) = (v("translation", &[0.0; 3]), v("rotation", &[0.0, 0.0, 0.0, 1.0]), v("scale", &[1.0; 3]));
-    DMat4::from_scale_rotation_translation(DVec3::new(s[0], s[1], s[2]), glam::DQuat::from_xyzw(r[0], r[1], r[2], r[3]), DVec3::new(t[0], t[1], t[2]))
+    let v = |k: &str, d: &[f64]| {
+        n[k].as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|v| v.as_f64().unwrap_or(0.0))
+                    .collect::<Vec<_>>()
+            })
+            .filter(|a| a.len() == d.len())
+            .unwrap_or(d.to_vec())
+    };
+    let (t, r, s) = (
+        v("translation", &[0.0; 3]),
+        v("rotation", &[0.0, 0.0, 0.0, 1.0]),
+        v("scale", &[1.0; 3]),
+    );
+    DMat4::from_scale_rotation_translation(
+        DVec3::new(s[0], s[1], s[2]),
+        glam::DQuat::from_xyzw(r[0], r[1], r[2], r[3]),
+        DVec3::new(t[0], t[1], t[2]),
+    )
 }
 
 /// A glTF binary tile: its triangles placed in our frame, its texture with mips.
@@ -671,7 +780,11 @@ pub fn decode(glb: &[u8]) -> Result<MeshData> {
 
 /// As `decode`, with the pavement smoothed (pave.rs) when `src` is given.
 pub fn decode_with(glb: &[u8], src: Option<&crate::sources::Sources>) -> Result<MeshData> {
-    let u32_at = |o: usize| glb.get(o..o + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])).ok_or_else(|| anyhow!("short glb"));
+    let u32_at = |o: usize| {
+        glb.get(o..o + 4)
+            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .ok_or_else(|| anyhow!("short glb"))
+    };
     if u32_at(0)? != 0x4654_6C67 {
         bail!("not a glb");
     }
@@ -679,7 +792,9 @@ pub fn decode_with(glb: &[u8], src: Option<&crate::sources::Sources>) -> Result<
     let mut o = 12;
     while o + 8 <= glb.len() {
         let (len, ty) = (u32_at(o)? as usize, u32_at(o + 4)?);
-        let chunk = glb.get(o + 8..o + 8 + len).ok_or_else(|| anyhow!("short chunk"))?;
+        let chunk = glb
+            .get(o + 8..o + 8 + len)
+            .ok_or_else(|| anyhow!("short chunk"))?;
         match ty {
             0x4E4F_534A => json = Some(serde_json::from_slice(chunk)?),
             0x004E_4942 => bin = chunk,
@@ -689,16 +804,35 @@ pub fn decode_with(glb: &[u8], src: Option<&crate::sources::Sources>) -> Result<
     }
     let j = json.ok_or_else(|| anyhow!("glb without json"))?;
     // glTF is y-up; 3D Tiles are z-up (ECEF).
-    let yup = DMat4::from_cols(DVec3::X.extend(0.0), DVec3::Z.extend(0.0), (-DVec3::Y).extend(0.0), glam::DVec4::W);
+    let yup = DMat4::from_cols(
+        DVec3::X.extend(0.0),
+        DVec3::Z.extend(0.0),
+        (-DVec3::Y).extend(0.0),
+        glam::DVec4::W,
+    );
     let mut meshes: Vec<(DMat4, usize)> = Vec::new();
-    let mut stack: Vec<(usize, DMat4)> = j["scenes"][j["scene"].as_u64().unwrap_or(0) as usize]["nodes"].as_array().map(|a| a.iter().filter_map(|n| n.as_u64()).map(|n| (n as usize, yup)).collect()).unwrap_or_default();
+    let mut stack: Vec<(usize, DMat4)> =
+        j["scenes"][j["scene"].as_u64().unwrap_or(0) as usize]["nodes"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|n| n.as_u64())
+                    .map(|n| (n as usize, yup))
+                    .collect()
+            })
+            .unwrap_or_default();
     while let Some((n, parent)) = stack.pop() {
         let node = &j["nodes"][n];
         let m = parent * node_matrix(node);
         if let Some(mi) = node["mesh"].as_u64() {
             meshes.push((m, mi as usize));
         }
-        for c in node["children"].as_array().into_iter().flatten().filter_map(|c| c.as_u64()) {
+        for c in node["children"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| c.as_u64())
+        {
             stack.push((c as usize, m));
         }
     }
@@ -709,7 +843,11 @@ pub fn decode_with(glb: &[u8], src: Option<&crate::sources::Sources>) -> Result<
     // holds up to three photographs, packed into one atlas below.
     let mut parts: Vec<(Option<usize>, std::ops::Range<usize>)> = Vec::new();
     for (m, mi) in meshes {
-        for p in j["meshes"][mi]["primitives"].as_array().into_iter().flatten() {
+        for p in j["meshes"][mi]["primitives"]
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
             if p["mode"].as_u64().unwrap_or(4) != 4 {
                 continue;
             }
@@ -717,7 +855,14 @@ pub fn decode_with(glb: &[u8], src: Option<&crate::sources::Sources>) -> Result<
                 bail!("Draco-compressed tile (not supported)");
             }
             let tex = p["material"].as_u64().and_then(|mat| j["materials"][mat as usize]["pbrMetallicRoughness"]["baseColorTexture"]["index"].as_u64()).and_then(|t| j["textures"][t as usize]["source"].as_u64()).map(|s| s as usize);
-            let pos = accessor_f32(&j, bin, p["attributes"]["POSITION"].as_u64().ok_or_else(|| anyhow!("no positions"))? as usize, 3)?;
+            let pos = accessor_f32(
+                &j,
+                bin,
+                p["attributes"]["POSITION"]
+                    .as_u64()
+                    .ok_or_else(|| anyhow!("no positions"))? as usize,
+                3,
+            )?;
             let n = pos.len() / 3;
             let uv = match p["attributes"]["TEXCOORD_0"].as_u64() {
                 Some(a) => accessor_f32(&j, bin, a as usize, 2)?,
@@ -725,13 +870,25 @@ pub fn decode_with(glb: &[u8], src: Option<&crate::sources::Sources>) -> Result<
             };
             let base = ecef.len() as u32;
             match p["indices"].as_u64() {
-                Some(a) => idx.extend(accessor_idx(&j, bin, a as usize)?.into_iter().filter(|&i| (i as usize) < n).map(|i| i + base)),
+                Some(a) => idx.extend(
+                    accessor_idx(&j, bin, a as usize)?
+                        .into_iter()
+                        .filter(|&i| (i as usize) < n)
+                        .map(|i| i + base),
+                ),
                 None => idx.extend(base..base + n as u32),
             }
             idx.truncate(idx.len() / 3 * 3);
             for k in 0..n {
-                ecef.push(m.transform_point3(DVec3::new(pos[k * 3] as f64, pos[k * 3 + 1] as f64, pos[k * 3 + 2] as f64)));
-                uvs.push([uv.get(k * 2).copied().unwrap_or(0.0), uv.get(k * 2 + 1).copied().unwrap_or(0.0)]);
+                ecef.push(m.transform_point3(DVec3::new(
+                    pos[k * 3] as f64,
+                    pos[k * 3 + 1] as f64,
+                    pos[k * 3 + 2] as f64,
+                )));
+                uvs.push([
+                    uv.get(k * 2).copied().unwrap_or(0.0),
+                    uv.get(k * 2 + 1).copied().unwrap_or(0.0),
+                ]);
             }
             parts.push((tex, base as usize..ecef.len()));
         }
@@ -755,7 +912,11 @@ pub fn decode_with(glb: &[u8], src: Option<&crate::sources::Sources>) -> Result<
                 let v = &j["bufferViews"][bv as usize];
                 let off = v["byteOffset"].as_u64().unwrap_or(0) as usize;
                 let len = v["byteLength"].as_u64().unwrap_or(0) as usize;
-                let img = image::load_from_memory(bin.get(off..off + len).ok_or_else(|| anyhow!("image out of range"))?)?.to_rgba8();
+                let img = image::load_from_memory(
+                    bin.get(off..off + len)
+                        .ok_or_else(|| anyhow!("image out of range"))?,
+                )?
+                .to_rgba8();
                 let (w, h) = img.dimensions();
                 (w, h, img.into_raw())
             }
@@ -782,7 +943,10 @@ pub fn decode_with(glb: &[u8], src: Option<&crate::sources::Sources>) -> Result<
             let (w, h) = (pics[k].0 as f32, pics[k].1 as f32);
             let (ox, oy) = ((at[k].0 + ATLAS_PAD) as f32, (at[k].1 + ATLAS_PAD) as f32);
             for uv in &mut uvs[run.clone()] {
-                *uv = [(ox + uv[0].clamp(0.0, 1.0) * w) / aw as f32, (oy + uv[1].clamp(0.0, 1.0) * h) / ah as f32];
+                *uv = [
+                    (ox + uv[0].clamp(0.0, 1.0) * w) / aw as f32,
+                    (oy + uv[1].clamp(0.0, 1.0) * h) / ah as f32,
+                ];
             }
         }
         mips(aw, ah, px)
@@ -804,7 +968,9 @@ pub fn decode_with(glb: &[u8], src: Option<&crate::sources::Sources>) -> Result<
         crate::pave::flatten(src, origin, &mut pos, &mut lla);
     }
     // Which building each vertex is part of, for its windows at night.
-    let (tags, beacons) = src.map(|src| crate::photonight::tag(src, origin, &pos, &lla)).unwrap_or_default();
+    let (tags, beacons) = src
+        .map(|src| crate::photonight::tag(src, origin, &pos, &lla))
+        .unwrap_or_default();
     let mut nrm = vec![Vec3::ZERO; pos.len()];
     for t in idx.chunks_exact(3) {
         let (a, b, c) = (pos[t[0] as usize], pos[t[1] as usize], pos[t[2] as usize]);
@@ -823,14 +989,39 @@ pub fn decode_with(glb: &[u8], src: Option<&crate::sources::Sources>) -> Result<
         .map(|(i, ((p, uv), n))| {
             let n = n.try_normalize().unwrap_or(up);
             let q = |v: f32| (v * 127.0).round().clamp(-127.0, 127.0) as i8;
-            PVertex { pos: p.to_array(), uv: *uv, nrm: [q(n.x), q(n.y), q(n.z), tags.get(i).copied().unwrap_or(0) as i8] }
+            PVertex {
+                pos: p.to_array(),
+                uv: *uv,
+                nrm: [
+                    q(n.x),
+                    q(n.y),
+                    q(n.z),
+                    tags.get(i).copied().unwrap_or(0) as i8,
+                ],
+            }
         })
         .collect();
     let step = (lla.len() / 64).max(1);
     let samples = lla.iter().step_by(step).copied().collect();
-    let copyright = j["asset"]["copyright"].as_str().unwrap_or("").split(';').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+    let copyright = j["asset"]["copyright"]
+        .as_str()
+        .unwrap_or("")
+        .split(';')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
     let col = ColMesh::build(origin, &pos, &idx);
-    Ok(MeshData { verts, idx, mips, origin, col, copyright, samples, sun, beacons })
+    Ok(MeshData {
+        verts,
+        idx,
+        mips,
+        origin,
+        col,
+        copyright,
+        samples,
+        sun,
+        beacons,
+    })
 }
 
 // ------------------------------------------------------------ workers
@@ -862,24 +1053,50 @@ struct Jobs {
 }
 type Queue = Arc<(Mutex<Jobs>, Condvar)>;
 
-fn spawn_workers(g: Arc<Google>, src: Option<Arc<crate::sources::Sources>>, queue: Queue, tx: crossbeam_channel::Sender<Res>) {
+fn spawn_workers(
+    g: Arc<Google>,
+    src: Option<Arc<crate::sources::Sources>>,
+    queue: Queue,
+    tx: crossbeam_channel::Sender<Res>,
+) {
     for _ in 0..WORKERS {
         let (g, src, queue, tx) = (g.clone(), src.clone(), queue.clone(), tx.clone());
-        std::thread::spawn(move || loop {
-            let req = {
-                let mut q = queue.0.lock();
-                while q.items.is_empty() || q.busy >= q.limit {
-                    queue.1.wait(&mut q);
+        std::thread::spawn(move || {
+            loop {
+                let req = {
+                    let mut q = queue.0.lock();
+                    while q.items.is_empty() || q.busy >= q.limit {
+                        queue.1.wait(&mut q);
+                    }
+                    let best = q
+                        .items
+                        .iter()
+                        .enumerate()
+                        .min_by(|a, b| a.1.0.total_cmp(&b.1.0))
+                        .map(|(i, _)| i)
+                        .unwrap();
+                    q.busy += 1;
+                    q.items.swap_remove(best).1
+                };
+                let r = g.get3d(&req.path).and_then(|d| {
+                    if req.json {
+                        parse_tileset(&d, &req.path).map(Payload::Tree)
+                    } else {
+                        decode_with(&d, src.as_deref()).map(|m| Payload::Mesh(Box::new(m)))
+                    }
+                });
+                queue.0.lock().busy -= 1;
+                queue.1.notify_one();
+                if tx
+                    .send(Res {
+                        epoch: req.epoch,
+                        node: req.node,
+                        r,
+                    })
+                    .is_err()
+                {
+                    break;
                 }
-                let best = q.items.iter().enumerate().min_by(|a, b| a.1 .0.total_cmp(&b.1 .0)).map(|(i, _)| i).unwrap();
-                q.busy += 1;
-                q.items.swap_remove(best).1
-            };
-            let r = g.get3d(&req.path).and_then(|d| if req.json { parse_tileset(&d, &req.path).map(Payload::Tree) } else { decode_with(&d, src.as_deref()).map(|m| Payload::Mesh(Box::new(m))) });
-            queue.0.lock().busy -= 1;
-            queue.1.notify_one();
-            if tx.send(Res { epoch: req.epoch, node: req.node, r }).is_err() {
-                break;
             }
         });
     }
@@ -941,7 +1158,8 @@ pub fn inside(ring: &[glam::Vec2], p: glam::Vec2) -> bool {
     let mut j = ring.len().wrapping_sub(1);
     for i in 0..ring.len() {
         let (p0, p1) = (ring[i], ring[j]);
-        if (p0.y > p.y) != (p1.y > p.y) && p.x < (p1.x - p0.x) * (p.y - p0.y) / (p1.y - p0.y) + p0.x {
+        if (p0.y > p.y) != (p1.y > p.y) && p.x < (p1.x - p0.x) * (p.y - p0.y) / (p1.y - p0.y) + p0.x
+        {
             c = !c;
         }
         j = i;
@@ -956,7 +1174,11 @@ fn simplify(ring: &[glam::Vec2], max: usize) -> Vec<glam::Vec2> {
     while r.len() > max.max(3) {
         let n = r.len();
         let k = (0..n).min_by(|&a, &b| {
-            let w = |i: usize| (r[i] - r[(i + n - 1) % n]).perp_dot(r[(i + 1) % n] - r[i]).abs();
+            let w = |i: usize| {
+                (r[i] - r[(i + n - 1) % n])
+                    .perp_dot(r[(i + 1) % n] - r[i])
+                    .abs()
+            };
             w(a).total_cmp(&w(b))
         });
         r.remove(k.unwrap());
@@ -1007,7 +1229,10 @@ impl SkinSrc {
     /// Where a point lies: across, along and above the floor.
     pub fn local(&self, p: DVec3) -> (glam::Vec2, f32) {
         let d = p - self.o;
-        (glam::Vec2::new(d.dot(self.e) as f32, d.dot(self.n) as f32), d.dot(self.u) as f32)
+        (
+            glam::Vec2::new(d.dot(self.e) as f32, d.dot(self.n) as f32),
+            d.dot(self.u) as f32,
+        )
     }
     /// Inside the cut: within an outline and above the floor.
     pub fn inside(&self, p: DVec3) -> bool {
@@ -1090,7 +1315,14 @@ impl Photo {
             root_at: None,
             root_ok: false,
             root_fails: 0,
-            queue: Arc::new((Mutex::new(Jobs { items: Vec::new(), busy: 0, limit: Params::of(Detail::default()).fetches }), Condvar::new())),
+            queue: Arc::new((
+                Mutex::new(Jobs {
+                    items: Vec::new(),
+                    busy: 0,
+                    limit: Params::of(Detail::default()).fetches,
+                }),
+                Condvar::new(),
+            )),
             tx,
             rx,
             workers: false,
@@ -1103,7 +1335,11 @@ impl Photo {
             draws: Vec::new(),
             drawn: Vec::new(),
             shown: Vec::new(),
-            fade_s: std::env::var("FABLE_LOD_FADE").ok().and_then(|v| v.parse().ok()).unwrap_or(FADE_S).max(0.0),
+            fade_s: std::env::var("FABLE_LOD_FADE")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(FADE_S)
+                .max(0.0),
             fade_t: 0.0,
             col: Vec::new(),
             samples: VecDeque::new(),
@@ -1151,8 +1387,31 @@ impl Photo {
         let sph_c = ecef_to_ours(p.obb.c);
         let sph_r = p.obb.radius();
         let never = u64::MAX;
-        self.nodes.push(Node { obb: p.obb, sph_c, sph_r, error: p.error, kind: p.kind, state: State::Idle, fails: 0, children: Vec::new(), last_used: 0, parent, fade: 0.0, out: false, vis: never, sel: never, under: never, inc_below: never, out_below: never, busy: never });
-        let kids: Vec<u32> = p.children.into_iter().map(|c| self.push_tree(c, i)).collect();
+        self.nodes.push(Node {
+            obb: p.obb,
+            sph_c,
+            sph_r,
+            error: p.error,
+            kind: p.kind,
+            state: State::Idle,
+            fails: 0,
+            children: Vec::new(),
+            last_used: 0,
+            parent,
+            fade: 0.0,
+            out: false,
+            vis: never,
+            sel: never,
+            under: never,
+            inc_below: never,
+            out_below: never,
+            busy: never,
+        });
+        let kids: Vec<u32> = p
+            .children
+            .into_iter()
+            .map(|c| self.push_tree(c, i))
+            .collect();
         self.nodes[i as usize].children = kids;
         i
     }
@@ -1250,7 +1509,9 @@ impl Photo {
             (Kind::Glb(_), State::Ready(_)) => true,
             (Kind::Glb(_), State::Failed(_)) => n.fails >= 4,
             (Kind::Glb(_), _) => false,
-            (Kind::Json(_), State::Linked) | (Kind::Group, _) => depth < 4 && n.children.iter().all(|&k| self.ready_deep(k, c, depth + 1)),
+            (Kind::Json(_), State::Linked) | (Kind::Group, _) => {
+                depth < 4 && n.children.iter().all(|&k| self.ready_deep(k, c, depth + 1))
+            }
             (Kind::Json(_), _) => false,
         }
     }
@@ -1306,7 +1567,8 @@ impl Photo {
         // and leave holes): a tile still fading in does not split yet, and a
         // tile does not take back the place of children still fading in.
         let n = &self.nodes[i as usize];
-        let fading_in = n.vis == self.frame - 1 && !n.out && n.fade < 1.0 && matches!(n.state, State::Ready(_));
+        let fading_in =
+            n.vis == self.frame - 1 && !n.out && n.fade < 1.0 && matches!(n.state, State::Ready(_));
         let held = n.busy == self.frame;
         if refine {
             if kids_ready && !fading_in {
@@ -1357,7 +1619,17 @@ impl Photo {
     /// `terrain` is our own ground height (m) at a lat/lon, for the datum,
     /// and whether it comes from a fine terrain tile.
     #[allow(clippy::too_many_arguments)]
-    pub fn update(&mut self, r: &Renderer, cam: DVec3, focus: DVec3, fr: &Frustum, px: f64, day: f64, dt: f64, terrain: &dyn Fn(f64, f64) -> Option<(f64, bool)>) {
+    pub fn update(
+        &mut self,
+        r: &Renderer,
+        cam: DVec3,
+        focus: DVec3,
+        fr: &Frustum,
+        px: f64,
+        day: f64,
+        dt: f64,
+        terrain: &dyn Fn(f64, f64) -> Option<(f64, bool)>,
+    ) {
         self.frame += 1;
         let want_on = self.g.photoreal() && day > 0.0;
         if !self.g.photoreal() && (!self.nodes.is_empty() || self.root_at.is_some()) {
@@ -1366,7 +1638,11 @@ impl Photo {
         self.receive();
         // The zone grows and shrinks smoothly (on at dawn, off at dusk or when switched off).
         self.set_params(Params::of(self.g.detail()));
-        let target = if want_on && self.datum.is_some() { self.params.zone_r * day.clamp(0.0, 1.0) } else { 0.0 };
+        let target = if want_on && self.datum.is_some() {
+            self.params.zone_r * day.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         self.zone_r += (target - self.zone_r) * (dt * 0.8).min(1.0);
         if target == 0.0 && self.zone_r < 50.0 {
             self.zone_r = 0.0;
@@ -1386,7 +1662,12 @@ impl Photo {
         }
         if !self.workers {
             self.workers = true;
-            spawn_workers(self.g.clone(), self.src.clone(), self.queue.clone(), self.tx.clone());
+            spawn_workers(
+                self.g.clone(),
+                self.src.clone(),
+                self.queue.clone(),
+                self.tx.clone(),
+            );
         }
         // A session lasts about three hours: then the whole tree is fetched anew.
         let now = self.now();
@@ -1397,7 +1678,15 @@ impl Photo {
         }
         if self.root_at.is_none() {
             self.root_at = Some(now);
-            self.queue.0.lock().items.push((0.0, Req { epoch: self.epoch, node: ROOT, path: ROOT_PATH.into(), json: true }));
+            self.queue.0.lock().items.push((
+                0.0,
+                Req {
+                    epoch: self.epoch,
+                    node: ROOT,
+                    path: ROOT_PATH.into(),
+                    json: true,
+                },
+            ));
             self.queue.1.notify_one();
         }
         self.upload(r, terrain);
@@ -1414,8 +1703,19 @@ impl Photo {
         let datum = self.datum.unwrap_or(0.0);
         let (clat, clon, ch) = geo::pos_to_lla(cam);
         // While the datum is still unknown, load (to measure it) over what will be the zone.
-        let reach = if self.zone_r > 0.0 { self.zone_r } else { 2500.0f64.min(self.params.zone_r) };
-        let c = Ctx { cam, cam_e: lla_to_ecef(clat, clon, ch - datum), centre_e: lla_to_ecef(flat, flon, gh - datum), fr: fr.clone(), px, datum };
+        let reach = if self.zone_r > 0.0 {
+            self.zone_r
+        } else {
+            2500.0f64.min(self.params.zone_r)
+        };
+        let c = Ctx {
+            cam,
+            cam_e: lla_to_ecef(clat, clon, ch - datum),
+            centre_e: lla_to_ecef(flat, flon, gh - datum),
+            fr: fr.clone(),
+            px,
+            datum,
+        };
         let zr = self.zone_r;
         self.zone_r = reach;
         self.mark_busy();
@@ -1428,12 +1728,19 @@ impl Photo {
         // Collision tiles near the aircraft, finest first.
         for (i, n) in self.nodes.iter().enumerate() {
             if let State::Ready(_) = n.state {
-                if n.error <= COL_ERROR && n.last_used + 2 >= self.frame && n.obb.dist(c.centre_e) < COL_DIST {
+                if n.error <= COL_ERROR
+                    && n.last_used + 2 >= self.frame
+                    && n.obb.dist(c.centre_e) < COL_DIST
+                {
                     self.col.push(i as u32);
                 }
             }
         }
-        self.col.sort_by(|a, b| self.nodes[*a as usize].error.total_cmp(&self.nodes[*b as usize].error));
+        self.col.sort_by(|a, b| {
+            self.nodes[*a as usize]
+                .error
+                .total_cmp(&self.nodes[*b as usize].error)
+        });
         self.schedule();
         self.evict();
         self.update_datum(dt);
@@ -1451,7 +1758,11 @@ impl Photo {
         cr.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
         self.credits = cr.iter().map(|c| c.0).collect::<Vec<_>>().join("; ");
         let queued = self.queue.0.lock().items.len();
-        let flying = self.nodes.iter().filter(|n| matches!(n.state, State::Queued)).count();
+        let flying = self
+            .nodes
+            .iter()
+            .filter(|n| matches!(n.state, State::Queued))
+            .count();
         self.stats = (self.draws.len(), self.loaded(), flying.max(queued));
         self.gpu_bytes_shown = self.gpu_bytes;
     }
@@ -1465,10 +1776,14 @@ impl Photo {
         // Unlink stale subtrees: JSON links whose whole subtree is unused.
         fn used(nodes: &[Node], i: usize, frame: u64) -> bool {
             let n = &nodes[i];
-            n.last_used + UNUSED_FRAMES >= frame || n.children.iter().any(|&c| used(nodes, c as usize, frame))
+            n.last_used + UNUSED_FRAMES >= frame
+                || n.children.iter().any(|&c| used(nodes, c as usize, frame))
         }
         for i in 0..old.len() {
-            if matches!(old[i].kind, Kind::Json(_)) && matches!(old[i].state, State::Linked) && !used(&old, i, frame) {
+            if matches!(old[i].kind, Kind::Json(_))
+                && matches!(old[i].state, State::Linked)
+                && !used(&old, i, frame)
+            {
                 old[i].children.clear();
                 old[i].state = State::Idle;
             }
@@ -1507,7 +1822,12 @@ impl Photo {
                 n
             })
             .collect();
-        self.shown = self.shown.iter().map(|&i| map[i as usize]).filter(|&i| i != u32::MAX).collect();
+        self.shown = self
+            .shown
+            .iter()
+            .map(|&i| map[i as usize])
+            .filter(|&i| i != u32::MAX)
+            .collect();
         self.epoch += 1;
         self.uploads.clear();
         self.queue.0.lock().items.clear();
@@ -1564,7 +1884,11 @@ impl Photo {
         let now = self.now();
         let dt = (now - self.fade_t).clamp(0.0, 0.25);
         self.fade_t = now;
-        let step = if self.fade_s > 0.0 { ((dt / self.fade_s) as f32).max(1e-4) } else { 1.0 };
+        let step = if self.fade_s > 0.0 {
+            ((dt / self.fade_s) as f32).max(1e-4)
+        } else {
+            1.0
+        };
         let prev = std::mem::take(&mut self.shown);
         for &i in &prev {
             self.mark_up(i, |n| &mut n.under);
@@ -1599,7 +1923,8 @@ impl Photo {
             if n.sel == f {
                 continue;
             }
-            let keep = matches!(n.state, State::Ready(_)) && (n.inc_below == f || self.any_above(i, |a| a.sel == f && a.fade < 1.0));
+            let keep = matches!(n.state, State::Ready(_))
+                && (n.inc_below == f || self.any_above(i, |a| a.sel == f && a.fade < 1.0));
             if keep {
                 leaving.push(i);
             } else {
@@ -1617,7 +1942,10 @@ impl Photo {
         for k in 0..self.draws.len() {
             let i = self.draws[k];
             let n = &self.nodes[i as usize];
-            if n.fade < 1.0 && n.out_below != f && !self.any_above(i, |a| a.out && a.sel != f && a.vis == f - 1) {
+            if n.fade < 1.0
+                && n.out_below != f
+                && !self.any_above(i, |a| a.out && a.sel != f && a.vis == f - 1)
+            {
                 self.nodes[i as usize].fade = 1.0;
             }
         }
@@ -1646,7 +1974,10 @@ impl Photo {
     }
 
     fn loaded(&self) -> usize {
-        self.nodes.iter().filter(|n| matches!(n.state, State::Ready(_))).count()
+        self.nodes
+            .iter()
+            .filter(|n| matches!(n.state, State::Ready(_)))
+            .count()
     }
 
     /// Hands the wanted requests to the workers, closest first; requests not
@@ -1673,7 +2004,15 @@ impl Photo {
             };
             if matches!(n.state, State::Idle | State::Failed(_)) {
                 n.state = State::Queued;
-                q.items.push((p, Req { epoch: self.epoch, node: i, path, json }));
+                q.items.push((
+                    p,
+                    Req {
+                        epoch: self.epoch,
+                        node: i,
+                        path,
+                        json,
+                    },
+                ));
             }
         }
         drop(q);
@@ -1696,28 +2035,53 @@ impl Photo {
             }
             budget = budget.saturating_sub(bytes);
             self.uploads.pop_front();
-            let State::Decoded(m) = std::mem::replace(&mut n.state, State::Idle) else { unreachable!() };
+            let State::Decoded(m) = std::mem::replace(&mut n.state, State::Idle) else {
+                unreachable!()
+            };
             let gpu = r.upload_photo(&m);
             // How far the mesh sits from our terrain, from the finer tiles.
             if n.error <= E_DRAW {
                 // Only against fine terrain (a coarse tile is off by tens of
                 // metres in hills), and off our buildings' roofs.
-                let v: Vec<([f64; 3], f32)> = m.samples.iter().filter_map(|s| match terrain(s[0], s[1]) {
-                    Some((t, true)) => Some((*s, (t - s[2]) as f32)),
-                    _ => None,
-                }).collect();
+                let v: Vec<([f64; 3], f32)> = m
+                    .samples
+                    .iter()
+                    .filter_map(|s| match terrain(s[0], s[1]) {
+                        Some((t, true)) => Some((*s, (t - s[2]) as f32)),
+                        _ => None,
+                    })
+                    .collect();
                 for (s, d) in v.iter().step_by((v.len() / 16).max(1)) {
-                    self.samples.push_back((geo::lla_to_pos(s[0], s[1], 0.0), *d, n.error as f32));
+                    self.samples
+                        .push_back((geo::lla_to_pos(s[0], s[1], 0.0), *d, n.error as f32));
                 }
                 while self.samples.len() > 3000 {
                     self.samples.pop_front();
                 }
             }
             let uv = m.verts.iter().map(|v| v.uv).collect();
-            let small = m.mips.iter().find(|l| l.0 <= 64 && l.1 <= 64).unwrap_or(m.mips.last().unwrap());
-            let tiny = Arc::new(Tiny { w: small.0, h: small.1, px: small.2.clone() });
+            let small = m
+                .mips
+                .iter()
+                .find(|l| l.0 <= 64 && l.1 <= 64)
+                .unwrap_or(m.mips.last().unwrap());
+            let tiny = Arc::new(Tiny {
+                w: small.0,
+                h: small.1,
+                px: small.2.clone(),
+            });
             let m = *m;
-            n.state = State::Ready(Box::new(Loaded { gpu, col: m.col, uv, tiny, bytes, copyright: m.copyright, at: now, sun: m.sun, beacons: m.beacons }));
+            n.state = State::Ready(Box::new(Loaded {
+                gpu,
+                col: m.col,
+                uv,
+                tiny,
+                bytes,
+                copyright: m.copyright,
+                at: now,
+                sun: m.sun,
+                beacons: m.beacons,
+            }));
             self.gpu_bytes += bytes;
         }
     }
@@ -1727,13 +2091,21 @@ impl Photo {
         if self.gpu_bytes <= budget {
             return;
         }
-        let mut old: Vec<(u64, u32)> = self.nodes.iter().enumerate().filter(|(_, n)| matches!(n.state, State::Ready(_)) && n.last_used + 2 < self.frame).map(|(i, n)| (n.last_used, i as u32)).collect();
+        let mut old: Vec<(u64, u32)> = self
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| matches!(n.state, State::Ready(_)) && n.last_used + 2 < self.frame)
+            .map(|(i, n)| (n.last_used, i as u32))
+            .collect();
         old.sort();
         for (_, i) in old {
             if self.gpu_bytes <= budget * 9 / 10 {
                 break;
             }
-            if let State::Ready(l) = std::mem::replace(&mut self.nodes[i as usize].state, State::Idle) {
+            if let State::Ready(l) =
+                std::mem::replace(&mut self.nodes[i as usize].state, State::Idle)
+            {
                 self.gpu_bytes -= l.bytes;
             }
         }
@@ -1760,11 +2132,20 @@ impl Photo {
         let conf = ((avg.length() - 0.02) / 0.03).clamp(0.0, 1.0);
         let k = (dt * 0.5).min(1.0);
         let (d0, c0) = self.baked_sun;
-        let d = if d0 == DVec3::ZERO { hz } else { (d0 + (hz - d0) * k).normalize_or_zero() };
+        let d = if d0 == DVec3::ZERO {
+            hz
+        } else {
+            (d0 + (hz - d0) * k).normalize_or_zero()
+        };
         self.baked_sun = (d, c0 + (conf - c0) * k);
         if self.frame % 1800 == 0 {
             let (e, n, _) = geo::enu(self.centre);
-            log::debug!("3D tiles: photographed sun from azimuth {:.0} deg (walls {:.3}, sure {:.2})", d.dot(e).atan2(d.dot(n)).to_degrees().rem_euclid(360.0), avg.length(), self.baked_sun.1);
+            log::debug!(
+                "3D tiles: photographed sun from azimuth {:.0} deg (walls {:.3}, sure {:.2})",
+                d.dot(e).atan2(d.dot(n)).to_degrees().rem_euclid(360.0),
+                avg.length(),
+                self.baked_sun.1
+            );
         }
     }
 
@@ -1776,10 +2157,18 @@ impl Photo {
     /// mean of what lies within 2 m of it. Fine tiles are trusted over coarse
     /// ones, which smear roofs and streets together.
     fn update_datum(&mut self, dt: f64) {
-        let near: Vec<&(DVec3, f32, f32)> = self.samples.iter().filter(|s| s.0.distance(self.centre) < 30_000.0).collect();
+        let near: Vec<&(DVec3, f32, f32)> = self
+            .samples
+            .iter()
+            .filter(|s| s.0.distance(self.centre) < 30_000.0)
+            .collect();
         let fine: Vec<f32> = near.iter().filter(|s| s.2 <= 40.0).map(|s| s.1).collect();
         let is_fine = fine.len() >= 120;
-        let mut d = if is_fine { fine } else { near.iter().map(|s| s.1).collect() };
+        let mut d = if is_fine {
+            fine
+        } else {
+            near.iter().map(|s| s.1).collect()
+        };
         if d.len() < 60 {
             return;
         }
@@ -1808,7 +2197,9 @@ impl Photo {
             }
         }
         self.datum = Some(match self.datum {
-            Some(o) if (est - o).abs() < 40.0 && (self.datum_lock.is_some() || !is_fine) => o + (est - o) * (dt * 0.5).min(1.0),
+            Some(o) if (est - o).abs() < 40.0 && (self.datum_lock.is_some() || !is_fine) => {
+                o + (est - o) * (dt * 0.5).min(1.0)
+            }
             _ => est,
         });
         if self.datum_lock.is_none() && is_fine && held >= 3.0 {
@@ -1841,7 +2232,10 @@ impl Photo {
             .col
             .iter()
             .filter_map(|&i| match &self.nodes[i as usize].state {
-                State::Ready(l) => l.col.top(p).map(|h| (h + datum, ((now - l.at) / RAMP_S).clamp(0.0, 1.0))),
+                State::Ready(l) => l
+                    .col
+                    .top(p)
+                    .map(|h| (h + datum, ((now - l.at) / RAMP_S).clamp(0.0, 1.0))),
                 _ => None,
             })
             .take(3)
@@ -1869,8 +2263,23 @@ impl Photo {
                 _ => None,
             })
             .collect();
-        let boxes = tiles.iter().map(|t| (t.o, t.axes[0], t.axes[1], [t.min[0], t.min[1], t.max[0], t.max[1]])).collect();
-        Some(Streets { photo: self, boxes, tiles, datum })
+        let boxes = tiles
+            .iter()
+            .map(|t| {
+                (
+                    t.o,
+                    t.axes[0],
+                    t.axes[1],
+                    [t.min[0], t.min[1], t.max[0], t.max[1]],
+                )
+            })
+            .collect();
+        Some(Streets {
+            photo: self,
+            boxes,
+            tiles,
+            datum,
+        })
     }
 
     /// Whether our own scenery at lat/lon is hidden under the mesh.
@@ -1888,7 +2297,18 @@ impl Photo {
             .filter_map(|&(i, fade, out)| match &self.nodes[i as usize].state {
                 State::Ready(l) => {
                     let o = l.col.o + l.col.axes[2] * datum - cam;
-                    Some((&l.gpu, [[o.x as f32, o.y as f32, o.z as f32, self.nodes[i as usize].error as f32], [fade, if out { 1.0 } else { 0.0 }, 0.0, 0.0]]))
+                    Some((
+                        &l.gpu,
+                        [
+                            [
+                                o.x as f32,
+                                o.y as f32,
+                                o.z as f32,
+                                self.nodes[i as usize].error as f32,
+                            ],
+                            [fade, if out { 1.0 } else { 0.0 }, 0.0, 0.0],
+                        ],
+                    ))
                 }
                 _ => None,
             })
@@ -1919,9 +2339,14 @@ impl Photo {
         let on = self.zone_r > 0.0 && !self.draws.is_empty();
         let cc = c - cam;
         // The cuts nearest the camera, as many as the shaders take.
-        let (mut cut, mut cut_v, mut n_cut, mut nv) = ([[0.0; 4]; 3 * MAX_CUTS], [[0.0; 4]; MAX_CUT_V / 2], 0, 0);
+        let (mut cut, mut cut_v, mut n_cut, mut nv) =
+            ([[0.0; 4]; 3 * MAX_CUTS], [[0.0; 4]; MAX_CUT_V / 2], 0, 0);
         let mut order: Vec<usize> = (0..self.cuts.len()).collect();
-        order.sort_by(|&a, &b| (self.cuts[a].o - cam).length_squared().total_cmp(&(self.cuts[b].o - cam).length_squared()));
+        order.sort_by(|&a, &b| {
+            (self.cuts[a].o - cam)
+                .length_squared()
+                .total_cmp(&(self.cuts[b].o - cam).length_squared())
+        });
         for k in order {
             let ct = &self.cuts[k];
             if !on || n_cut >= MAX_CUTS {
@@ -1944,14 +2369,24 @@ impl Photo {
         }
         PhotoFrame {
             mask_vp: vp.as_mat4(),
-            zone: [if on { self.zone_r as f32 } else { 0.0 }, self.params.band() as f32, if on { 1.0 } else { 0.0 }, n_cut as f32],
+            zone: [
+                if on { self.zone_r as f32 } else { 0.0 },
+                self.params.band() as f32,
+                if on { 1.0 } else { 0.0 },
+                n_cut as f32,
+            ],
             centre: [cc.x as f32, cc.y as f32, cc.z as f32, 0.0],
             sun: {
                 let up = self.centre.normalize();
                 let (hz, conf) = self.baked_sun;
                 let (s, c) = BAKED_ELEV.to_radians().sin_cos();
                 let d = (hz * c + up * s).normalize_or(up);
-                [d.x as f32, d.y as f32, d.z as f32, if self.relight { conf as f32 } else { -1.0 }]
+                [
+                    d.x as f32,
+                    d.y as f32,
+                    d.z as f32,
+                    if self.relight { conf as f32 } else { -1.0 },
+                ]
             },
             cut,
             cut_v,
@@ -1992,7 +2427,9 @@ impl Photo {
         let up = self.centre.normalize();
         let mut best: std::collections::HashMap<u64, (f64, Vec<DVec3>)> = Default::default();
         for &i in &self.draws {
-            let State::Ready(l) = &self.nodes[i as usize].state else { continue };
+            let State::Ready(l) = &self.nodes[i as usize].state else {
+                continue;
+            };
             if l.beacons.is_empty() {
                 continue;
             }
@@ -2011,7 +2448,9 @@ impl Photo {
                 }) {
                     continue;
                 }
-                per.entry(b.key).or_default().push(w + w.normalize() * datum);
+                per.entry(b.key)
+                    .or_default()
+                    .push(w + w.normalize() * datum);
             }
             for (k, v) in per {
                 let top = v.iter().map(|p| p.length()).fold(0.0, f64::max);
@@ -2029,7 +2468,14 @@ impl Photo {
             let phase = (k >> 56) as u8;
             for p in v {
                 let r = p - cam;
-                out.push(crate::airfield::Light { pos: [r.x as f32, r.y as f32, r.z as f32], inten: 60.0, dir: [0.0; 3], spread: 0.0, col: [255, 28, 20, 0], fx: [18, phase, 110, 0] });
+                out.push(crate::airfield::Light {
+                    pos: [r.x as f32, r.y as f32, r.z as f32],
+                    inten: 60.0,
+                    dir: [0.0; 3],
+                    spread: 0.0,
+                    col: [255, 28, 20, 0],
+                    fx: [18, phase, 110, 0],
+                });
             }
         }
     }
@@ -2038,17 +2484,22 @@ impl Photo {
     /// vertical through a point.
     fn mesh_top(&self, p: DVec3) -> Option<f64> {
         let datum = self.datum?;
-        self.draws.iter().find_map(|&i| match &self.nodes[i as usize].state {
-            State::Ready(l) => l.col.top(p).map(|h| h + datum),
-            _ => None,
-        })
+        self.draws
+            .iter()
+            .find_map(|&i| match &self.nodes[i as usize].state {
+                State::Ready(l) => l.col.top(p).map(|h| h + datum),
+                _ => None,
+            })
     }
 
     /// Whether the mesh is what is drawn (and stands) at a point.
     pub fn covers(&self, p: DVec3) -> bool {
         let q = p - self.centre;
         let up = self.centre.normalize();
-        self.zone_r > 0.0 && self.datum.is_some() && !self.draws.is_empty() && (q - up * q.dot(up)).length() < self.zone_r - self.params.band() * 0.5
+        self.zone_r > 0.0
+            && self.datum.is_some()
+            && !self.draws.is_empty()
+            && (q - up * q.dot(up)).length() < self.zone_r - self.params.band() * 0.5
     }
 
     /// Takes a destroyed building out of the mesh. `rings`: its outlines
@@ -2070,7 +2521,10 @@ impl Photo {
         let g0 = geo::lla_to_pos(lat, lon, base);
         let (e, n, u) = geo::enu(g0);
         let to2 = |p: DVec3| glam::Vec2::new((p - g0).dot(e) as f32, (p - g0).dot(n) as f32);
-        let local: Vec<Vec<glam::Vec2>> = rings.iter().map(|r| r.iter().map(|p| to2(*p)).collect()).collect();
+        let local: Vec<Vec<glam::Vec2>> = rings
+            .iter()
+            .map(|r| r.iter().map(|p| to2(*p)).collect())
+            .collect();
         // The street round it, from the mesh just outside: the floor of the cut.
         let mut street: Vec<f64> = Vec::new();
         for r in &local {
@@ -2092,7 +2546,11 @@ impl Photo {
             }
         }
         street.sort_by(|a, b| a.total_cmp(b));
-        let ground = street.get(street.len() / 8).copied().unwrap_or(base).clamp(base - 4.0, base + 4.0);
+        let ground = street
+            .get(street.len() / 8)
+            .copied()
+            .unwrap_or(base)
+            .clamp(base - 4.0, base + 4.0);
         let floor = ground + 0.35;
         let o = g0 + u * (floor - base);
         let (mut lo, mut hi) = (glam::Vec2::splat(f32::MAX), glam::Vec2::splat(f32::MIN));
@@ -2100,7 +2558,11 @@ impl Photo {
             lo = lo.min(*p);
             hi = hi.max(*p);
         }
-        let rad = local.iter().flatten().map(|p| p.length()).fold(0.0f32, f32::max);
+        let rad = local
+            .iter()
+            .flatten()
+            .map(|p| p.length())
+            .fold(0.0f32, f32::max);
         // (the shaders take the same outlines: what is cut out is exactly what comes down)
         let src_rings: Vec<Vec<glam::Vec2>> = local.iter().map(|r| simplify(r, CUT_RING)).collect();
         let mut tops: Vec<Option<f64>> = vec![None; local.len()];
@@ -2120,13 +2582,29 @@ impl Photo {
             let nd = &self.nodes[i as usize];
             let State::Ready(l) = &nd.state else { continue };
             let cm = &l.col;
-            let world = |v: Vec3| cm.o + cm.axes[0] * v.x as f64 + cm.axes[1] * v.y as f64 + cm.axes[2] * (v.z as f64 + datum);
+            let world = |v: Vec3| {
+                cm.o + cm.axes[0] * v.x as f64
+                    + cm.axes[1] * v.y as f64
+                    + cm.axes[2] * (v.z as f64 + datum)
+            };
             let mut tris = Vec::new();
             for t in &cm.t {
                 let p = t.map(|k| world(cm.v[k as usize]));
-                let q = p.map(|p| ((p - o).dot(e) as f32, (p - o).dot(n) as f32, (p - o).dot(u) as f32));
-                let (x0, x1) = (q[0].0.min(q[1].0).min(q[2].0), q[0].0.max(q[1].0).max(q[2].0));
-                let (y0, y1) = (q[0].1.min(q[1].1).min(q[2].1), q[0].1.max(q[1].1).max(q[2].1));
+                let q = p.map(|p| {
+                    (
+                        (p - o).dot(e) as f32,
+                        (p - o).dot(n) as f32,
+                        (p - o).dot(u) as f32,
+                    )
+                });
+                let (x0, x1) = (
+                    q[0].0.min(q[1].0).min(q[2].0),
+                    q[0].0.max(q[1].0).max(q[2].0),
+                );
+                let (y0, y1) = (
+                    q[0].1.min(q[1].1).min(q[2].1),
+                    q[0].1.max(q[1].1).max(q[2].1),
+                );
                 let z1 = q[0].2.max(q[1].2).max(q[2].2);
                 if z1 <= 0.0 || x1 < lo.x || x0 > hi.x || y1 < lo.y || y0 > hi.y {
                     continue;
@@ -2139,10 +2617,17 @@ impl Photo {
                         }
                     }
                 }
-                tris.push((p, t.map(|k| l.uv.get(k as usize).copied().unwrap_or([0.0; 2]))));
+                tris.push((
+                    p,
+                    t.map(|k| l.uv.get(k as usize).copied().unwrap_or([0.0; 2])),
+                ));
             }
             if !tris.is_empty() {
-                tiles.push(SkinTile { view: l.gpu.view.clone(), tiny: l.tiny.clone(), tris });
+                tiles.push(SkinTile {
+                    view: l.gpu.view.clone(),
+                    tiny: l.tiny.clone(),
+                    tris,
+                });
             }
         }
         for r in &src_rings {
@@ -2151,9 +2636,23 @@ impl Photo {
             }
             let ring = r.clone();
             let rr = ring.iter().map(|p| p.length()).fold(0.0f32, f32::max) + 0.5;
-            self.cuts.push(Cut { o: o - u * datum, e, n, ring, r: rr });
+            self.cuts.push(Cut {
+                o: o - u * datum,
+                e,
+                n,
+                ring,
+                r: rr,
+            });
         }
-        Some(SkinSrc { o, e, n, u, rings: src_rings, tiles, tops })
+        Some(SkinSrc {
+            o,
+            e,
+            n,
+            u,
+            rings: src_rings,
+            tiles,
+            tops,
+        })
     }
 }
 
@@ -2170,7 +2669,12 @@ fn ground_peak(d: &[f32]) -> Option<f64> {
             hist[b as usize] += 1;
         }
     }
-    let smooth = |i: usize| -> u32 { [(-2i32, 1u32), (-1, 2), (0, 3), (1, 2), (2, 1)].iter().map(|&(o, w)| hist.get((i as i32 + o) as usize).copied().unwrap_or(0) * w).sum() };
+    let smooth = |i: usize| -> u32 {
+        [(-2i32, 1u32), (-1, 2), (0, 3), (1, 2), (2, 1)]
+            .iter()
+            .map(|&(o, w)| hist.get((i as i32 + o) as usize).copied().unwrap_or(0) * w)
+            .sum()
+    };
     let best = (0..N).max_by_key(|&i| smooth(i))?;
     let c = LO + best as f32 + 0.5;
     let near: Vec<f32> = d.iter().copied().filter(|v| (v - c).abs() <= 2.0).collect();
@@ -2189,7 +2693,10 @@ struct Ctx {
 }
 impl Ctx {
     fn in_view(&self, n: &Node) -> bool {
-        self.fr.sphere(n.sph_c + n.sph_c.normalize() * self.datum - self.cam, n.sph_r)
+        self.fr.sphere(
+            n.sph_c + n.sph_c.normalize() * self.datum - self.cam,
+            n.sph_r,
+        )
     }
 }
 
@@ -2201,15 +2708,27 @@ mod tests {
     fn detail_levels_grow() {
         let p: Vec<Params> = Detail::ALL.into_iter().map(Params::of).collect();
         for w in p.windows(2) {
-            assert!(w[1].sse_px < w[0].sse_px && w[1].zone_r >= w[0].zone_r && w[1].gpu_budget > w[0].gpu_budget && w[1].fetches > w[0].fetches);
+            assert!(
+                w[1].sse_px < w[0].sse_px
+                    && w[1].zone_r >= w[0].zone_r
+                    && w[1].gpu_budget > w[0].gpu_budget
+                    && w[1].fetches > w[0].fetches
+            );
         }
-        assert!(p.iter().all(|p| p.zone_r <= ZONE_R && p.fetches <= WORKERS && p.zone_r - p.band() > COL_DIST * 0.5));
+        assert!(p.iter().all(|p| p.zone_r <= ZONE_R
+            && p.fetches <= WORKERS
+            && p.zone_r - p.band() > COL_DIST * 0.5));
         assert_eq!(Params::of(Detail::High).band(), 1600.0);
     }
 
     #[test]
     fn wgs84_round_trip() {
-        for &(lat, lon, h) in &[(37.6188f64, -122.375f64, -30.0), (0.0, 0.0, 0.0), (-45.0, 170.0, 2500.0), (89.9, 10.0, 100.0)] {
+        for &(lat, lon, h) in &[
+            (37.6188f64, -122.375f64, -30.0),
+            (0.0, 0.0, 0.0),
+            (-45.0, 170.0, 2500.0),
+            (89.9, 10.0, 100.0),
+        ] {
             let p = lla_to_ecef(lat.to_radians(), lon.to_radians(), h);
             let (la, lo, hh) = ecef_to_lla(p);
             assert!((la.to_degrees() - lat).abs() < 1e-9, "{la} {lat}");
@@ -2221,22 +2740,39 @@ mod tests {
     #[test]
     fn urls() {
         let base = "/v1/3dtiles/datasets/A/files/B.json?session=S1";
-        assert_eq!(resolve(base, "/v1/3dtiles/datasets/A/files/C.glb", session_of(base)), "/v1/3dtiles/datasets/A/files/C.glb?session=S1");
-        assert_eq!(resolve(base, "D.glb?session=S2", session_of(base)), "/v1/3dtiles/datasets/A/files/D.glb?session=S2");
-        assert_eq!(resolve("/v1/3dtiles/root.json", "https://tile.googleapis.com/v1/x.json?session=Z", None), "/v1/x.json?session=Z");
+        assert_eq!(
+            resolve(base, "/v1/3dtiles/datasets/A/files/C.glb", session_of(base)),
+            "/v1/3dtiles/datasets/A/files/C.glb?session=S1"
+        );
+        assert_eq!(
+            resolve(base, "D.glb?session=S2", session_of(base)),
+            "/v1/3dtiles/datasets/A/files/D.glb?session=S2"
+        );
+        assert_eq!(
+            resolve(
+                "/v1/3dtiles/root.json",
+                "https://tile.googleapis.com/v1/x.json?session=Z",
+                None
+            ),
+            "/v1/x.json?session=Z"
+        );
         assert_eq!(session_of("/a?key=1&session=Q"), Some("Q"));
     }
 
     #[test]
     fn datum_peak() {
         // A third bare ground at +32 (noisy), the rest roofs 5..150 m up.
-        let mut d: Vec<f32> = (0..300).map(|i| 32.0 + ((i * 37 % 17) as f32 - 8.0) * 0.2).collect();
+        let mut d: Vec<f32> = (0..300)
+            .map(|i| 32.0 + ((i * 37 % 17) as f32 - 8.0) * 0.2)
+            .collect();
         d.extend((0..600).map(|i| 32.0 - 5.0 - (i * 53 % 145) as f32));
         d.sort_by(|a, b| a.total_cmp(b));
         let p = ground_peak(&d).unwrap();
         assert!((p - 32.0).abs() < 0.5, "{p}");
         // Downtown, off our buildings' roofs: streets, the roofs the map lacks, walls.
-        let mut d: Vec<f32> = (0..300).map(|i| 32.0 + ((i * 37 % 17) as f32 - 8.0) * 0.2).collect();
+        let mut d: Vec<f32> = (0..300)
+            .map(|i| 32.0 + ((i * 37 % 17) as f32 - 8.0) * 0.2)
+            .collect();
         d.extend((0..150).map(|i| -10.0 + ((i * 29 % 13) as f32 - 6.0) * 0.15));
         d.extend((0..400).map(|i| 32.0 - 3.0 - (i * 53 % 200) as f32));
         d.sort_by(|a, b| a.total_cmp(b));
@@ -2246,7 +2782,10 @@ mod tests {
 
     #[test]
     fn obb_distance() {
-        let b = Obb { c: DVec3::ZERO, h: [DVec3::X * 2.0, DVec3::Y, DVec3::Z] };
+        let b = Obb {
+            c: DVec3::ZERO,
+            h: [DVec3::X * 2.0, DVec3::Y, DVec3::Z],
+        };
         assert_eq!(b.dist(DVec3::new(1.0, 0.5, 0.0)), 0.0);
         assert!((b.dist(DVec3::new(5.0, 0.0, 0.0)) - 3.0).abs() < 1e-9);
         assert!((b.dist(DVec3::new(2.0, 4.0, 5.0)) - 5.0).abs() < 1e-9);
@@ -2258,7 +2797,10 @@ mod tests {
         let o = geo::lla_to_pos(0.6, -2.1, 0.0);
         let (e, n, u) = geo::enu(o);
         let pts = [(-5.0, -5.0), (5.0, -5.0), (5.0, 5.0), (-5.0, 5.0)];
-        let pos: Vec<Vec3> = pts.iter().map(|&(x, y)| (e * x + n * y + u * 3.0).as_vec3()).collect();
+        let pos: Vec<Vec3> = pts
+            .iter()
+            .map(|&(x, y)| (e * x + n * y + u * 3.0).as_vec3())
+            .collect();
         let m = ColMesh::build(o, &pos, &[0, 1, 2, 0, 2, 3]);
         let h = m.top(o + e * 1.0 + n * 2.0).unwrap();
         assert!((h - 3.0).abs() < 0.01, "{h}");
@@ -2268,19 +2810,42 @@ mod tests {
     /// Decodes a tile saved by hand (TILE3D=path.glb); never part of a normal run.
     #[test]
     fn atlas_packing() {
-        let cases: [&[(u32, u32)]; 6] = [&[(256, 512), (256, 256)], &[(512, 512), (256, 256)], &[(512, 512), (256, 512)], &[(512, 512), (256, 512), (256, 256)], &[(512, 1024), (256, 256)], &[(1, 1), (256, 256), (64, 128)]];
+        let cases: [&[(u32, u32)]; 6] = [
+            &[(256, 512), (256, 256)],
+            &[(512, 512), (256, 256)],
+            &[(512, 512), (256, 512)],
+            &[(512, 512), (256, 512), (256, 256)],
+            &[(512, 1024), (256, 256)],
+            &[(1, 1), (256, 256), (64, 128)],
+        ];
         for sizes in cases {
             let (w, h, at) = pack(sizes);
-            let boxes: Vec<(u32, u32, u32, u32)> = sizes.iter().zip(&at).map(|(s, a)| (a.0, a.1, s.0 + 2 * ATLAS_PAD, s.1 + 2 * ATLAS_PAD)).collect();
+            let boxes: Vec<(u32, u32, u32, u32)> = sizes
+                .iter()
+                .zip(&at)
+                .map(|(s, a)| (a.0, a.1, s.0 + 2 * ATLAS_PAD, s.1 + 2 * ATLAS_PAD))
+                .collect();
             let used: u32 = boxes.iter().map(|b| b.2 * b.3).sum();
             for (k, a) in boxes.iter().enumerate() {
-                assert!(a.0 + a.2 <= w && a.1 + a.3 <= h, "{sizes:?}: out of the atlas");
+                assert!(
+                    a.0 + a.2 <= w && a.1 + a.3 <= h,
+                    "{sizes:?}: out of the atlas"
+                );
                 for b in &boxes[k + 1..] {
-                    assert!(a.0 + a.2 <= b.0 || b.0 + b.2 <= a.0 || a.1 + a.3 <= b.1 || b.1 + b.3 <= a.1, "{sizes:?}: overlap");
+                    assert!(
+                        a.0 + a.2 <= b.0
+                            || b.0 + b.2 <= a.0
+                            || a.1 + a.3 <= b.1
+                            || b.1 + b.3 <= a.1,
+                        "{sizes:?}: overlap"
+                    );
                 }
             }
             // No more than a quarter wasted on the size mixes Google sends.
-            assert!(used as f64 / (w * h) as f64 > 0.75, "{sizes:?}: {w}x{h} for {used}");
+            assert!(
+                used as f64 / (w * h) as f64 > 0.75,
+                "{sizes:?}: {w}x{h} for {used}"
+            );
         }
         // The padding repeats the edge texels.
         let src: Vec<u8> = (0..4u8).flat_map(|i| [i * 60, 0, 0, 255]).collect();
@@ -2297,7 +2862,17 @@ mod tests {
         let p = std::env::var("TILE3D").expect("TILE3D=path to a .glb");
         let m = decode(&std::fs::read(p).unwrap()).unwrap();
         let (lat, lon, h) = geo::pos_to_lla(m.origin);
-        println!("{} verts {} tris tex {}x{} at {:.5},{:.5} h {:.1} credits {:?}", m.verts.len(), m.idx.len() / 3, m.mips[0].0, m.mips[0].1, lat.to_degrees(), lon.to_degrees(), h, m.copyright);
+        println!(
+            "{} verts {} tris tex {}x{} at {:.5},{:.5} h {:.1} credits {:?}",
+            m.verts.len(),
+            m.idx.len() / 3,
+            m.mips[0].0,
+            m.mips[0].1,
+            lat.to_degrees(),
+            lon.to_degrees(),
+            h,
+            m.copyright
+        );
         assert!(!m.verts.is_empty());
     }
 }

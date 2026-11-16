@@ -27,7 +27,19 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { lang: None, sound_on: true, volume: 1.0, cam_mode: 0, cockpit_fov: crate::cockpit::FOV, look_sens: 1.0, show_hud: true, taa: true, live_traffic: true, live_weather: true, real_time: true }
+        Self {
+            lang: None,
+            sound_on: true,
+            volume: 1.0,
+            cam_mode: 0,
+            cockpit_fov: crate::cockpit::FOV,
+            look_sens: 1.0,
+            show_hud: true,
+            taa: true,
+            live_traffic: true,
+            live_weather: true,
+            real_time: true,
+        }
     }
 }
 
@@ -38,7 +50,10 @@ fn path() -> Option<PathBuf> {
 impl Settings {
     /// The saved settings; the defaults for anything missing or unreadable.
     pub fn load() -> Self {
-        let Some(j) = path().and_then(|p| std::fs::read(p).ok()).and_then(|d| serde_json::from_slice::<serde_json::Value>(&d).ok()) else {
+        let Some(j) = path()
+            .and_then(|p| std::fs::read(p).ok())
+            .and_then(|d| serde_json::from_slice::<serde_json::Value>(&d).ok())
+        else {
             return Self::default();
         };
         Self::from_json(&j)
@@ -52,7 +67,11 @@ impl Settings {
             lang: j["language"].as_str().and_then(Lang::parse),
             sound_on: b("sound", d.sound_on),
             volume: f("volume", d.volume as f64).clamp(0.0, 1.0) as f32,
-            cam_mode: if j["camera"].as_str() == Some("cockpit") { 1 } else { 0 },
+            cam_mode: if j["camera"].as_str() == Some("cockpit") {
+                1
+            } else {
+                0
+            },
             cockpit_fov: f("cockpit_fov", d.cockpit_fov as f64).clamp(35.0, 85.0) as f32,
             look_sens: f("mouse_look_speed", d.look_sens).clamp(0.25, 3.0),
             show_hud: b("hud", d.show_hud),
@@ -99,7 +118,19 @@ mod tests {
 
     #[test]
     fn round_trip() {
-        let s = Settings { lang: Some(Lang::Fr), sound_on: false, volume: 0.4, cam_mode: 1, cockpit_fov: 50.0, look_sens: 1.5, show_hud: false, taa: false, live_traffic: false, live_weather: false, real_time: false };
+        let s = Settings {
+            lang: Some(Lang::Fr),
+            sound_on: false,
+            volume: 0.4,
+            cam_mode: 1,
+            cockpit_fov: 50.0,
+            look_sens: 1.5,
+            show_hud: false,
+            taa: false,
+            live_traffic: false,
+            live_weather: false,
+            real_time: false,
+        };
         assert_eq!(Settings::from_json(&s.to_json()), s);
         // Missing or odd values fall back to the defaults.
         let j = serde_json::json!({ "volume": 7.0, "language": "xx" });

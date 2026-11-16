@@ -104,7 +104,10 @@ pub fn signed_area(r: &[[f32; 2]]) -> f32 {
 pub fn decode(data: &[u8], want: &[&str]) -> HashMap<String, Layer> {
     let mut buf = Vec::new();
     let data = if data.len() > 2 && data[0] == 0x1f && data[1] == 0x8b {
-        if flate2::read::GzDecoder::new(data).read_to_end(&mut buf).is_err() {
+        if flate2::read::GzDecoder::new(data)
+            .read_to_end(&mut buf)
+            .is_err()
+        {
             return HashMap::new();
         }
         &buf[..]
@@ -154,7 +157,10 @@ fn decode_layer(b: &[u8], want: &[&str]) -> Option<(String, Layer)> {
             (_, w) => pb.skip(w),
         }
     }
-    let features = feats.into_iter().map(|f| decode_feature(f, &keys, &vals)).collect();
+    let features = feats
+        .into_iter()
+        .map(|f| decode_feature(f, &keys, &vals))
+        .collect();
     Some((name.to_string(), Layer { extent, features }))
 }
 

@@ -5,7 +5,7 @@
 //! of leaf sprays ("cards") that are only drawn close to the camera. Beyond
 //! `IMP_DIST` a tree is drawn as an impostor, a picture of its full model
 //! (impostor.rs); the simpler solid models are then only for the shadows.
-use crate::buildings::{greenness, hash, Ctx, Hoods, TreeChunk, ATLAS, RASTER};
+use crate::buildings::{ATLAS, Ctx, Hoods, RASTER, TreeChunk, greenness, hash};
 use crate::render::{TreeInst, TreeVertex};
 use crate::sources::*;
 use glam::{Vec2, Vec3};
@@ -25,8 +25,16 @@ pub const LOD_DIST: [f32; LODS - 2] = [260.0, 600.0, 1200.0, 2200.0];
 pub const LOD_JITTER: f32 = 0.12;
 /// Range of distances over which some tree may be drawn with model `lod`.
 pub fn lod_span(lod: usize) -> (f32, f32) {
-    let lo = if lod == 0 { 0.0 } else { LOD_DIST[lod - 1] * (1.0 - LOD_JITTER) };
-    let hi = if lod >= LOD_DIST.len() { f32::INFINITY } else { LOD_DIST[lod] * (1.0 + LOD_JITTER) };
+    let lo = if lod == 0 {
+        0.0
+    } else {
+        LOD_DIST[lod - 1] * (1.0 - LOD_JITTER)
+    };
+    let hi = if lod >= LOD_DIST.len() {
+        f32::INFINITY
+    } else {
+        LOD_DIST[lod] * (1.0 + LOD_JITTER)
+    };
     (lo, hi)
 }
 /// How far away leaf cards are drawn. Must match `CARD_RANGE` in trees.wgsl.
@@ -101,7 +109,11 @@ impl Under {
     pub fn inst(&self, cell: Vec3) -> TreeInst {
         let p = self.pos(cell);
         let width = 0.85 + 0.35 * (self.yaw.wrapping_mul(37) as f32 / 255.0);
-        TreeInst { a: [p.x, p.y, p.z, self.scale as f32 / 100.0], b: [0.0, 0.0, self.yaw as f32 / 255.0 * TAU, width], tint: [self.tint[0], self.tint[1], self.tint[2], self.range() as u8] }
+        TreeInst {
+            a: [p.x, p.y, p.z, self.scale as f32 / 100.0],
+            b: [0.0, 0.0, self.yaw as f32 / 255.0 * TAU, width],
+            tint: [self.tint[0], self.tint[1], self.tint[2], self.range() as u8],
+        }
     }
 }
 
@@ -165,7 +177,16 @@ struct Spray {
     area: f32,
 }
 fn spray(species: usize) -> Spray {
-    let s = |style, n, len, aspect, p1, p2, droop, area| Spray { style, n, len, aspect, p1, p2, droop, area };
+    let s = |style, n, len, aspect, p1, p2, droop, area| Spray {
+        style,
+        n,
+        len,
+        aspect,
+        p1,
+        p2,
+        droop,
+        area,
+    };
     match species {
         OAK => s(ST_SPRIG, 7.0, 1.25, 0.42, 0.46, 0.30, 0.15, 0.55),
         MAPLE => s(ST_SPRIG, 6.0, 1.35, 0.44, 0.62, 0.45, 0.20, 0.60),
@@ -209,23 +230,94 @@ fn vnoise(p: Vec3) -> f32 {
     let i = p.floor();
     let f = p - i;
     let f = f * f * (Vec3::splat(3.0) - 2.0 * f);
-    let h = |x: f32, y: f32, z: f32| hash(((i.x + x) as i32 as u32).wrapping_mul(73856093) ^ ((i.y + y) as i32 as u32).wrapping_mul(19349663), ((i.z + z) as i32 as u32).wrapping_mul(83492791));
+    let h = |x: f32, y: f32, z: f32| {
+        hash(
+            ((i.x + x) as i32 as u32).wrapping_mul(73856093)
+                ^ ((i.y + y) as i32 as u32).wrapping_mul(19349663),
+            ((i.z + z) as i32 as u32).wrapping_mul(83492791),
+        )
+    };
     let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
-    lerp(lerp(lerp(h(0., 0., 0.), h(1., 0., 0.), f.x), lerp(h(0., 1., 0.), h(1., 1., 0.), f.x), f.y), lerp(lerp(h(0., 0., 1.), h(1., 0., 1.), f.x), lerp(h(0., 1., 1.), h(1., 1., 1.), f.x), f.y), f.z)
+    lerp(
+        lerp(
+            lerp(h(0., 0., 0.), h(1., 0., 0.), f.x),
+            lerp(h(0., 1., 0.), h(1., 1., 0.), f.x),
+            f.y,
+        ),
+        lerp(
+            lerp(h(0., 0., 1.), h(1., 0., 1.), f.x),
+            lerp(h(0., 1., 1.), h(1., 1., 1.), f.x),
+            f.y,
+        ),
+        f.z,
+    )
 }
 
 /// Octahedron (8 faces): the crown of a tree a few pixels across.
 fn octa() -> (Vec<Vec3>, Vec<[u32; 3]>) {
-    let v = vec![Vec3::X, Vec3::NEG_X, Vec3::Y, Vec3::NEG_Y, Vec3::Z, Vec3::NEG_Z];
-    let f = vec![[2, 4, 0], [2, 0, 5], [2, 5, 1], [2, 1, 4], [3, 0, 4], [3, 5, 0], [3, 1, 5], [3, 4, 1]];
+    let v = vec![
+        Vec3::X,
+        Vec3::NEG_X,
+        Vec3::Y,
+        Vec3::NEG_Y,
+        Vec3::Z,
+        Vec3::NEG_Z,
+    ];
+    let f = vec![
+        [2, 4, 0],
+        [2, 0, 5],
+        [2, 5, 1],
+        [2, 1, 4],
+        [3, 0, 4],
+        [3, 5, 0],
+        [3, 1, 5],
+        [3, 4, 1],
+    ];
     (v, f)
 }
 
 /// Icosphere: level 0 = 20 faces, level 1 = 80.
 pub fn ico(level: u32) -> (Vec<Vec3>, Vec<[u32; 3]>) {
     let t = (1.0 + 5f32.sqrt()) / 2.0;
-    let mut v: Vec<Vec3> = [[-1., t, 0.], [1., t, 0.], [-1., -t, 0.], [1., -t, 0.], [0., -1., t], [0., 1., t], [0., -1., -t], [0., 1., -t], [t, 0., -1.], [t, 0., 1.], [-t, 0., -1.], [-t, 0., 1.]].iter().map(|p| Vec3::from(*p).normalize()).collect();
-    let mut f: Vec<[u32; 3]> = vec![[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8], [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]];
+    let mut v: Vec<Vec3> = [
+        [-1., t, 0.],
+        [1., t, 0.],
+        [-1., -t, 0.],
+        [1., -t, 0.],
+        [0., -1., t],
+        [0., 1., t],
+        [0., -1., -t],
+        [0., 1., -t],
+        [t, 0., -1.],
+        [t, 0., 1.],
+        [-t, 0., -1.],
+        [-t, 0., 1.],
+    ]
+    .iter()
+    .map(|p| Vec3::from(*p).normalize())
+    .collect();
+    let mut f: Vec<[u32; 3]> = vec![
+        [0, 11, 5],
+        [0, 5, 1],
+        [0, 1, 7],
+        [0, 7, 10],
+        [0, 10, 11],
+        [1, 5, 9],
+        [5, 11, 4],
+        [11, 10, 2],
+        [10, 7, 6],
+        [7, 1, 8],
+        [3, 9, 4],
+        [3, 4, 2],
+        [3, 2, 6],
+        [3, 6, 8],
+        [3, 8, 9],
+        [4, 9, 5],
+        [2, 4, 11],
+        [6, 2, 10],
+        [8, 6, 7],
+        [9, 8, 1],
+    ];
     for _ in 0..level {
         let mut cache = std::collections::HashMap::new();
         let mut mid = |a: u32, b: u32, v: &mut Vec<Vec3>| {
@@ -236,7 +328,11 @@ pub fn ico(level: u32) -> (Vec<Vec3>, Vec<[u32; 3]>) {
         };
         let mut nf = Vec::with_capacity(f.len() * 4);
         for t in &f {
-            let (a, b, c) = (mid(t[0], t[1], &mut v), mid(t[1], t[2], &mut v), mid(t[2], t[0], &mut v));
+            let (a, b, c) = (
+                mid(t[0], t[1], &mut v),
+                mid(t[1], t[2], &mut v),
+                mid(t[2], t[0], &mut v),
+            );
             nf.extend([[t[0], a, c], [t[1], b, a], [t[2], c, b], [a, b, c]]);
         }
         f = nf;
@@ -259,13 +355,24 @@ fn lumpy(d: Vec3, seed: f32, lump: f32) -> (Vec3, f32) {
 /// How deep a point sits inside the other foliage masses: 0 at or outside
 /// their surfaces, 1 at a centre.
 fn buried(p: Vec3, blobs: &[(Vec3, Vec3)], skip: usize) -> f32 {
-    blobs.iter().enumerate().filter(|(k, _)| *k != skip).map(|(_, (c, r))| 1.0 - ((p - *c) / *r).length()).fold(0.0, f32::max)
+    blobs
+        .iter()
+        .enumerate()
+        .filter(|(k, _)| *k != skip)
+        .map(|(_, (c, r))| 1.0 - ((p - *c) / *r).length())
+        .fold(0.0, f32::max)
 }
 
 /// Solid vertex. `shrink` is how far it pulls in once leaf cards take over
 /// close up, `ao` how open to the sky it is, `style` the kind of bark.
 fn sv(pos: Vec3, nrm: Vec3, col: Vec3, leaf: f32, shrink: Vec3, ao: f32, style: f32) -> TreeVertex {
-    TreeVertex { pos: pos.into(), nrm: nrm.into(), col: [col.x, col.y, col.z, leaf], uv: [0.0, 0.0, 0.0, style], aux: [shrink.x, shrink.y, shrink.z, ao] }
+    TreeVertex {
+        pos: pos.into(),
+        nrm: nrm.into(),
+        col: [col.x, col.y, col.z, leaf],
+        uv: [0.0, 0.0, 0.0, style],
+        aux: [shrink.x, shrink.y, shrink.z, ao],
+    }
 }
 
 #[derive(Default)]
@@ -279,7 +386,18 @@ struct TB {
 impl TB {
     /// A lumpy mass of foliage. Normals lean away from the crown centre so the
     /// whole canopy shades as one soft volume rather than a pile of balls.
-    fn blob(&mut self, c: Vec3, r: Vec3, crown: Vec3, col: Vec3, level: i32, seed: f32, lump: f32, others: &[(Vec3, Vec3)], me: usize) {
+    fn blob(
+        &mut self,
+        c: Vec3,
+        r: Vec3,
+        crown: Vec3,
+        col: Vec3,
+        level: i32,
+        seed: f32,
+        lump: f32,
+        others: &[(Vec3, Vec3)],
+        me: usize,
+    ) {
         let (vs, fs) = if level < 0 { octa() } else { ico(level as u32) };
         let b = self.v.len() as u32;
         for d in &vs {
@@ -290,7 +408,8 @@ impl TB {
             let shade = (0.62 + 0.42 * (d.y * 0.5 + 0.5)) * (0.86 + 0.28 * n);
             // Dark where the masses run into each other.
             let ao = 1.0 - 0.65 * (buried(pos, others, me) / 0.4).clamp(0.0, 1.0);
-            self.v.push(sv(pos, nrm, col * shade, 1.0, (c - pos) * 0.14, ao, 0.0));
+            self.v
+                .push(sv(pos, nrm, col * shade, 1.0, (c - pos) * 0.14, ao, 0.0));
         }
         for f in &fs {
             self.i.extend([b + f[0], b + f[1], b + f[2]]);
@@ -300,14 +419,16 @@ impl TB {
     fn tube(&mut self, pts: &[(Vec3, f32)], sides: u32, col: Vec3, style: f32) {
         let b = self.v.len() as u32;
         for (k, (p, r)) in pts.iter().enumerate() {
-            let dir = (pts[(k + 1).min(pts.len() - 1)].0 - pts[k.saturating_sub(1)].0).normalize_or_zero();
+            let dir = (pts[(k + 1).min(pts.len() - 1)].0 - pts[k.saturating_sub(1)].0)
+                .normalize_or_zero();
             let x = dir.cross(Vec3::new(0.3, 0.1, 0.9)).normalize_or_zero();
             let y = dir.cross(x);
             for s in 0..sides {
                 let a = s as f32 / sides as f32 * TAU;
                 let n = x * a.cos() + y * a.sin();
                 let sh = 0.8 + 0.4 * hash(k as u32 * 7 + s, 3);
-                self.v.push(sv(*p + n * *r, n, col * sh, 0.0, Vec3::ZERO, 1.0, style));
+                self.v
+                    .push(sv(*p + n * *r, n, col * sh, 0.0, Vec3::ZERO, 1.0, style));
             }
         }
         for k in 0..pts.len() as u32 - 1 {
@@ -320,13 +441,30 @@ impl TB {
     /// One skirt of a conifer: a jagged, drooping cone.
     fn skirt(&mut self, y0: f32, y1: f32, r: f32, sides: u32, col: Vec3, seed: f32) {
         let b = self.v.len() as u32;
-        self.v.push(sv(Vec3::Y * y1, Vec3::Y, col * 1.15, 1.0, Vec3::ZERO, 0.8, 0.0));
+        self.v.push(sv(
+            Vec3::Y * y1,
+            Vec3::Y,
+            col * 1.15,
+            1.0,
+            Vec3::ZERO,
+            0.8,
+            0.0,
+        ));
         for s in 0..sides {
             let a = (s as f32 + seed) / sides as f32 * TAU;
-            let jag = if s % 2 == 0 { 1.0 } else { 0.72 } * (0.85 + 0.3 * hash(s, (seed * 977.0) as u32));
+            let jag =
+                if s % 2 == 0 { 1.0 } else { 0.72 } * (0.85 + 0.3 * hash(s, (seed * 977.0) as u32));
             let d = Vec3::new(a.cos(), 0.0, a.sin());
             let sh = 0.6 + 0.3 * hash(s + 3, (seed * 577.0) as u32);
-            self.v.push(sv(d * r * jag + Vec3::Y * (y0 - (jag - 0.7) * (y1 - y0) * 0.25), (d + Vec3::Y * 0.55).normalize(), col * sh, 1.0, d * (-0.38 * r * jag), 1.0, 0.0));
+            self.v.push(sv(
+                d * r * jag + Vec3::Y * (y0 - (jag - 0.7) * (y1 - y0) * 0.25),
+                (d + Vec3::Y * 0.55).normalize(),
+                col * sh,
+                1.0,
+                d * (-0.38 * r * jag),
+                1.0,
+                0.0,
+            ));
         }
         for s in 0..sides {
             self.i.extend([b, b + 1 + s, b + 1 + (s + 1) % sides]);
@@ -334,7 +472,17 @@ impl TB {
     }
     /// A palm frond: an arching, folded strip. From afar it is a solid blade;
     /// close up that folds away and a card with cut-out leaflets takes over.
-    fn frond(&mut self, base: Vec3, ang: f32, len: f32, lift: f32, segs: u32, col: Vec3, fold: bool, seed: f32) {
+    fn frond(
+        &mut self,
+        base: Vec3,
+        ang: f32,
+        len: f32,
+        lift: f32,
+        segs: u32,
+        col: Vec3,
+        fold: bool,
+        seed: f32,
+    ) {
         let d = Vec3::new(ang.cos(), 0.0, ang.sin());
         let side = Vec3::new(-ang.sin(), 0.0, ang.cos());
         let b = self.v.len() as u32;
@@ -347,21 +495,47 @@ impl TB {
             let w = len * 0.17 * (PI * (t * 0.86 + 0.1)).sin();
             let c = col * (0.75 + 0.4 * t);
             let n = (Vec3::Y + d * (1.9 * t - lift)).normalize();
-            let (l, r) = (spine + side * w - Vec3::Y * w * 0.45, spine - side * w - Vec3::Y * w * 0.45);
-            self.v.push(sv(l, (n + side * 0.4).normalize(), c, 1.0, spine - l, 1.0, 0.0));
+            let (l, r) = (
+                spine + side * w - Vec3::Y * w * 0.45,
+                spine - side * w - Vec3::Y * w * 0.45,
+            );
+            self.v.push(sv(
+                l,
+                (n + side * 0.4).normalize(),
+                c,
+                1.0,
+                spine - l,
+                1.0,
+                0.0,
+            ));
             if fold {
                 self.v.push(sv(spine, n, c, 1.0, Vec3::ZERO, 1.0, 0.0));
                 let wc = len * sp.aspect;
                 for (s, nn) in [(1.0f32, n + side * 0.4), (0.0, n), (-1.0, n - side * 0.4)] {
-                    self.cv.push(TreeVertex { pos: (spine + side * (wc * s) - Vec3::Y * (wc * 0.45 * s.abs())).into(), nrm: nn.normalize().into(), col: [c.x, c.y, c.z, sp.n], uv: [t, s, seed, sp.style], aux: [sp.aspect, sp.p1, sp.p2, 1.0] });
+                    self.cv.push(TreeVertex {
+                        pos: (spine + side * (wc * s) - Vec3::Y * (wc * 0.45 * s.abs())).into(),
+                        nrm: nn.normalize().into(),
+                        col: [c.x, c.y, c.z, sp.n],
+                        uv: [t, s, seed, sp.style],
+                        aux: [sp.aspect, sp.p1, sp.p2, 1.0],
+                    });
                 }
             }
-            self.v.push(sv(r, (n - side * 0.4).normalize(), c, 1.0, spine - r, 1.0, 0.0));
+            self.v.push(sv(
+                r,
+                (n - side * 0.4).normalize(),
+                c,
+                1.0,
+                spine - r,
+                1.0,
+                0.0,
+            ));
         }
         for k in 0..segs {
             for j in 0..per - 1 {
                 let a = b + k * per + j;
-                self.i.extend([a, a + 1, a + per, a + 1, a + per + 1, a + per]);
+                self.i
+                    .extend([a, a + 1, a + per, a + 1, a + per + 1, a + per]);
                 if fold {
                     let a = cb + k * 3 + j;
                     self.ci.extend([a, a + 1, a + 3, a + 1, a + 4, a + 3]);
@@ -371,7 +545,20 @@ impl TB {
     }
     /// A spray of leaves: a strip from `base` along `stem`, `len` long, curling
     /// away from its upper face toward the tip.
-    fn card(&mut self, base: Vec3, stem: Vec3, side: Vec3, len: f32, sp: &Spray, segs: u32, curl: f32, nrm: Vec3, col: Vec3, seed: f32, ao: f32) {
+    fn card(
+        &mut self,
+        base: Vec3,
+        stem: Vec3,
+        side: Vec3,
+        len: f32,
+        sp: &Spray,
+        segs: u32,
+        curl: f32,
+        nrm: Vec3,
+        col: Vec3,
+        seed: f32,
+        ao: f32,
+    ) {
         let b = self.cv.len() as u32;
         let face = side.cross(stem);
         let w = len * sp.aspect;
@@ -381,7 +568,13 @@ impl TB {
             // New growth at the tip is lighter.
             let sh = 0.78 + 0.34 * t;
             for s in [-1.0f32, 1.0] {
-                self.cv.push(TreeVertex { pos: (c + side * (w * s)).into(), nrm: nrm.into(), col: [col.x * sh, col.y * sh, col.z * sh, sp.n], uv: [t, s, seed, sp.style], aux: [sp.aspect, sp.p1, sp.p2, ao] });
+                self.cv.push(TreeVertex {
+                    pos: (c + side * (w * s)).into(),
+                    nrm: nrm.into(),
+                    col: [col.x * sh, col.y * sh, col.z * sh, sp.n],
+                    uv: [t, s, seed, sp.style],
+                    aux: [sp.aspect, sp.p1, sp.p2, ao],
+                });
             }
         }
         for k in 0..segs {
@@ -391,7 +584,17 @@ impl TB {
     }
     /// A spray lying on a surface whose outward normal is `out`, growing along
     /// `stem`, shingled over the foliage behind it.
-    fn spray_on(&mut self, pos: Vec3, out: Vec3, stem: Vec3, sp: &Spray, nrm: Vec3, col: Vec3, ao: f32, rng: &mut Rng) {
+    fn spray_on(
+        &mut self,
+        pos: Vec3,
+        out: Vec3,
+        stem: Vec3,
+        sp: &Spray,
+        nrm: Vec3,
+        col: Vec3,
+        ao: f32,
+        rng: &mut Rng,
+    ) {
         let mut side = stem.cross(out).normalize_or_zero();
         if side == Vec3::ZERO {
             return;
@@ -399,11 +602,41 @@ impl TB {
         let tw = rng.r(-0.7, 0.7);
         side = (side * tw.cos() + stem.cross(side) * tw.sin()).normalize();
         let len = sp.len * rng.r(0.75, 1.25);
-        self.card(pos - stem * (len * 0.4) + out * 0.05, stem, side, len, sp, 2, 0.12 + sp.droop * 0.4, nrm, col, rng.f(), ao);
+        self.card(
+            pos - stem * (len * 0.4) + out * 0.05,
+            stem,
+            side,
+            len,
+            sp,
+            2,
+            0.12 + sp.droop * 0.4,
+            nrm,
+            col,
+            rng.f(),
+            ao,
+        );
     }
     /// Leaf sprays all over the outside of a crown made of foliage masses.
-    fn crown_cards(&mut self, blobs: &[(Vec3, Vec3)], crown: Vec3, col: Vec3, sp: &Spray, lump: f32, variant: usize, max: f32, rng: &mut Rng) {
-        let areas: Vec<f32> = blobs.iter().map(|(_, r)| 4.0 * PI * (((r.x * r.y).powf(1.6) + (r.x * r.z).powf(1.6) + (r.y * r.z).powf(1.6)) / 3.0).powf(0.625)).collect();
+    fn crown_cards(
+        &mut self,
+        blobs: &[(Vec3, Vec3)],
+        crown: Vec3,
+        col: Vec3,
+        sp: &Spray,
+        lump: f32,
+        variant: usize,
+        max: f32,
+        rng: &mut Rng,
+    ) {
+        let areas: Vec<f32> = blobs
+            .iter()
+            .map(|(_, r)| {
+                4.0 * PI
+                    * (((r.x * r.y).powf(1.6) + (r.x * r.z).powf(1.6) + (r.y * r.z).powf(1.6))
+                        / 3.0)
+                        .powf(0.625)
+            })
+            .collect();
         let thin = (max * sp.area / areas.iter().sum::<f32>()).min(1.0);
         for (k, (c, r)) in blobs.iter().enumerate() {
             for _ in 0..(areas[k] / sp.area * thin) as usize {
@@ -421,9 +654,14 @@ impl TB {
                 }
                 let out = (d / *r).normalize_or_zero();
                 let tan = out.cross(rnd).normalize_or_zero();
-                let stem = (tan + out * rng.r(0.35, 1.1) - Vec3::Y * (sp.droop * rng.r(0.5, 1.5))).normalize_or_zero();
-                let nrm = (d * 0.45 + (pos - crown).normalize_or_zero() * 0.55 + rnd * 0.15).normalize_or_zero();
-                let shade = (0.62 + 0.42 * (d.y * 0.5 + 0.5)) * (0.86 + 0.28 * nz) * rng.r(0.85, 1.15) * (0.9 + 0.2 * hash(k as u32, variant as u32));
+                let stem = (tan + out * rng.r(0.35, 1.1) - Vec3::Y * (sp.droop * rng.r(0.5, 1.5)))
+                    .normalize_or_zero();
+                let nrm = (d * 0.45 + (pos - crown).normalize_or_zero() * 0.55 + rnd * 0.15)
+                    .normalize_or_zero();
+                let shade = (0.62 + 0.42 * (d.y * 0.5 + 0.5))
+                    * (0.86 + 0.28 * nz)
+                    * rng.r(0.85, 1.15)
+                    * (0.9 + 0.2 * hash(k as u32, variant as u32));
                 self.spray_on(pos, out, stem, sp, nrm, col * shade, 1.0 - 2.5 * bur, rng);
             }
         }
@@ -479,13 +717,32 @@ fn grow(species: usize, variant: usize, lod: usize) -> (TB, TreeDim) {
             let n = [5, 4, 3, 1, 1][lod];
             let base = rng.r(1.2, 2.6);
             if has_trunk {
-                t.tube(&[(Vec3::Y * -0.3, 0.42), (Vec3::Y * 0.5, 0.28), (Vec3::Y * (h * 0.8), 0.06)], sides, bark, 0.0);
+                t.tube(
+                    &[
+                        (Vec3::Y * -0.3, 0.42),
+                        (Vec3::Y * 0.5, 0.28),
+                        (Vec3::Y * (h * 0.8), 0.06),
+                    ],
+                    sides,
+                    bark,
+                    0.0,
+                );
             }
             for k in 0..n {
                 let f = k as f32 / n as f32;
-                let (y0, y1) = (base + (h - base) * f, base + (h - base) * (f + 1.6 / n as f32).min(1.0));
+                let (y0, y1) = (
+                    base + (h - base) * f,
+                    base + (h - base) * (f + 1.6 / n as f32).min(1.0),
+                );
                 let (rk, col) = (r * (1.0 - f * 0.82), leaf * (1.0 - 0.12 * f));
-                t.skirt(y0, y1 + 0.3, rk, [9, 8, 7, 5, 4][lod], col, variant as f32 * 0.37 + k as f32 * 0.21);
+                t.skirt(
+                    y0,
+                    y1 + 0.3,
+                    rk,
+                    [9, 8, 7, 5, 4][lod],
+                    col,
+                    variant as f32 * 0.37 + k as f32 * 0.21,
+                );
                 if lod == 0 {
                     // Boughs of needles hanging down each skirt.
                     let apex = Vec3::Y * (y1 + 0.3);
@@ -496,30 +753,74 @@ fn grow(species: usize, variant: usize, lod: usize) -> (TB, TreeDim) {
                         let (u, rnd) = (rng.r(0.3, 1.0), rng.dir());
                         let rim = d * (rk * 0.9) + Vec3::Y * y0;
                         let out = (d + Vec3::Y * 0.55).normalize();
-                        let stem = ((rim - apex).normalize() * 0.8 + d * 0.5 + d.cross(Vec3::Y) * rng.r(-0.4, 0.4)).normalize();
-                        t.spray_on(apex.lerp(rim, u), out, stem, &sp, (out + rnd * 0.15).normalize(), col * ((0.6 + 0.4 * u) * rng.r(0.85, 1.15)), 0.55 + 0.45 * u, &mut rng);
+                        let stem = ((rim - apex).normalize() * 0.8
+                            + d * 0.5
+                            + d.cross(Vec3::Y) * rng.r(-0.4, 0.4))
+                        .normalize();
+                        t.spray_on(
+                            apex.lerp(rim, u),
+                            out,
+                            stem,
+                            &sp,
+                            (out + rnd * 0.15).normalize(),
+                            col * ((0.6 + 0.4 * u) * rng.r(0.85, 1.15)),
+                            0.55 + 0.45 * u,
+                            &mut rng,
+                        );
                     }
                 }
             }
-            dim = TreeDim { height: h, crown_r: r, crown_base: base, trunk_r: 0.28 };
+            dim = TreeDim {
+                height: h,
+                crown_r: r,
+                crown_base: base,
+                trunk_r: 0.28,
+            };
         }
         PALM => {
             let h = rng.r(8.0, 13.0);
             let bend = lean * rng.r(0.3, 1.4);
             let top = Vec3::Y * h + bend;
-            let tr: Vec<(Vec3, f32)> = (0..=4).map(|k| {
-                let f = k as f32 / 4.0;
-                (Vec3::Y * (h * f) + bend * f * f, 0.24 - 0.09 * f + if k == 0 { 0.1 } else { 0.0 })
-            }).collect();
-            if lod == 0 { t.tube(&tr, sides, bark, 2.0) } else { t.tube(&[tr[0], tr[2], tr[4]], sides, bark, 2.0) }
+            let tr: Vec<(Vec3, f32)> = (0..=4)
+                .map(|k| {
+                    let f = k as f32 / 4.0;
+                    (
+                        Vec3::Y * (h * f) + bend * f * f,
+                        0.24 - 0.09 * f + if k == 0 { 0.1 } else { 0.0 },
+                    )
+                })
+                .collect();
+            if lod == 0 {
+                t.tube(&tr, sides, bark, 2.0)
+            } else {
+                t.tube(&[tr[0], tr[2], tr[4]], sides, bark, 2.0)
+            }
             let n = [11, 9, 7, 5, 4][lod];
             for k in 0..n {
                 let a = k as f32 / n as f32 * TAU + rng.r(-0.25, 0.25);
-                let lift = if k % 3 == 0 { rng.r(0.75, 1.0) } else { rng.r(0.3, 0.7) };
+                let lift = if k % 3 == 0 {
+                    rng.r(0.75, 1.0)
+                } else {
+                    rng.r(0.3, 0.7)
+                };
                 let len = rng.r(3.2, 4.4);
-                t.frond(top, a, len, lift, [5, 3, 2, 1, 1][lod], leaf, lod == 0, rng.f());
+                t.frond(
+                    top,
+                    a,
+                    len,
+                    lift,
+                    [5, 3, 2, 1, 1][lod],
+                    leaf,
+                    lod == 0,
+                    rng.f(),
+                );
             }
-            dim = TreeDim { height: h + 1.5, crown_r: 3.6, crown_base: h - 1.5, trunk_r: 0.25 };
+            dim = TreeDim {
+                height: h + 1.5,
+                crown_r: 3.6,
+                crown_base: h - 1.5,
+                trunk_r: 0.25,
+            };
         }
         CYPRESS => {
             let h = rng.r(10.0, 16.0);
@@ -530,14 +831,24 @@ fn grow(species: usize, variant: usize, lod: usize) -> (TB, TreeDim) {
             let seed = rng.f();
             // Flame shape: widest a third of the way up.
             let prof = |f: f32| (f * 3.0).min(1.0).powf(0.6) * (1.0 - f).powf(0.75) * 1.75;
-            let radius = |d: Vec3, f: f32| r * prof(f) * (0.85 + 0.3 * vnoise(d * 2.0 + Vec3::Y * f * 5.0 + seed * 9.0));
+            let radius = |d: Vec3, f: f32| {
+                r * prof(f) * (0.85 + 0.3 * vnoise(d * 2.0 + Vec3::Y * f * 5.0 + seed * 9.0))
+            };
             for k in 0..=rings {
                 let f = k as f32 / rings as f32;
                 for s in 0..sd {
                     let a = s as f32 / sd as f32 * TAU + f * 1.3;
                     let d = Vec3::new(a.cos(), 0.0, a.sin());
                     let rr = radius(d, f);
-                    t.v.push(sv(d * rr + Vec3::Y * (0.5 + (h - 0.5) * f), (d + Vec3::Y * 0.3).normalize(), leaf * (0.6 + 0.5 * f), 1.0, d * (-0.15 * rr), 1.0, 0.0));
+                    t.v.push(sv(
+                        d * rr + Vec3::Y * (0.5 + (h - 0.5) * f),
+                        (d + Vec3::Y * 0.3).normalize(),
+                        leaf * (0.6 + 0.5 * f),
+                        1.0,
+                        d * (-0.15 * rr),
+                        1.0,
+                        0.0,
+                    ));
                 }
             }
             for k in 0..rings {
@@ -547,7 +858,12 @@ fn grow(species: usize, variant: usize, lod: usize) -> (TB, TreeDim) {
                 }
             }
             if has_trunk {
-                t.tube(&[(Vec3::Y * -0.3, 0.26), (Vec3::Y * 1.0, 0.16)], sides, bark, 0.0);
+                t.tube(
+                    &[(Vec3::Y * -0.3, 0.26), (Vec3::Y * 1.0, 0.16)],
+                    sides,
+                    bark,
+                    0.0,
+                );
             }
             if lod == 0 {
                 // Upswept sprays of scale leaves all the way up.
@@ -556,11 +872,26 @@ fn grow(species: usize, variant: usize, lod: usize) -> (TB, TreeDim) {
                     let d = Vec3::new(a.cos(), 0.0, a.sin());
                     let rnd = rng.dir();
                     let out = (d + Vec3::Y * 0.3).normalize();
-                    let stem = (Vec3::Y * 0.85 + d * 0.4 + d.cross(Vec3::Y) * rng.r(-0.3, 0.3)).normalize();
-                    t.spray_on(d * radius(d, f) + Vec3::Y * (0.5 + (h - 0.5) * f), out, stem, &sp, (out + rnd * 0.15).normalize(), leaf * ((0.6 + 0.5 * f) * rng.r(0.85, 1.15)), 1.0, &mut rng);
+                    let stem = (Vec3::Y * 0.85 + d * 0.4 + d.cross(Vec3::Y) * rng.r(-0.3, 0.3))
+                        .normalize();
+                    t.spray_on(
+                        d * radius(d, f) + Vec3::Y * (0.5 + (h - 0.5) * f),
+                        out,
+                        stem,
+                        &sp,
+                        (out + rnd * 0.15).normalize(),
+                        leaf * ((0.6 + 0.5 * f) * rng.r(0.85, 1.15)),
+                        1.0,
+                        &mut rng,
+                    );
                 }
             }
-            dim = TreeDim { height: h, crown_r: r, crown_base: 0.6, trunk_r: 0.3 };
+            dim = TreeDim {
+                height: h,
+                crown_r: r,
+                crown_base: 0.6,
+                trunk_r: 0.3,
+            };
         }
         FERN => {
             // A rosette of arching fronds.
@@ -573,7 +904,19 @@ fn grow(species: usize, variant: usize, lod: usize) -> (TB, TreeDim) {
                 // side x stem points up, so the frond arches over and down.
                 let side = stem.cross(Vec3::Y).normalize();
                 let nrm = (Vec3::Y + d * 0.5).normalize();
-                t.card(Vec3::Y * 0.03, stem, side, rng.r(0.75, 1.25), &sp, 4, rng.r(0.45, 0.8), nrm, leaf * rng.r(0.85, 1.15), rng.f(), 0.75 + 0.25 * el);
+                t.card(
+                    Vec3::Y * 0.03,
+                    stem,
+                    side,
+                    rng.r(0.75, 1.25),
+                    &sp,
+                    4,
+                    rng.r(0.45, 0.8),
+                    nrm,
+                    leaf * rng.r(0.85, 1.15),
+                    rng.f(),
+                    0.75 + 0.25 * el,
+                );
             }
         }
         GRASS => {
@@ -583,9 +926,22 @@ fn grow(species: usize, variant: usize, lod: usize) -> (TB, TreeDim) {
                 let a = k as f32 / n as f32 * PI + rng.r(-0.3, 0.3);
                 let side = Vec3::new(a.cos(), 0.0, a.sin());
                 let off = Vec3::new(rng.r(-0.12, 0.12), -0.03, rng.r(-0.12, 0.12));
-                let stem = (Vec3::Y + Vec3::new(rng.r(-0.15, 0.15), 0.0, rng.r(-0.15, 0.15))).normalize();
+                let stem =
+                    (Vec3::Y + Vec3::new(rng.r(-0.15, 0.15), 0.0, rng.r(-0.15, 0.15))).normalize();
                 let face = side.cross(stem);
-                t.card(off, stem, side, rng.r(0.5, 0.95), &sp, 2, rng.r(-0.1, 0.1), (Vec3::Y + face * 0.35).normalize(), leaf * rng.r(0.8, 1.2), rng.f(), 1.0);
+                t.card(
+                    off,
+                    stem,
+                    side,
+                    rng.r(0.5, 0.95),
+                    &sp,
+                    2,
+                    rng.r(-0.1, 0.1),
+                    (Vec3::Y + face * 0.35).normalize(),
+                    leaf * rng.r(0.8, 1.2),
+                    rng.f(),
+                    1.0,
+                );
             }
         }
         SAPLING => {
@@ -593,14 +949,35 @@ fn grow(species: usize, variant: usize, lod: usize) -> (TB, TreeDim) {
             let h = rng.r(1.8, 3.6);
             let top = Vec3::Y * h + lean * rng.r(0.1, 0.5);
             let at = |f: f32| top * f + lean * (0.15 * (f * PI).sin());
-            t.tube(&[(at(0.0) - Vec3::Y * 0.2, 0.04), (at(0.5), 0.028), (at(1.0), 0.008)], 4, bark * 1.2, 0.0);
+            t.tube(
+                &[
+                    (at(0.0) - Vec3::Y * 0.2, 0.04),
+                    (at(0.5), 0.028),
+                    (at(1.0), 0.008),
+                ],
+                4,
+                bark * 1.2,
+                0.0,
+            );
             for k in 0..16 + variant * 4 {
                 let f = rng.r(0.3, 1.0);
                 let a = k as f32 * 2.4 + rng.r(-0.4, 0.4);
                 let d = Vec3::new(a.cos(), 0.0, a.sin());
                 let stem = (d * 0.8 + Vec3::Y * rng.r(0.25, 0.8)).normalize();
                 let side = stem.cross(Vec3::Y).normalize();
-                t.card(at(f), stem, side, sp.len * rng.r(0.7, 1.2) * (1.25 - 0.5 * f), &sp, 2, sp.droop, (d * 0.6 + Vec3::Y).normalize(), leaf * rng.r(0.85, 1.15), rng.f(), 0.8 + 0.2 * f);
+                t.card(
+                    at(f),
+                    stem,
+                    side,
+                    sp.len * rng.r(0.7, 1.2) * (1.25 - 0.5 * f),
+                    &sp,
+                    2,
+                    sp.droop,
+                    (d * 0.6 + Vec3::Y).normalize(),
+                    leaf * rng.r(0.85, 1.15),
+                    rng.f(),
+                    0.8 + 0.2 * f,
+                );
             }
         }
         DEADWOOD => {
@@ -610,28 +987,77 @@ fn grow(species: usize, variant: usize, lod: usize) -> (TB, TreeDim) {
                 0 | 1 => {
                     // A fallen trunk with the stubs of its limbs.
                     let (len, r) = (rng.r(3.0, 6.5), rng.r(0.16, 0.3));
-                    let (p0, p1) = (d * (-len * 0.5) + Vec3::Y * (r * 0.75), d * (len * 0.5) + Vec3::Y * (r * 0.55));
-                    t.tube(&[(p0 - d * 0.02, 0.0), (p0, r), ((p0 + p1) * 0.5, r * 0.9), (p1, r * 0.7), (p1 + d * 0.02, 0.0)], 7, bark, 0.0);
+                    let (p0, p1) = (
+                        d * (-len * 0.5) + Vec3::Y * (r * 0.75),
+                        d * (len * 0.5) + Vec3::Y * (r * 0.55),
+                    );
+                    t.tube(
+                        &[
+                            (p0 - d * 0.02, 0.0),
+                            (p0, r),
+                            ((p0 + p1) * 0.5, r * 0.9),
+                            (p1, r * 0.7),
+                            (p1 + d * 0.02, 0.0),
+                        ],
+                        7,
+                        bark,
+                        0.0,
+                    );
                     for _ in 0..2 + variant {
                         let from = p0.lerp(p1, rng.r(0.25, 0.9));
-                        let dir = (d.cross(Vec3::Y) * rng.r(-1.0, 1.0) + Vec3::Y * rng.r(0.3, 1.0) + d * 0.4).normalize();
-                        t.tube(&[(from, r * 0.4), (from + dir * rng.r(0.4, 1.1), r * 0.18)], 4, bark, 0.0);
+                        let dir = (d.cross(Vec3::Y) * rng.r(-1.0, 1.0)
+                            + Vec3::Y * rng.r(0.3, 1.0)
+                            + d * 0.4)
+                            .normalize();
+                        t.tube(
+                            &[(from, r * 0.4), (from + dir * rng.r(0.4, 1.1), r * 0.18)],
+                            4,
+                            bark,
+                            0.0,
+                        );
                     }
                 }
                 2 => {
                     // A stump.
                     let (r, h) = (rng.r(0.25, 0.45), rng.r(0.35, 0.8));
-                    t.tube(&[(Vec3::Y * -0.3, r * 1.5), (Vec3::Y * 0.12, r * 1.1), (Vec3::Y * h, r), (Vec3::Y * (h + 0.02), 0.0)], 8, bark, 0.0);
+                    t.tube(
+                        &[
+                            (Vec3::Y * -0.3, r * 1.5),
+                            (Vec3::Y * 0.12, r * 1.1),
+                            (Vec3::Y * h, r),
+                            (Vec3::Y * (h + 0.02), 0.0),
+                        ],
+                        8,
+                        bark,
+                        0.0,
+                    );
                 }
                 _ => {
                     // A standing dead snag, snapped off.
                     let (r, h) = (rng.r(0.16, 0.26), rng.r(3.5, 7.0));
                     let top = Vec3::Y * h + lean * 0.5;
-                    t.tube(&[(Vec3::Y * -0.3, r * 1.5), (Vec3::Y * 0.4, r), (top * 0.6, r * 0.75), (top, r * 0.5), (top + Vec3::Y * 0.3, 0.0)], 6, bark, 0.0);
+                    t.tube(
+                        &[
+                            (Vec3::Y * -0.3, r * 1.5),
+                            (Vec3::Y * 0.4, r),
+                            (top * 0.6, r * 0.75),
+                            (top, r * 0.5),
+                            (top + Vec3::Y * 0.3, 0.0),
+                        ],
+                        6,
+                        bark,
+                        0.0,
+                    );
                     for _ in 0..3 {
                         let from = top * rng.r(0.45, 0.95);
-                        let dir = (Vec3::new(rng.r(-1.0, 1.0), rng.r(0.2, 0.9), rng.r(-1.0, 1.0))).normalize();
-                        t.tube(&[(from, r * 0.35), (from + dir * rng.r(0.5, 1.4), r * 0.1)], 4, bark, 0.0);
+                        let dir = (Vec3::new(rng.r(-1.0, 1.0), rng.r(0.2, 0.9), rng.r(-1.0, 1.0)))
+                            .normalize();
+                        t.tube(
+                            &[(from, r * 0.35), (from + dir * rng.r(0.5, 1.4), r * 0.1)],
+                            4,
+                            bark,
+                            0.0,
+                        );
                     }
                 }
             }
@@ -640,14 +1066,74 @@ fn grow(species: usize, variant: usize, lod: usize) -> (TB, TreeDim) {
             // Broadleaf-style trees: a trunk, a few limbs, and masses of foliage.
             // (height, bare trunk, trunk radius, crown spread xz, crown spread y, blob radius xz, blob radius y, blobs, lumpiness)
             let (h, th, tr, sx, sy, bx, by, n, lump) = match species {
-                OAK => (rng.r(10.0, 14.0), rng.r(2.8, 4.2), 0.40, 3.0, 1.6, 2.9, 2.2, 6, 0.24),
-                MAPLE => (rng.r(13.0, 18.0), rng.r(3.5, 5.5), 0.34, 2.0, 3.0, 2.7, 2.6, 5, 0.22),
-                PINE => (rng.r(14.0, 19.0), rng.r(8.0, 11.0), 0.30, 2.4, 1.1, 2.5, 1.3, 4, 0.3),
-                BIRCH => (rng.r(11.0, 16.0), rng.r(3.5, 5.0), 0.16, 1.0, 3.2, 1.7, 2.0, 4, 0.3),
-                TROPICAL => (rng.r(9.0, 13.0), rng.r(4.0, 6.0), 0.36, 4.2, 0.6, 3.6, 1.25, 5, 0.22),
+                OAK => (
+                    rng.r(10.0, 14.0),
+                    rng.r(2.8, 4.2),
+                    0.40,
+                    3.0,
+                    1.6,
+                    2.9,
+                    2.2,
+                    6,
+                    0.24,
+                ),
+                MAPLE => (
+                    rng.r(13.0, 18.0),
+                    rng.r(3.5, 5.5),
+                    0.34,
+                    2.0,
+                    3.0,
+                    2.7,
+                    2.6,
+                    5,
+                    0.22,
+                ),
+                PINE => (
+                    rng.r(14.0, 19.0),
+                    rng.r(8.0, 11.0),
+                    0.30,
+                    2.4,
+                    1.1,
+                    2.5,
+                    1.3,
+                    4,
+                    0.3,
+                ),
+                BIRCH => (
+                    rng.r(11.0, 16.0),
+                    rng.r(3.5, 5.0),
+                    0.16,
+                    1.0,
+                    3.2,
+                    1.7,
+                    2.0,
+                    4,
+                    0.3,
+                ),
+                TROPICAL => (
+                    rng.r(9.0, 13.0),
+                    rng.r(4.0, 6.0),
+                    0.36,
+                    4.2,
+                    0.6,
+                    3.6,
+                    1.25,
+                    5,
+                    0.22,
+                ),
                 BUSH => (rng.r(1.6, 2.8), 0.0, 0.0, 0.9, 0.2, 1.2, 1.0, 3, 0.3),
                 SHRUB => (rng.r(1.0, 1.9), 0.0, 0.0, 0.55, 0.12, 0.75, 0.62, 3, 0.32),
-                _ => (rng.r(17.0, 24.0), rng.r(7.0, 10.0), 0.36, 2.8, 4.0, 2.1, 1.7, 6, 0.34),
+                _ => (
+                    rng.r(17.0, 24.0),
+                    rng.r(7.0, 10.0),
+                    0.36,
+                    2.8,
+                    4.0,
+                    2.1,
+                    1.7,
+                    6,
+                    0.34,
+                ),
             };
             let low = matches!(species, BUSH | SHRUB);
             let cy = match species {
@@ -655,10 +1141,19 @@ fn grow(species: usize, variant: usize, lod: usize) -> (TB, TreeDim) {
                 SHRUB => 0.5,
                 _ => th + (h - th) * 0.5,
             };
-            let crown = Vec3::new(lean.x * 0.6, cy, lean.z * 0.6) * if species == SHRUB { Vec3::new(0.3, 1.0, 0.3) } else { Vec3::ONE };
+            let crown = Vec3::new(lean.x * 0.6, cy, lean.z * 0.6)
+                * if species == SHRUB {
+                    Vec3::new(0.3, 1.0, 0.3)
+                } else {
+                    Vec3::ONE
+                };
             for k in 0..n {
                 let d = rng.disc();
-                let fy = if n > 1 { k as f32 / (n - 1) as f32 * 2.0 - 1.0 } else { 0.0 };
+                let fy = if n > 1 {
+                    k as f32 / (n - 1) as f32 * 2.0 - 1.0
+                } else {
+                    0.0
+                };
                 let c = crown + Vec3::new(d.x * sx, fy * sy * rng.r(0.7, 1.0), d.y * sx);
                 let s = rng.r(0.8, 1.15);
                 blobs.push((c, Vec3::new(bx * s, by * s * rng.r(0.85, 1.15), bx * s)));
@@ -666,32 +1161,85 @@ fn grow(species: usize, variant: usize, lod: usize) -> (TB, TreeDim) {
             if !low {
                 let top = Vec3::new(crown.x * 0.7, th + (cy - th) * 0.6, crown.z * 0.7);
                 // Flared at the roots.
-                let trunk = [(Vec3::Y * -0.3, tr * 1.7), (Vec3::Y * 0.25, tr * 1.25), (Vec3::Y * 0.9, tr), (Vec3::new(top.x * 0.4, th * 0.75, top.z * 0.4), tr * 0.8), (top, tr * 0.45)];
+                let trunk = [
+                    (Vec3::Y * -0.3, tr * 1.7),
+                    (Vec3::Y * 0.25, tr * 1.25),
+                    (Vec3::Y * 0.9, tr),
+                    (Vec3::new(top.x * 0.4, th * 0.75, top.z * 0.4), tr * 0.8),
+                    (top, tr * 0.45),
+                ];
                 if lod == 0 {
                     t.tube(&trunk, sides, bark, bark_style);
                     // Limbs reaching into the foliage.
                     for (c, _) in blobs.iter() {
                         let from = trunk[3].0 + (trunk[4].0 - trunk[3].0) * rng.r(0.0, 0.8);
-                        t.tube(&[(from, tr * 0.42), ((from + *c) * 0.5 + Vec3::Y * 0.4, tr * 0.3), (*c, tr * 0.12)], 5, bark, bark_style);
+                        t.tube(
+                            &[
+                                (from, tr * 0.42),
+                                ((from + *c) * 0.5 + Vec3::Y * 0.4, tr * 0.3),
+                                (*c, tr * 0.12),
+                            ],
+                            5,
+                            bark,
+                            bark_style,
+                        );
                     }
                 } else if lod == 1 {
-                    t.tube(&[trunk[0], trunk[2], trunk[3], trunk[4]], sides, bark, bark_style);
+                    t.tube(
+                        &[trunk[0], trunk[2], trunk[3], trunk[4]],
+                        sides,
+                        bark,
+                        bark_style,
+                    );
                 } else if lod < 4 {
                     t.tube(&[trunk[1], trunk[4]], sides, bark, bark_style);
                 }
             }
-            let (lo, hi) = blobs.iter().fold((Vec3::splat(1e9), Vec3::splat(-1e9)), |(lo, hi), (c, r)| (lo.min(*c - *r), hi.max(*c + *r)));
+            let (lo, hi) = blobs
+                .iter()
+                .fold((Vec3::splat(1e9), Vec3::splat(-1e9)), |(lo, hi), (c, r)| {
+                    (lo.min(*c - *r), hi.max(*c + *r))
+                });
             match lod {
                 0 => {
                     for (k, (c, r)) in blobs.iter().enumerate() {
-                        t.blob(*c, *r, crown, leaf * (0.9 + 0.2 * hash(k as u32, variant as u32)), level, k as f32 + variant as f32 * 3.1, lump, &blobs, k);
+                        t.blob(
+                            *c,
+                            *r,
+                            crown,
+                            leaf * (0.9 + 0.2 * hash(k as u32, variant as u32)),
+                            level,
+                            k as f32 + variant as f32 * 3.1,
+                            lump,
+                            &blobs,
+                            k,
+                        );
                     }
-                    t.crown_cards(&blobs, crown, leaf, &sp, lump, variant, if low { 110.0 } else { 700.0 }, &mut rng);
+                    t.crown_cards(
+                        &blobs,
+                        crown,
+                        leaf,
+                        &sp,
+                        lump,
+                        variant,
+                        if low { 110.0 } else { 700.0 },
+                        &mut rng,
+                    );
                 }
                 1 => {
                     // Every mass, more coarsely made.
                     for (k, (c, r)) in blobs.iter().enumerate() {
-                        t.blob(*c, *r, crown, leaf * (0.9 + 0.2 * hash(k as u32, variant as u32)), 0, k as f32 + variant as f32 * 3.1, lump, &blobs, k);
+                        t.blob(
+                            *c,
+                            *r,
+                            crown,
+                            leaf * (0.9 + 0.2 * hash(k as u32, variant as u32)),
+                            0,
+                            k as f32 + variant as f32 * 3.1,
+                            lump,
+                            &blobs,
+                            k,
+                        );
                     }
                 }
                 2 => {
@@ -700,13 +1248,40 @@ fn grow(species: usize, variant: usize, lod: usize) -> (TB, TreeDim) {
                     for k in 0..m {
                         let grp: Vec<_> = blobs.iter().skip(k).step_by(m).collect();
                         let c = grp.iter().fold(Vec3::ZERO, |a, b| a + b.0) / grp.len() as f32;
-                        let r = grp.iter().fold(Vec3::ZERO, |a, b| a.max((b.0 - c).abs() * 0.6 + b.1));
-                        t.blob(c, r * 1.05, crown, leaf, 0, k as f32 + variant as f32 * 3.1, lump, &[], 0);
+                        let r = grp
+                            .iter()
+                            .fold(Vec3::ZERO, |a, b| a.max((b.0 - c).abs() * 0.6 + b.1));
+                        t.blob(
+                            c,
+                            r * 1.05,
+                            crown,
+                            leaf,
+                            0,
+                            k as f32 + variant as f32 * 3.1,
+                            lump,
+                            &[],
+                            0,
+                        );
                     }
                 }
-                _ => t.blob((lo + hi) * 0.5, (hi - lo) * 0.52, crown, leaf * 0.95, level, variant as f32, lump * 0.6, &[], 0),
+                _ => t.blob(
+                    (lo + hi) * 0.5,
+                    (hi - lo) * 0.52,
+                    crown,
+                    leaf * 0.95,
+                    level,
+                    variant as f32,
+                    lump * 0.6,
+                    &[],
+                    0,
+                ),
             }
-            dim = TreeDim { height: hi.y, crown_r: ((hi.x - lo.x).max(hi.z - lo.z)) * 0.5, crown_base: lo.y.max(0.0), trunk_r: tr.max(0.15) };
+            dim = TreeDim {
+                height: hi.y,
+                crown_r: ((hi.x - lo.x).max(hi.z - lo.z)) * 0.5,
+                crown_base: lo.y.max(0.0),
+                trunk_r: tr.max(0.15),
+            };
         }
     }
     (t, dim)
@@ -739,7 +1314,14 @@ pub fn build_meshes() -> TreeMeshes {
 
 /// How likely each species is at a place: climate from latitude and altitude,
 /// a few regional specialities, and whether the spot is city, scrub or wild.
-fn species_weights(lat: f64, lon: f64, elev: f32, urban: bool, arid: bool, scrub: bool) -> [f32; TREE_SPECIES] {
+fn species_weights(
+    lat: f64,
+    lon: f64,
+    elev: f32,
+    urban: bool,
+    arid: bool,
+    scrub: bool,
+) -> [f32; TREE_SPECIES] {
     let alat = lat.abs() as f32;
     // Climbing ~140 m is like moving a degree toward the pole.
     let eff = alat + elev.max(0.0) / 140.0;
@@ -841,10 +1423,15 @@ pub fn place(cx: &Ctx, vt: &VecTile, hoods: &Hoods, built: &[u8], roads: &[u8]) 
     let ext = cx.ext;
     // Patches of the tile used to find what stands near the camera.
     const NC: usize = 24;
-    let cell_of = |p: [f32; 2]| (((p[1] / ext * NC as f32) as usize).min(NC - 1) * NC + ((p[0] / ext * NC as f32) as usize).min(NC - 1)) as u16;
+    let cell_of = |p: [f32; 2]| {
+        (((p[1] / ext * NC as f32) as usize).min(NC - 1) * NC
+            + ((p[0] / ext * NC as f32) as usize).min(NC - 1)) as u16
+    };
     // Land cover and no-go rasters.
     let mut cover = vec![0u8; RASTER * RASTER];
-    for want in [LC_GRASS, LC_FARM, LC_WET, LC_SCRUB, LC_WOOD, LC_BARE, LC_ROCK] {
+    for want in [
+        LC_GRASS, LC_FARM, LC_WET, LC_SCRUB, LC_WOOD, LC_BARE, LC_ROCK,
+    ] {
         for (_, rings) in vt.landcover.iter().filter(|l| l.0 == want) {
             let mut layer = vec![0u8; RASTER * RASTER];
             crate::buildings::raster(&mut layer, RASTER, ext, rings, 1);
@@ -873,7 +1460,10 @@ pub fn place(cx: &Ctx, vt: &VecTile, hoods: &Hoods, built: &[u8], roads: &[u8]) 
         let mut pts = l.pts.clone();
         if l.runway && pts.len() >= 2 {
             // And the approach and climb-out beyond each end.
-            let (a, b) = (glam::Vec2::from(pts[0]), glam::Vec2::from(pts[pts.len() - 1]));
+            let (a, b) = (
+                glam::Vec2::from(pts[0]),
+                glam::Vec2::from(pts[pts.len() - 1]),
+            );
             let d = (b - a).normalize_or_zero() * (450.0 / cx.unit_m);
             pts[0] = (a - d).into();
             let n = pts.len() - 1;
@@ -898,14 +1488,28 @@ pub fn place(cx: &Ctx, vt: &VecTile, hoods: &Hoods, built: &[u8], roads: &[u8]) 
                 continue;
             }
             let (mut s, mut s2) = (0.0, 0.0);
-            for (dx, dy) in [(0i32, 0i32), (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] {
-                let l = lum((x as i32 + dx).max(0) as usize, (y as i32 + dy).max(0) as usize);
+            for (dx, dy) in [
+                (0i32, 0i32),
+                (1, 0),
+                (-1, 0),
+                (0, 1),
+                (0, -1),
+                (1, 1),
+                (-1, -1),
+                (1, -1),
+                (-1, 1),
+            ] {
+                let l = lum(
+                    (x as i32 + dx).max(0) as usize,
+                    (y as i32 + dy).max(0) as usize,
+                );
                 s += l;
                 s2 += l * l;
             }
             let sd = (s2 / 9.0 - (s / 9.0) * (s / 9.0)).max(0.0).sqrt();
             let dark = ((150.0 - s / 9.0) / 55.0).clamp(0.0, 1.0);
-            treeness[y * ATLAS + x] = g * (0.2 + 0.8 * ((sd - 3.0) / 8.0).clamp(0.0, 1.0)) * (0.35 + 0.65 * dark);
+            treeness[y * ATLAS + x] =
+                g * (0.2 + 0.8 * ((sd - 3.0) / 8.0).clamp(0.0, 1.0)) * (0.35 + 0.65 * dark);
         }
     }
     let arid = gsum / ((ATLAS * ATLAS) as f32) < 0.035;
@@ -923,28 +1527,49 @@ pub fn place(cx: &Ctx, vt: &VecTile, hoods: &Hoods, built: &[u8], roads: &[u8]) 
     for iy in 0..n {
         for ix in 0..n {
             let s = (ix + iy * 8191) ^ tseed;
-            let m = Vec2::new((ix as f32 + hash(s, 1)) * CELL - width_m * 0.5, (iy as f32 + hash(s, 2)) * CELL - width_m * 0.5);
+            let m = Vec2::new(
+                (ix as f32 + hash(s, 1)) * CELL - width_m * 0.5,
+                (iy as f32 + hash(s, 2)) * CELL - width_m * 0.5,
+            );
             let p = cx.units(m);
             if p[0] < 0.0 || p[1] < 0.0 || p[0] >= ext || p[1] >= ext {
                 continue;
             }
-            let (rx, ry) = ((p[0] / ext * RASTER as f32) as usize, (p[1] / ext * RASTER as f32) as usize);
+            let (rx, ry) = (
+                (p[0] / ext * RASTER as f32) as usize,
+                (p[1] / ext * RASTER as f32) as usize,
+            );
             let ri = ry.min(RASTER - 1) * RASTER + rx.min(RASTER - 1);
             if block[ri] != 0 {
                 continue;
             }
             // Keep clear of walls.
-            let near_wall = (-1i32..=1).any(|dy| (-1i32..=1).any(|dx| built[((ry as i32 + dy).clamp(0, RASTER as i32 - 1) as usize) * RASTER + (rx as i32 + dx).clamp(0, RASTER as i32 - 1) as usize] != 0));
+            let near_wall = (-1i32..=1).any(|dy| {
+                (-1i32..=1).any(|dx| {
+                    built[((ry as i32 + dy).clamp(0, RASTER as i32 - 1) as usize) * RASTER
+                        + (rx as i32 + dx).clamp(0, RASTER as i32 - 1) as usize]
+                        != 0
+                })
+            });
             if near_wall {
                 continue;
             }
-            let (axp, ayp) = ((p[0] / ext * ATLAS as f32) as usize, (p[1] / ext * ATLAS as f32) as usize);
+            let (axp, ayp) = (
+                (p[0] / ext * ATLAS as f32) as usize,
+                (p[1] / ext * ATLAS as f32) as usize,
+            );
             let tr = treeness[ayp.min(ATLAS - 1) * ATLAS + axp.min(ATLAS - 1)];
             let img = cx.img(p);
             let g = greenness(img);
             let lc = cover[ri];
             let density = match lc {
-                LC_WOOD => if g < 0.02 && lum(axp, ayp) > 150.0 { 0.08 } else { 0.5 + 0.45 * g },
+                LC_WOOD => {
+                    if g < 0.02 && lum(axp, ayp) > 150.0 {
+                        0.08
+                    } else {
+                        0.5 + 0.45 * g
+                    }
+                }
                 LC_SCRUB => 0.22 + 0.3 * g,
                 LC_GRASS => tr * tr * 1.3,
                 LC_FARM => tr * tr * tr * 0.5,
@@ -962,7 +1587,11 @@ pub fn place(cx: &Ctx, vt: &VecTile, hoods: &Hoods, built: &[u8], roads: &[u8]) 
             // Trees grow in stands: a slow noise field favours different species from place to place.
             let mut total = 0.0;
             for (k, wk) in w.iter_mut().enumerate() {
-                let nz = vnoise(Vec3::new(m.x / 140.0 + k as f32 * 5.3, m.y / 140.0, k as f32 * 1.7 + (tseed % 97) as f32));
+                let nz = vnoise(Vec3::new(
+                    m.x / 140.0 + k as f32 * 5.3,
+                    m.y / 140.0,
+                    k as f32 * 1.7 + (tseed % 97) as f32,
+                ));
                 *wk *= 0.15 + 2.2 * nz * nz;
                 total += *wk;
             }
@@ -979,19 +1608,33 @@ pub fn place(cx: &Ctx, vt: &VecTile, hoods: &Hoods, built: &[u8], roads: &[u8]) 
                 }
                 pickv -= wk;
             }
-            let variant = (species * VARIANTS + (hash(s, 5) * VARIANTS as f32) as usize % VARIANTS) as u8;
+            let variant =
+                (species * VARIANTS + (hash(s, 5) * VARIANTS as f32) as usize % VARIANTS) as u8;
             let young = hash(s, 6);
-            let scale = (0.58 + 0.7 * young.powf(0.8)) * if lc == LC_WOOD { 1.1 } else { 0.92 } * if eff_cold(cx.lat, ground) { 0.7 } else { 1.0 };
+            let scale = (0.58 + 0.7 * young.powf(0.8))
+                * if lc == LC_WOOD { 1.1 } else { 0.92 }
+                * if eff_cold(cx.lat, ground) { 0.7 } else { 1.0 };
             // Tint toward the canopy colour actually seen from above.
             let lin = [0, 1, 2].map(|k| (img[k] as f32 / 255.0).powf(2.2));
             let bright = 0.82 + 0.36 * hash(s, 7);
             let tint = [0, 1, 2].map(|k| {
                 let target = LEAF[species][k] * 0.55 + lin[k] * 1.1 * 0.45;
-                ((target / LEAF[species][k]).clamp(0.5, 1.8) * bright * 127.0).clamp(0.0, 255.0) as u8
+                ((target / LEAF[species][k]).clamp(0.5, 1.8) * bright * 127.0).clamp(0.0, 255.0)
+                    as u8
             });
             let pos = cx.pos(p, ground - 0.2);
-            let chunk = (((p[1] / ext * CH as f32) as usize).min(CH - 1) * CH + ((p[0] / ext * CH as f32) as usize).min(CH - 1)) as u8;
-            cand.push((TreeInst { a: [pos.x, pos.y, pos.z, scale], b: [0.0, 0.0, hash(s, 8) * TAU, 0.85 + 0.35 * hash(s, 9)], tint: [tint[0], tint[1], tint[2], 255] }, variant, chunk, cell_of(p)));
+            let chunk = (((p[1] / ext * CH as f32) as usize).min(CH - 1) * CH
+                + ((p[0] / ext * CH as f32) as usize).min(CH - 1)) as u8;
+            cand.push((
+                TreeInst {
+                    a: [pos.x, pos.y, pos.z, scale],
+                    b: [0.0, 0.0, hash(s, 8) * TAU, 0.85 + 0.35 * hash(s, 9)],
+                    tint: [tint[0], tint[1], tint[2], 255],
+                },
+                variant,
+                chunk,
+                cell_of(p),
+            ));
         }
     }
     // Thin out evenly if a tile is wall-to-wall forest.
@@ -1027,7 +1670,11 @@ pub fn place(cx: &Ctx, vt: &VecTile, hoods: &Hoods, built: &[u8], roads: &[u8]) 
         .into_iter()
         .zip(bounds)
         .filter(|(r, _)| !r.is_empty())
-        .map(|(runs, (lo, hi))| TreeChunk { center: (lo + hi) * 0.5, radius: (hi - lo).length() * 0.5 + 14.0, runs })
+        .map(|(runs, (lo, hi))| TreeChunk {
+            center: (lo + hi) * 0.5,
+            radius: (hi - lo).length() * 0.5 + 14.0,
+            runs,
+        })
         .collect();
     // What grows underneath: shrubs, ferns, saplings, tussocks and deadwood,
     // thick in the woods and thinning out into open country.
@@ -1038,30 +1685,46 @@ pub fn place(cx: &Ctx, vt: &VecTile, hoods: &Hoods, built: &[u8], roads: &[u8]) 
     for iy in 0..un {
         for ix in 0..un {
             let s = (ix + iy * 16381) ^ tseed.rotate_left(7) ^ 0x5bd1e995;
-            let m = Vec2::new((ix as f32 + hash(s, 1)) * UCELL - width_m * 0.5, (iy as f32 + hash(s, 2)) * UCELL - width_m * 0.5);
+            let m = Vec2::new(
+                (ix as f32 + hash(s, 1)) * UCELL - width_m * 0.5,
+                (iy as f32 + hash(s, 2)) * UCELL - width_m * 0.5,
+            );
             let p = cx.units(m);
             if p[0] < 0.0 || p[1] < 0.0 || p[0] >= ext || p[1] >= ext {
                 continue;
             }
-            let (rx, ry) = (((p[0] / ext * RASTER as f32) as usize).min(RASTER - 1), ((p[1] / ext * RASTER as f32) as usize).min(RASTER - 1));
+            let (rx, ry) = (
+                ((p[0] / ext * RASTER as f32) as usize).min(RASTER - 1),
+                ((p[1] / ext * RASTER as f32) as usize).min(RASTER - 1),
+            );
             let ri = ry * RASTER + rx;
             if block[ri] != 0 || built[ri] != 0 {
                 continue;
             }
-            let (axp, ayp) = (((p[0] / ext * ATLAS as f32) as usize).min(ATLAS - 1), ((p[1] / ext * ATLAS as f32) as usize).min(ATLAS - 1));
+            let (axp, ayp) = (
+                ((p[0] / ext * ATLAS as f32) as usize).min(ATLAS - 1),
+                ((p[1] / ext * ATLAS as f32) as usize).min(ATLAS - 1),
+            );
             let tr = treeness[ayp * ATLAS + axp];
             let lc = cover[ri];
             // Plants come in drifts rather than an even sprinkle.
             let drift = vnoise(Vec3::new(m.x / 23.0, m.y / 23.0, (tseed % 89) as f32));
             let density = match lc {
-                LC_WOOD => if tr < 0.01 && lum(axp, ayp) > 150.0 { 0.05 } else { 0.9 },
+                LC_WOOD => {
+                    if tr < 0.01 && lum(axp, ayp) > 150.0 {
+                        0.05
+                    } else {
+                        0.9
+                    }
+                }
                 LC_SCRUB => 0.6,
                 LC_GRASS => 0.03 + tr * 0.7,
                 LC_FARM => tr * tr * 0.5,
                 LC_WET => 0.25,
                 LC_BARE | LC_ROCK => 0.0,
                 _ => tr * 0.8,
-            } * (0.35 + 1.3 * drift) * if arid { 0.45 } else { 1.0 };
+            } * (0.35 + 1.3 * drift)
+                * if arid { 0.45 } else { 1.0 };
             if hash(s, 3) >= density {
                 continue;
             }
@@ -1077,7 +1740,13 @@ pub fn place(cx: &Ctx, vt: &VecTile, hoods: &Hoods, built: &[u8], roads: &[u8]) 
                 LC_WOOD => [0.26, 0.30, 0.14, 0.22, 0.08],
                 LC_SCRUB => [0.50, 0.02, 0.03, 0.40, 0.05],
                 LC_WET => [0.10, 0.10, 0.0, 0.80, 0.0],
-                _ => if wood { [0.32, 0.18, 0.12, 0.33, 0.05] } else { [0.35, 0.0, 0.05, 0.60, 0.0] },
+                _ => {
+                    if wood {
+                        [0.32, 0.18, 0.12, 0.33, 0.05]
+                    } else {
+                        [0.35, 0.0, 0.05, 0.60, 0.0]
+                    }
+                }
             };
             if arid || cold {
                 w[1] = 0.0;
@@ -1104,10 +1773,22 @@ pub fn place(cx: &Ctx, vt: &VecTile, hoods: &Hoods, built: &[u8], roads: &[u8]) 
                     return (bright * 127.0) as u8;
                 }
                 let target = LEAF[species][k] * 0.6 + lin[k] * 1.1 * 0.4;
-                ((target / LEAF[species][k]).clamp(0.55, 1.7) * bright * 127.0).clamp(0.0, 255.0) as u8
+                ((target / LEAF[species][k]).clamp(0.55, 1.7) * bright * 127.0).clamp(0.0, 255.0)
+                    as u8
             });
             let scale = (0.65 + 0.75 * hash(s, 6)) * if cold { 0.75 } else { 1.0 };
-            under.push((cell_of(p), cx.pos(p, ground - 0.04), Under { off: [0; 3], tint, var: (species * VARIANTS + (hash(s, 5) * VARIANTS as f32) as usize % VARIANTS) as u8, yaw: (hash(s, 8) * 255.0) as u8, scale: (scale * 100.0) as u8 }));
+            under.push((
+                cell_of(p),
+                cx.pos(p, ground - 0.04),
+                Under {
+                    off: [0; 3],
+                    tint,
+                    var: (species * VARIANTS + (hash(s, 5) * VARIANTS as f32) as usize % VARIANTS)
+                        as u8,
+                    yaw: (hash(s, 8) * 255.0) as u8,
+                    scale: (scale * 100.0) as u8,
+                },
+            ));
         }
     }
     if under.len() > MAX_UNDER {
@@ -1125,7 +1806,11 @@ pub fn place(cx: &Ctx, vt: &VecTile, hoods: &Hoods, built: &[u8], roads: &[u8]) 
     let mut cells = Vec::new();
     let (mut ti, mut ui) = (0, 0);
     while ti < near_idx.len() || ui < under.len() {
-        let id = near_idx.get(ti).map(|i| cand[*i as usize].3).unwrap_or(u16::MAX).min(under.get(ui).map(|u| u.0).unwrap_or(u16::MAX));
+        let id = near_idx
+            .get(ti)
+            .map(|i| cand[*i as usize].3)
+            .unwrap_or(u16::MAX)
+            .min(under.get(ui).map(|u| u.0).unwrap_or(u16::MAX));
         let (t0, u0) = (ti, ui);
         let (mut lo, mut hi) = (Vec3::splat(1e9), Vec3::splat(-1e9));
         while ti < near_idx.len() && cand[near_idx[ti] as usize].3 == id {
@@ -1141,11 +1826,26 @@ pub fn place(cx: &Ctx, vt: &VecTile, hoods: &Hoods, built: &[u8], roads: &[u8]) 
         }
         let center = (lo + hi) * 0.5;
         for u in &mut under[u0..ui] {
-            u.2.off = ((u.1 - center) * 100.0).clamp(Vec3::splat(-32767.0), Vec3::splat(32767.0)).to_array().map(|v| v as i16);
+            u.2.off = ((u.1 - center) * 100.0)
+                .clamp(Vec3::splat(-32767.0), Vec3::splat(32767.0))
+                .to_array()
+                .map(|v| v as i16);
         }
-        cells.push(NearCell { center, radius: (hi - lo).length() * 0.5, trees: (t0 as u32, (ti - t0) as u32), under: (u0 as u32, (ui - u0) as u32) });
+        cells.push(NearCell {
+            center,
+            radius: (hi - lo).length() * 0.5,
+            trees: (t0 as u32, (ti - t0) as u32),
+            under: (u0 as u32, (ui - u0) as u32),
+        });
     }
-    Placed { var: cand.iter().map(|c| c.1).collect(), trees: cand.into_iter().map(|c| c.0).collect(), chunks, under: under.into_iter().map(|u| u.2).collect(), cells, near_idx }
+    Placed {
+        var: cand.iter().map(|c| c.1).collect(),
+        trees: cand.into_iter().map(|c| c.0).collect(),
+        chunks,
+        under: under.into_iter().map(|u| u.2).collect(),
+        cells,
+        near_idx,
+    }
 }
 
 fn eff_cold(lat: f64, elev: f32) -> bool {

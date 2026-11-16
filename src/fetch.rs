@@ -1,5 +1,5 @@
 //! Disk-cached HTTP fetches for map tiles.
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -18,7 +18,12 @@ impl Fetcher {
             .timeout_global(Some(Duration::from_secs(20)))
             .user_agent("fablegame-flightsim/0.1")
             .build();
-        Self { agent: cfg.into(), root, missing: Mutex::new(HashSet::new()), offline }
+        Self {
+            agent: cfg.into(),
+            root,
+            missing: Mutex::new(HashSet::new()),
+            offline,
+        }
     }
 
     /// Plain GET with no caching.
@@ -48,7 +53,9 @@ impl Fetcher {
                     let _ = std::fs::create_dir_all(dir);
                 }
                 // Write to a temp name first so a crash never leaves a half tile.
-                let tmp = path.with_extension(format!("tmp{:?}", std::thread::current().id()).replace(['(', ')'], ""));
+                let tmp = path.with_extension(
+                    format!("tmp{:?}", std::thread::current().id()).replace(['(', ')'], ""),
+                );
                 if std::fs::write(&tmp, &data).is_ok() {
                     let _ = std::fs::rename(&tmp, &path);
                 }

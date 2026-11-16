@@ -52,7 +52,12 @@ impl TileId {
     }
     pub fn children(self) -> [TileId; 4] {
         let (z, x, y) = (self.z + 1, self.x * 2, self.y * 2);
-        [TileId::new(z, x, y), TileId::new(z, x + 1, y), TileId::new(z, x, y + 1), TileId::new(z, x + 1, y + 1)]
+        [
+            TileId::new(z, x, y),
+            TileId::new(z, x + 1, y),
+            TileId::new(z, x, y + 1),
+            TileId::new(z, x + 1, y + 1),
+        ]
     }
     /// Ancestor at zoom `z` (or self if already at or above it) plus this tile's
     /// sub-rectangle inside it as (offset_x, offset_y, scale) in 0..1 units.
@@ -63,18 +68,28 @@ impl TileId {
         let d = self.z - z;
         let n = (1u32 << d) as f64;
         let a = TileId::new(z, self.x >> d, self.y >> d);
-        (a, (self.x - (a.x << d)) as f64 / n, (self.y - (a.y << d)) as f64 / n, 1.0 / n)
+        (
+            a,
+            (self.x - (a.x << d)) as f64 / n,
+            (self.y - (a.y << d)) as f64 / n,
+            1.0 / n,
+        )
     }
     pub fn at(lat: f64, lon: f64, z: u8) -> TileId {
         let n = (1u64 << z) as f64;
-        let x = (lon_to_merc_x(lon).rem_euclid(1.0) * n).floor().min(n - 1.0);
+        let x = (lon_to_merc_x(lon).rem_euclid(1.0) * n)
+            .floor()
+            .min(n - 1.0);
         let y = (lat_to_merc_y(lat) * n).floor().clamp(0.0, n - 1.0);
         TileId::new(z, x as u32, y as u32)
     }
     /// Fractional position of a lat/lon inside this tile (0..1, y down).
     pub fn frac(self, lat: f64, lon: f64) -> (f64, f64) {
         let n = (1u64 << self.z) as f64;
-        (lon_to_merc_x(lon).rem_euclid(1.0) * n - self.x as f64, lat_to_merc_y(lat) * n - self.y as f64)
+        (
+            lon_to_merc_x(lon).rem_euclid(1.0) * n - self.x as f64,
+            lat_to_merc_y(lat) * n - self.y as f64,
+        )
     }
     /// lat/lon of a fractional position inside the tile. Rows touching the
     /// mercator limit are pulled to the pole so the globe is closed.

@@ -82,32 +82,415 @@ pub mod screen {
 /// Every string a legend or a display can print, looked up by index. The
 /// shader gets them as a table (`strings_wgsl`); index 0 means "made-up text".
 pub const STRINGS: &[&str] = &[
-    "", "IAS/MACH", "HDG", "ALT", "VERT SPD", "LNAV", "VNAV", "FL CH", "HOLD", "A/T ARM", "F/D", "APP", "LOC", "BANK LIMIT", "CMD", "DISENGAGE",
-    "MINS", "BARO", "MAP", "PLN", "VOR", "RANGE", "WXR", "STA", "WPT", "ARPT", "DATA", "POS", "TERR", "FUEL CONTROL", "RUN", "CUTOFF",
-    "STAB TRIM", "AUTO", "ALTN", "GEAR", "UP", "DN", "OFF", "AUTOBRAKES", "RTO", "DISARM", "MAX AUTO", "GND PROX", "FLAP", "OVRD", "SOURCE", "IRS",
-    "FMC", "NAV", "ON", "ARMED", "EMER LIGHTS", "ENG START", "CON", "NORM", "FLT", "FUEL JETTISON", "NOZZLE", "X FEED", "MAIN", "PUMPS", "CTR", "STAB",
-    "HYD", "DEMAND", "ELEC", "GEN CONT", "BUS TIE", "DRIVE DISC", "BATTERY", "STBY POWER", "APU", "EXT PWR", "ALIGN", "ATT", "NACELLE", "WING", "ANTI-ICE", "WINDOW HEAT",
-    "WIPER", "LANDING", "OUTBD", "INBD", "RWY TURNOFF", "TAXI", "BEACON", "STROBE", "LOGO", "IND LTS", "TEST", "BRT", "PACKS", "TRIM AIR", "RECIRC", "AFT CARGO",
-    "HI FLOW", "OUTFLOW", "CABIN ALT", "LDG ALT", "YAW DAMPER", "UPR", "LWR", "PASS OXYGEN", "SEAT BELTS", "NO SMOKING", "CAPT", "F/O", "PUSH", "TO/GA", "REV", "SPEED BRAKE",
-    "FLAPS", "CARGO FIRE", "DISCH", "ARM", "FWD", "AFT", "ENG FIRE", "1", "2", "3", "4", "CHR", "ET", "RESET", "FLOOD", "PANEL",
-    "DOME", "STORM", "GLARESHIELD", "INTERPHONE", "VHF L", "VHF C", "VHF R", "HF L", "HF R", "MIC", "PA", "SAT", "AUDIO", "XPDR", "STBY", "TA/RA",
-    "TILT", "GAIN", "EVAC", "COMMAND", "PARK BRAKE", "BRAKE SOURCE", "PUSH HEADREST", "PULL", "LOCK OVRD", "NOSE/BODY", "SPD", "THR", "SEL", "V/S", "ALT HOLD", "HDG SEL",
-    "VALVE", "FAULT", "IGN", "BLEED", "ISLN", "DUCT", "SMOKE EVAC", "CALL", "ATC", "EICAS", "ENG", "STAT", "ELEC/HYD", "FUEL", "ECS", "DRS",
-    "CANC", "RCL", "EFIS", "DSPL", "CTL", "SYS", "CDU", "EIU", "UP 1 5 10 20", "25 30", "DOWN", "EPR", "N1", "EGT", "N2", "FF",
-    "OIL P", "OIL T", "OIL Q", "VIB", "TAT", "SAT", "TOTAL FUEL", "GROSS WT", "KGS X 1000", "CAB ALT", "RATE", "GS", "TAS", "MAG", "VOR L", "VOR R",
-    "CARPE", "DERBY", "SFO", "OAK", "NM", "SPD", "VNAV PTH", "VNAV SPD", "STD", "MCP SPD", "IN", "HPA", "FPV", "MTRS", "ACT RTE 1 LEGS", "CARPE",
-    "2219.0Z", "35.0NM", "TFC", "PACK 2 OFF", "APU RUNNING", "DUCT PRESS", "MASTER", "WARNING", "CAUTION", "RA", "DH", "WINDSHEAR", "CMD L", "CMD C", "CMD R", "DISC",
-    "TO", "CRZ", "CLB", "REF", "PROG", "EXEC", "INIT", "MENU", "LEGS", "DEP ARR", "FIX", "NAV RAD", "PREV PAGE", "NEXT PAGE", "CLR", "DEL",
-    "25", "30",
+    "",
+    "IAS/MACH",
+    "HDG",
+    "ALT",
+    "VERT SPD",
+    "LNAV",
+    "VNAV",
+    "FL CH",
+    "HOLD",
+    "A/T ARM",
+    "F/D",
+    "APP",
+    "LOC",
+    "BANK LIMIT",
+    "CMD",
+    "DISENGAGE",
+    "MINS",
+    "BARO",
+    "MAP",
+    "PLN",
+    "VOR",
+    "RANGE",
+    "WXR",
+    "STA",
+    "WPT",
+    "ARPT",
+    "DATA",
+    "POS",
+    "TERR",
+    "FUEL CONTROL",
+    "RUN",
+    "CUTOFF",
+    "STAB TRIM",
+    "AUTO",
+    "ALTN",
+    "GEAR",
+    "UP",
+    "DN",
+    "OFF",
+    "AUTOBRAKES",
+    "RTO",
+    "DISARM",
+    "MAX AUTO",
+    "GND PROX",
+    "FLAP",
+    "OVRD",
+    "SOURCE",
+    "IRS",
+    "FMC",
+    "NAV",
+    "ON",
+    "ARMED",
+    "EMER LIGHTS",
+    "ENG START",
+    "CON",
+    "NORM",
+    "FLT",
+    "FUEL JETTISON",
+    "NOZZLE",
+    "X FEED",
+    "MAIN",
+    "PUMPS",
+    "CTR",
+    "STAB",
+    "HYD",
+    "DEMAND",
+    "ELEC",
+    "GEN CONT",
+    "BUS TIE",
+    "DRIVE DISC",
+    "BATTERY",
+    "STBY POWER",
+    "APU",
+    "EXT PWR",
+    "ALIGN",
+    "ATT",
+    "NACELLE",
+    "WING",
+    "ANTI-ICE",
+    "WINDOW HEAT",
+    "WIPER",
+    "LANDING",
+    "OUTBD",
+    "INBD",
+    "RWY TURNOFF",
+    "TAXI",
+    "BEACON",
+    "STROBE",
+    "LOGO",
+    "IND LTS",
+    "TEST",
+    "BRT",
+    "PACKS",
+    "TRIM AIR",
+    "RECIRC",
+    "AFT CARGO",
+    "HI FLOW",
+    "OUTFLOW",
+    "CABIN ALT",
+    "LDG ALT",
+    "YAW DAMPER",
+    "UPR",
+    "LWR",
+    "PASS OXYGEN",
+    "SEAT BELTS",
+    "NO SMOKING",
+    "CAPT",
+    "F/O",
+    "PUSH",
+    "TO/GA",
+    "REV",
+    "SPEED BRAKE",
+    "FLAPS",
+    "CARGO FIRE",
+    "DISCH",
+    "ARM",
+    "FWD",
+    "AFT",
+    "ENG FIRE",
+    "1",
+    "2",
+    "3",
+    "4",
+    "CHR",
+    "ET",
+    "RESET",
+    "FLOOD",
+    "PANEL",
+    "DOME",
+    "STORM",
+    "GLARESHIELD",
+    "INTERPHONE",
+    "VHF L",
+    "VHF C",
+    "VHF R",
+    "HF L",
+    "HF R",
+    "MIC",
+    "PA",
+    "SAT",
+    "AUDIO",
+    "XPDR",
+    "STBY",
+    "TA/RA",
+    "TILT",
+    "GAIN",
+    "EVAC",
+    "COMMAND",
+    "PARK BRAKE",
+    "BRAKE SOURCE",
+    "PUSH HEADREST",
+    "PULL",
+    "LOCK OVRD",
+    "NOSE/BODY",
+    "SPD",
+    "THR",
+    "SEL",
+    "V/S",
+    "ALT HOLD",
+    "HDG SEL",
+    "VALVE",
+    "FAULT",
+    "IGN",
+    "BLEED",
+    "ISLN",
+    "DUCT",
+    "SMOKE EVAC",
+    "CALL",
+    "ATC",
+    "EICAS",
+    "ENG",
+    "STAT",
+    "ELEC/HYD",
+    "FUEL",
+    "ECS",
+    "DRS",
+    "CANC",
+    "RCL",
+    "EFIS",
+    "DSPL",
+    "CTL",
+    "SYS",
+    "CDU",
+    "EIU",
+    "UP 1 5 10 20",
+    "25 30",
+    "DOWN",
+    "EPR",
+    "N1",
+    "EGT",
+    "N2",
+    "FF",
+    "OIL P",
+    "OIL T",
+    "OIL Q",
+    "VIB",
+    "TAT",
+    "SAT",
+    "TOTAL FUEL",
+    "GROSS WT",
+    "KGS X 1000",
+    "CAB ALT",
+    "RATE",
+    "GS",
+    "TAS",
+    "MAG",
+    "VOR L",
+    "VOR R",
+    "CARPE",
+    "DERBY",
+    "SFO",
+    "OAK",
+    "NM",
+    "SPD",
+    "VNAV PTH",
+    "VNAV SPD",
+    "STD",
+    "MCP SPD",
+    "IN",
+    "HPA",
+    "FPV",
+    "MTRS",
+    "ACT RTE 1 LEGS",
+    "CARPE",
+    "2219.0Z",
+    "35.0NM",
+    "TFC",
+    "PACK 2 OFF",
+    "APU RUNNING",
+    "DUCT PRESS",
+    "MASTER",
+    "WARNING",
+    "CAUTION",
+    "RA",
+    "DH",
+    "WINDSHEAR",
+    "CMD L",
+    "CMD C",
+    "CMD R",
+    "DISC",
+    "TO",
+    "CRZ",
+    "CLB",
+    "REF",
+    "PROG",
+    "EXEC",
+    "INIT",
+    "MENU",
+    "LEGS",
+    "DEP ARR",
+    "FIX",
+    "NAV RAD",
+    "PREV PAGE",
+    "NEXT PAGE",
+    "CLR",
+    "DEL",
+    "25",
+    "30",
     // The Hornet's cockpit (fa18/pit.rs, pit18.wgsl).
-    "DANGER", "FIRE", "MASTER CAUTION", "EXTGH", "A/A", "A/G", "MASTER ARM", "EMERG JETT", "APU FIRE", "IR COOL", "HMD", "SPIN", "NIGHT", "CONT", "5", "6", "7", "8", "9", "0", "ENT", "I/P", "ADF", "VOL", "COMM 1", "COMM 2", "EMCON", "A/P", "IFF", "TCN", "ILS", "D/L", "BCN", "ON/OFF", "DAY", "BLK LVL", "W/B", "BAL", "AOA", "INS", "LOCK", "SHOOT", "MODE", "QTY", "ZONE", "INT", "CRS", "ECM", "LDG GEAR", "NOSE", "LEFT", "RIGHT", "HALF", "FULL", "EXT LT", "FCS", "COMM", "INTR LT", "SNSR", "KY-58", "DEFOG", "IDLE", "MIL", "MAX", "CANOPY", "EJECTION SEAT", "UPPER", "RWS", "TWS", "STT", "RSET", "SIL", "AZ", "EL", "OPR", "ADI", "HSI", "SA", "STORES", "SUPT", "BIT", "FPAS", "CHKLST", "UFC", "TAC", "WYPT", "SEQ1", "SCL", "DCLTR", "MK-82", "AIM-9X", "AIM-120", "GUN", "PRGM", "T/R", "RCV", "X", "Y", "71X", "M", "RPM", "TEMP", "NOZ", "OIL", "BINGO", "T", "I", "L", "R", "G", "N", "E", "S", "W", "DIST", "RNG", "40",
+    "DANGER",
+    "FIRE",
+    "MASTER CAUTION",
+    "EXTGH",
+    "A/A",
+    "A/G",
+    "MASTER ARM",
+    "EMERG JETT",
+    "APU FIRE",
+    "IR COOL",
+    "HMD",
+    "SPIN",
+    "NIGHT",
+    "CONT",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "0",
+    "ENT",
+    "I/P",
+    "ADF",
+    "VOL",
+    "COMM 1",
+    "COMM 2",
+    "EMCON",
+    "A/P",
+    "IFF",
+    "TCN",
+    "ILS",
+    "D/L",
+    "BCN",
+    "ON/OFF",
+    "DAY",
+    "BLK LVL",
+    "W/B",
+    "BAL",
+    "AOA",
+    "INS",
+    "LOCK",
+    "SHOOT",
+    "MODE",
+    "QTY",
+    "ZONE",
+    "INT",
+    "CRS",
+    "ECM",
+    "LDG GEAR",
+    "NOSE",
+    "LEFT",
+    "RIGHT",
+    "HALF",
+    "FULL",
+    "EXT LT",
+    "FCS",
+    "COMM",
+    "INTR LT",
+    "SNSR",
+    "KY-58",
+    "DEFOG",
+    "IDLE",
+    "MIL",
+    "MAX",
+    "CANOPY",
+    "EJECTION SEAT",
+    "UPPER",
+    "RWS",
+    "TWS",
+    "STT",
+    "RSET",
+    "SIL",
+    "AZ",
+    "EL",
+    "OPR",
+    "ADI",
+    "HSI",
+    "SA",
+    "STORES",
+    "SUPT",
+    "BIT",
+    "FPAS",
+    "CHKLST",
+    "UFC",
+    "TAC",
+    "WYPT",
+    "SEQ1",
+    "SCL",
+    "DCLTR",
+    "MK-82",
+    "AIM-9X",
+    "AIM-120",
+    "GUN",
+    "PRGM",
+    "T/R",
+    "RCV",
+    "X",
+    "Y",
+    "71X",
+    "M",
+    "RPM",
+    "TEMP",
+    "NOZ",
+    "OIL",
+    "BINGO",
+    "T",
+    "I",
+    "L",
+    "R",
+    "G",
+    "N",
+    "E",
+    "S",
+    "W",
+    "DIST",
+    "RNG",
+    "40",
     // The Blackbird's cockpits (sr71/pit.rs).
-    "TEB", "OXY", "UHF", "TACAN", "LIGHTS", "DEF", "SAS", "AUTOPILOT", "SPIKE", "FWD BYPASS", "AFT BYPASS", "L UNSTART", "R UNSTART", "CIT", "FUEL LOW", "CG", "PITOT HEAT", "OIL PRESS", "SENSOR", "VIEWSIGHT", "RADAR", "MAP PROJ",
+    "TEB",
+    "OXY",
+    "UHF",
+    "TACAN",
+    "LIGHTS",
+    "DEF",
+    "SAS",
+    "AUTOPILOT",
+    "SPIKE",
+    "FWD BYPASS",
+    "AFT BYPASS",
+    "L UNSTART",
+    "R UNSTART",
+    "CIT",
+    "FUEL LOW",
+    "CG",
+    "PITOT HEAT",
+    "OIL PRESS",
+    "SENSOR",
+    "VIEWSIGHT",
+    "RADAR",
+    "MAP PROJ",
 ];
 
 /// Index of a string in `STRINGS` (panics if it is missing: a typo in the layout).
 pub fn sid(s: &str) -> u32 {
-    STRINGS.iter().skip(1).position(|x| *x == s).map(|i| i as u32 + 1).unwrap_or_else(|| panic!("no legend string {s:?}"))
+    STRINGS
+        .iter()
+        .skip(1)
+        .position(|x| *x == s)
+        .map(|i| i as u32 + 1)
+        .unwrap_or_else(|| panic!("no legend string {s:?}"))
 }
 
 /// Stroke-font glyph index for a character (plane.wgsl `GSEG`).
@@ -122,7 +505,10 @@ pub fn glyph(c: char) -> u32 {
         ' ' => 15,
         _ => {
             const REST: &str = "ABCDFGHIJKLMOPQRTUVXYZ/-+:°<>()[]*'#";
-            REST.chars().position(|x| x == c).map(|i| 16 + i as u32).unwrap_or(15)
+            REST.chars()
+                .position(|x| x == c)
+                .map(|i| 16 + i as u32)
+                .unwrap_or(15)
         }
     }
 }
@@ -139,14 +525,28 @@ pub fn strings_wgsl() -> String {
             b[i] = glyph(c);
         }
         b[15] = n as u32;
-        let w: Vec<String> = (0..4).map(|j| format!("{}u", b[j * 4] | b[j * 4 + 1] << 8 | b[j * 4 + 2] << 16 | b[j * 4 + 3] << 24)).collect();
-        out += &format!("  vec4u({}){}\n", w.join(", "), if k + 1 < STRINGS.len() { "," } else { "" });
+        let w: Vec<String> = (0..4)
+            .map(|j| {
+                format!(
+                    "{}u",
+                    b[j * 4] | b[j * 4 + 1] << 8 | b[j * 4 + 2] << 16 | b[j * 4 + 3] << 24
+                )
+            })
+            .collect();
+        out += &format!(
+            "  vec4u({}){}\n",
+            w.join(", "),
+            if k + 1 < STRINGS.len() { "," } else { "" }
+        );
     }
     out += ");\n";
     // Names for the ones the displays print (the first of any repeats).
     let mut seen = std::collections::HashSet::new();
     for (k, s) in STRINGS.iter().enumerate().skip(1) {
-        let name: String = s.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+        let name: String = s
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect();
         if seen.insert(name.clone()) {
             out += &format!("const S_{name}: u32 = {k}u;\n");
         }
@@ -155,7 +555,9 @@ pub fn strings_wgsl() -> String {
 }
 
 pub(crate) fn legend_mat(style: u32, s: u32, col: Vec3) -> Mat {
-    mt(mat::PLASTIC, col.x, col.y, col.z).pat(pat::LEGEND).x((style + 16 * s) as f32)
+    mt(mat::PLASTIC, col.x, col.y, col.z)
+        .pat(pat::LEGEND)
+        .x((style + 16 * s) as f32)
 }
 
 // ---------------------------------------------------------------- shell geometry
@@ -258,7 +660,9 @@ fn station_at(x: f32, y: f32, lining: bool) -> f32 {
     for _ in 0..32 {
         let m = (a + b) * 0.5;
         let s = if lining { lsec(m) } else { sec(m) };
-        let w = if y >= s.top { 0.0 } else {
+        let w = if y >= s.top {
+            0.0
+        } else {
             let (mut p, mut q) = (0.0f32, PI);
             for _ in 0..24 {
                 let t = (p + q) * 0.5;
@@ -277,14 +681,29 @@ fn window_ring(k: usize, e: f32, lining: bool) -> Vec<Vec3> {
         let v: Vec<Vec2> = WSHIELD.iter().map(|p| Vec2::new(p[0], p[1])).collect();
         let n = v.len();
         let area: f32 = (0..n).map(|i| v[i].perp_dot(v[(i + 1) % n])).sum();
-        let out = |a: Vec2, b: Vec2| { let d = (b - a).normalize(); if area > 0.0 { Vec2::new(d.y, -d.x) } else { Vec2::new(-d.y, d.x) } };
+        let out = |a: Vec2, b: Vec2| {
+            let d = (b - a).normalize();
+            if area > 0.0 {
+                Vec2::new(d.y, -d.x)
+            } else {
+                Vec2::new(-d.y, d.x)
+            }
+        };
         let r = 0.06 + e;
         let mut pts = Vec::new();
         for i in 0..n {
             let (pv, c, nx) = (v[(i + n - 1) % n], v[i], v[(i + 1) % n]);
             let (n0, n1) = (out(pv, c), out(c, nx));
             let (a0, mut a1) = (n0.y.atan2(n0.x), n1.y.atan2(n1.x));
-            if area > 0.0 { while a1 < a0 { a1 += TAU } } else { while a1 > a0 { a1 -= TAU } }
+            if area > 0.0 {
+                while a1 < a0 {
+                    a1 += TAU
+                }
+            } else {
+                while a1 > a0 {
+                    a1 -= TAU
+                }
+            }
             for j in 0..=6 {
                 let a = a0 + (a1 - a0) * j as f32 / 6.0;
                 pts.push(c + Vec2::new(a.cos(), a.sin()) * r);
@@ -297,7 +716,13 @@ fn window_ring(k: usize, e: f32, lining: bool) -> Vec<Vec3> {
             }
         }
         // Past the aft limit (5.26 m from the nose) the cut is a station; clamp.
-        return pts.iter().map(|p| { let z = station_at(p.x, p.y, lining).min(bz(5.26 + e)); Vec3::new(p.x, p.y, z) }).collect();
+        return pts
+            .iter()
+            .map(|p| {
+                let z = station_at(p.x, p.y, lining).min(bz(5.26 + e));
+                Vec3::new(p.x, p.y, z)
+            })
+            .collect();
     }
     outline(WIN[k], e, 6)
         .iter()
@@ -338,7 +763,10 @@ impl Face {
     }
     /// The same face moved to (u, v), raised by h.
     pub(crate) fn sub(&self, u: f32, v: f32, h: f32) -> Face {
-        Face { o: self.at_h(u, v, h), ..*self }
+        Face {
+            o: self.at_h(u, v, h),
+            ..*self
+        }
     }
 }
 
@@ -371,10 +799,26 @@ pub(crate) fn screen_quad(m: &mut Mesh, mm: &Mat, c: Vec3, ax: Vec3, ay: Vec3, h
 /// A printed legend on a face, centred at (u, v): `hw` x `hh` half size.
 fn label(m: &mut Mesh, f: &Face, u: f32, v: f32, hw: f32, hh: f32, st: u32, s: u32) {
     let col = panel_col();
-    rect(m, &legend_mat(st, s, col), f.at_h(u, v, 0.0004), f.ax, f.ay, hw, hh);
+    rect(
+        m,
+        &legend_mat(st, s, col),
+        f.at_h(u, v, 0.0004),
+        f.ax,
+        f.ay,
+        hw,
+        hh,
+    );
 }
 fn label_c(m: &mut Mesh, f: &Face, u: f32, v: f32, hw: f32, hh: f32, st: u32, s: u32, col: Vec3) {
-    rect(m, &legend_mat(st, s, col), f.at_h(u, v, 0.0004), f.ax, f.ay, hw, hh);
+    rect(
+        m,
+        &legend_mat(st, s, col),
+        f.at_h(u, v, 0.0004),
+        f.ax,
+        f.ay,
+        hw,
+        hh,
+    );
 }
 /// A word's worth of legend sized for its text (glyph height `h`).
 fn word(m: &mut Mesh, f: &Face, u: f32, v: f32, h: f32, s: &str) {
@@ -386,17 +830,50 @@ fn word(m: &mut Mesh, f: &Face, u: f32, v: f32, h: f32, s: &str) {
 /// A Dzus fastener: the quarter-turn stud every Boeing panel is held in by.
 fn dzus(m: &mut Mesh, f: &Face, u: f32, v: f32, seed: f32) {
     let c = f.at(u, v);
-    m.lathe(&mt(mat::PLASTIC, 0.12, 0.10, 0.085), c, f.n(), &[[0.0042, 0.0], [0.0042, 0.0008], [0.0034, 0.0016], [0.0, 0.0018]], 10, true);
-    m.rbox(&BTN, c + f.n() * 0.0017, Vec3::new(0.0032, 0.0005, 0.0003), 0.0002, f.rot() * Quat::from_rotation_z(hash(seed) * PI));
+    m.lathe(
+        &mt(mat::PLASTIC, 0.12, 0.10, 0.085),
+        c,
+        f.n(),
+        &[
+            [0.0042, 0.0],
+            [0.0042, 0.0008],
+            [0.0034, 0.0016],
+            [0.0, 0.0018],
+        ],
+        10,
+        true,
+    );
+    m.rbox(
+        &BTN,
+        c + f.n() * 0.0017,
+        Vec3::new(0.0032, 0.0005, 0.0003),
+        0.0002,
+        f.rot() * Quat::from_rotation_z(hash(seed) * PI),
+    );
 }
 /// A panel plate standing proud of its face with a fastener at each corner.
 fn plate(m: &mut Mesh, f: &Face, u0: f32, v0: f32, u1: f32, v1: f32, seed: f32) {
     let (cu, cv) = ((u0 + u1) * 0.5, (v0 + v1) * 0.5);
     let (hu, hv) = ((u1 - u0) * 0.5 - 0.0008, (v1 - v0) * 0.5 - 0.0008);
-    m.rbox(&PANEL, f.at_h(cu, cv, 0.0015), Vec3::new(hu, hv, 0.0028), 0.0012, f.rot());
+    m.rbox(
+        &PANEL,
+        f.at_h(cu, cv, 0.0015),
+        Vec3::new(hu, hv, 0.0028),
+        0.0012,
+        f.rot(),
+    );
     let g = f.sub(0.0, 0.0, 0.0043);
-    for (k, (du, dv)) in [(-1.0f32, -1.0f32), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].iter().enumerate() {
-        dzus(m, &g, cu + du * (hu - 0.007), cv + dv * (hv - 0.0065), seed + k as f32);
+    for (k, (du, dv)) in [(-1.0f32, -1.0f32), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+        .iter()
+        .enumerate()
+    {
+        dzus(
+            m,
+            &g,
+            cu + du * (hu - 0.007),
+            cv + dv * (hv - 0.0065),
+            seed + k as f32,
+        );
     }
 }
 
@@ -404,78 +881,269 @@ fn plate(m: &mut Mesh, f: &Face, u0: f32, v0: f32, u1: f32, v1: f32, seed: f32) 
 fn knob(m: &mut Mesh, f: &Face, u: f32, v: f32, r: f32, seed: f32, scale: bool) {
     let c = f.at(u, v);
     let n = f.n();
-    m.lathe(&CREAM, c, n, &[[r * 1.25, 0.0], [r * 1.25, r * 0.25], [r * 1.05, r * 0.4], [r * 0.95, r * 0.45], [r * 0.95, r * 1.3], [r * 0.85, r * 1.4], [0.0, r * 1.42]], 14, false);
+    m.lathe(
+        &CREAM,
+        c,
+        n,
+        &[
+            [r * 1.25, 0.0],
+            [r * 1.25, r * 0.25],
+            [r * 1.05, r * 0.4],
+            [r * 0.95, r * 0.45],
+            [r * 0.95, r * 1.3],
+            [r * 0.85, r * 1.4],
+            [0.0, r * 1.42],
+        ],
+        14,
+        false,
+    );
     // The pointer: a dark line across the top of the grip.
     let a = (hash(seed) - 0.5) * 2.4;
     let rot = f.rot() * Quat::from_rotation_z(a);
-    m.rbox(&BTN, c + n * (r * 1.42), Vec3::new(r * 0.12, r * 0.8, 0.0004), 0.0002, rot);
+    m.rbox(
+        &BTN,
+        c + n * (r * 1.42),
+        Vec3::new(r * 0.12, r * 0.8, 0.0004),
+        0.0002,
+        rot,
+    );
     if scale {
         let col = panel_col();
-        rect(m, &legend_mat(style::SCALE, (hash(seed + 3.0) * 9.0) as u32, col), c + n * 0.0004, f.ax, f.ay, r * 2.6, r * 2.6);
+        rect(
+            m,
+            &legend_mat(style::SCALE, (hash(seed + 3.0) * 9.0) as u32, col),
+            c + n * 0.0004,
+            f.ax,
+            f.ay,
+            r * 2.6,
+            r * 2.6,
+        );
     }
 }
 /// Bat-handle toggle switch.
 fn toggle(m: &mut Mesh, f: &Face, u: f32, v: f32, up: bool) {
     let c = f.at(u, v);
     let n = f.n();
-    m.lathe(&CHROME, c, n, &[[0.0055, 0.0], [0.0055, 0.0018], [0.0042, 0.0022], [0.0042, 0.0042], [0.0, 0.0044]], 6, false);
+    m.lathe(
+        &CHROME,
+        c,
+        n,
+        &[
+            [0.0055, 0.0],
+            [0.0055, 0.0018],
+            [0.0042, 0.0022],
+            [0.0042, 0.0042],
+            [0.0, 0.0044],
+        ],
+        6,
+        false,
+    );
     let tip = c + n * 0.016 + f.ay * if up { 0.006 } else { -0.006 };
-    m.tube(&CHROME, &[c + n * 0.004, tip], &|t| 0.0018 + 0.0006 * t, 8, true);
+    m.tube(
+        &CHROME,
+        &[c + n * 0.004, tip],
+        &|t| 0.0018 + 0.0006 * t,
+        8,
+        true,
+    );
     m.dome(&CHROME, tip, (tip - c).normalize(), 0.0026, 0.002, 8, 0.0);
 }
 /// A guarded switch: the toggle under a hinged cover (red for the ones that matter).
 fn guarded(m: &mut Mesh, f: &Face, u: f32, v: f32, red: bool) {
     toggle(m, f, u, v, false);
-    let col = if red { mt(mat::PAINT, 0.36, 0.025, 0.02) } else { mt(mat::PLASTIC, 0.03, 0.03, 0.032) };
+    let col = if red {
+        mt(mat::PAINT, 0.36, 0.025, 0.02)
+    } else {
+        mt(mat::PLASTIC, 0.03, 0.03, 0.032)
+    };
     let rot = f.rot() * Quat::from_rotation_x(-0.15);
-    m.rbox(&col, f.at_h(u, v - 0.002, 0.012), Vec3::new(0.009, 0.016, 0.009), 0.0025, rot);
+    m.rbox(
+        &col,
+        f.at_h(u, v - 0.002, 0.012),
+        Vec3::new(0.009, 0.016, 0.009),
+        0.0025,
+        rot,
+    );
 }
 /// Square push-button switch with its legend lit or dark (`st` a BUTTON style).
 fn pbutton(m: &mut Mesh, f: &Face, u: f32, v: f32, hw: f32, hh: f32, st: u32, s: u32) {
-    m.rbox(&BTN, f.at_h(u, v, 0.004), Vec3::new(hw + 0.0015, hh + 0.0015, 0.004), 0.0012, f.rot());
+    m.rbox(
+        &BTN,
+        f.at_h(u, v, 0.004),
+        Vec3::new(hw + 0.0015, hh + 0.0015, 0.004),
+        0.0012,
+        f.rot(),
+    );
     let col = Vec3::new(0.022, 0.022, 0.024);
-    rect(m, &legend_mat(st, s, col), f.at_h(u, v, 0.0082), f.ax, f.ay, hw, hh);
+    rect(
+        m,
+        &legend_mat(st, s, col),
+        f.at_h(u, v, 0.0082),
+        f.ax,
+        f.ay,
+        hw,
+        hh,
+    );
 }
 /// A small round push button (the MCP's, the CDU's line keys).
 fn rbutton(m: &mut Mesh, f: &Face, u: f32, v: f32, r: f32, col: &Mat) {
-    m.lathe(col, f.at(u, v), f.n(), &[[r * 1.3, 0.0], [r * 1.3, r * 0.3], [r, r * 0.35], [r, r * 1.2], [0.0, r * 1.25]], 12, false);
+    m.lathe(
+        col,
+        f.at(u, v),
+        f.n(),
+        &[
+            [r * 1.3, 0.0],
+            [r * 1.3, r * 0.3],
+            [r, r * 0.35],
+            [r, r * 1.2],
+            [0.0, r * 1.25],
+        ],
+        12,
+        false,
+    );
 }
 /// A display unit: the bezel, the black mask, the screen under its glass and
 /// the brightness knob.
 fn display(m: &mut Mesh, f: &Face, u: f32, v: f32, half: f32, id: f32, seed: f32) {
     let rot = f.rot();
-    m.rbox(&BEZEL, f.at_h(u, v, 0.006), Vec3::new(half, half, 0.010), 0.005, rot);
+    m.rbox(
+        &BEZEL,
+        f.at_h(u, v, 0.006),
+        Vec3::new(half, half, 0.010),
+        0.005,
+        rot,
+    );
     // The bezel's chamfered inner lip and the black mask behind the glass.
     let s = half * 0.74;
-    m.rbox(&FRAME, f.at_h(u, v, 0.0145), Vec3::new(s + 0.012, s + 0.012, 0.0022), 0.008, rot);
-    screen_quad(m, &mt(mat::DISPLAY, 0.0, 0.0, 0.0).x(id), f.at_h(u, v, 0.0168), f.ax, f.ay, s, s);
-    for (k, (du, dv)) in [(-1.0f32, -1.0f32), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].iter().enumerate() {
-        m.screw(&SCREW_BLACK, f.at_h(u + du * (half - 0.008), v + dv * (half - 0.008), 0.016), f.n(), 0.0024, seed + k as f32);
+    m.rbox(
+        &FRAME,
+        f.at_h(u, v, 0.0145),
+        Vec3::new(s + 0.012, s + 0.012, 0.0022),
+        0.008,
+        rot,
+    );
+    screen_quad(
+        m,
+        &mt(mat::DISPLAY, 0.0, 0.0, 0.0).x(id),
+        f.at_h(u, v, 0.0168),
+        f.ax,
+        f.ay,
+        s,
+        s,
+    );
+    for (k, (du, dv)) in [(-1.0f32, -1.0f32), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+        .iter()
+        .enumerate()
+    {
+        m.screw(
+            &SCREW_BLACK,
+            f.at_h(u + du * (half - 0.008), v + dv * (half - 0.008), 0.016),
+            f.n(),
+            0.0024,
+            seed + k as f32,
+        );
     }
     // Brightness knob in the lower corner.
     let g = f.sub(0.0, 0.0, 0.016);
-    m.lathe(&BTN, g.at(u + half - 0.016, v - half + 0.014), f.n(), &[[0.006, 0.0], [0.006, 0.006], [0.005, 0.007], [0.0, 0.007]], 10, false);
+    m.lathe(
+        &BTN,
+        g.at(u + half - 0.016, v - half + 0.014),
+        f.n(),
+        &[[0.006, 0.0], [0.006, 0.006], [0.005, 0.007], [0.0, 0.007]],
+        10,
+        false,
+    );
 }
 /// An instrument (standby gauge) with its bezel and screws.
 fn instrument(m: &mut Mesh, f: &Face, u: f32, v: f32, r: f32, id: f32, seed: f32) {
     let rot = f.rot();
-    m.rbox(&BEZEL, f.at_h(u, v, 0.004), Vec3::new(r + 0.009, r + 0.009, 0.006), 0.004, rot);
+    m.rbox(
+        &BEZEL,
+        f.at_h(u, v, 0.004),
+        Vec3::new(r + 0.009, r + 0.009, 0.006),
+        0.004,
+        rot,
+    );
     let c = f.at_h(u, v, 0.0105);
-    m.disc(&mt(mat::GAUGE, 0.02, 0.02, 0.02).x(id), c, f.n(), f.ay, r, 36);
-    m.lathe(&BTN, c, f.n(), &[[r, 0.0], [r, 0.006], [r + 0.003, 0.0075], [r + 0.0055, 0.007]], 36, false);
-    for (k, (du, dv)) in [(-1.0f32, -1.0f32), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].iter().enumerate() {
-        m.screw(&SCREW_BLACK, f.at_h(u + du * (r + 0.004), v + dv * (r + 0.004), 0.0102), f.n(), 0.0022, seed + k as f32);
+    m.disc(
+        &mt(mat::GAUGE, 0.02, 0.02, 0.02).x(id),
+        c,
+        f.n(),
+        f.ay,
+        r,
+        36,
+    );
+    m.lathe(
+        &BTN,
+        c,
+        f.n(),
+        &[
+            [r, 0.0],
+            [r, 0.006],
+            [r + 0.003, 0.0075],
+            [r + 0.0055, 0.007],
+        ],
+        36,
+        false,
+    );
+    for (k, (du, dv)) in [(-1.0f32, -1.0f32), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+        .iter()
+        .enumerate()
+    {
+        m.screw(
+            &SCREW_BLACK,
+            f.at_h(u + du * (r + 0.004), v + dv * (r + 0.004), 0.0102),
+            f.n(),
+            0.0022,
+            seed + k as f32,
+        );
     }
 }
 /// A small window showing a readout (MCP counters, radio frequencies).
 fn readout(m: &mut Mesh, f: &Face, u: f32, v: f32, hw: f32, hh: f32, id: f32) {
-    m.rbox(&BTN, f.at_h(u, v, 0.0006), Vec3::new(hw + 0.003, hh + 0.003, 0.0012), 0.001, f.rot());
-    screen_quad(m, &mt(mat::DISPLAY, 0.0, 0.0, 0.0).x(id), f.at_h(u, v, 0.0022), f.ax, f.ay, hw, hh);
+    m.rbox(
+        &BTN,
+        f.at_h(u, v, 0.0006),
+        Vec3::new(hw + 0.003, hh + 0.003, 0.0012),
+        0.001,
+        f.rot(),
+    );
+    screen_quad(
+        m,
+        &mt(mat::DISPLAY, 0.0, 0.0, 0.0).x(id),
+        f.at_h(u, v, 0.0022),
+        f.ax,
+        f.ay,
+        hw,
+        hh,
+    );
 }
 fn annunciator(m: &mut Mesh, f: &Face, u: f32, v: f32, hw: f32, hh: f32, s: u32, lit: bool) {
     let col = Vec3::new(0.03, 0.028, 0.026);
-    m.rbox(&BTN, f.at_h(u, v, 0.002), Vec3::new(hw + 0.002, hh + 0.002, 0.002), 0.001, f.rot());
-    rect(m, &legend_mat(if lit { style::BUTTON_LIT } else { style::BUTTON }, s, col), f.at_h(u, v, 0.0042), f.ax, f.ay, hw, hh);
+    m.rbox(
+        &BTN,
+        f.at_h(u, v, 0.002),
+        Vec3::new(hw + 0.002, hh + 0.002, 0.002),
+        0.001,
+        f.rot(),
+    );
+    rect(
+        m,
+        &legend_mat(
+            if lit {
+                style::BUTTON_LIT
+            } else {
+                style::BUTTON
+            },
+            s,
+            col,
+        ),
+        f.at_h(u, v, 0.0042),
+        f.ax,
+        f.ay,
+        hw,
+        hh,
+    );
 }
 
 /// Fill a panel with controls: rows of knobs, switches and buttons with
@@ -488,7 +1156,16 @@ fn populate(m: &mut Mesh, f: &Face, u0: f32, v0: f32, u1: f32, v1: f32, seed: f3
     let g = f.sub(0.0, 0.0, 0.0043);
     // A title along the top of some panels.
     if hash(seed * 1.7) > 0.4 && h > 0.06 {
-        label(m, &g, (u0 + u1) * 0.5, v1 - 0.0075, (w * 0.22).min(0.04), 0.0038, style::TEXT, 0);
+        label(
+            m,
+            &g,
+            (u0 + u1) * 0.5,
+            v1 - 0.0075,
+            (w * 0.22).min(0.04),
+            0.0038,
+            style::TEXT,
+            0,
+        );
     }
     for r in 0..rows {
         let vy = v1 - (r as f32 + 0.6) * rh - 0.003;
@@ -519,7 +1196,13 @@ fn populate(m: &mut Mesh, f: &Face, u0: f32, v0: f32, u1: f32, v1: f32, seed: f3
                     label(m, &g, x, vy - 0.016, 0.009, 0.0028, style::TEXT, 0);
                 }
                 3 => {
-                    let st = if pick > 0.93 { style::BUTTON_AMBER } else if pick > 0.88 { style::BUTTON_ON } else { style::BUTTON };
+                    let st = if pick > 0.93 {
+                        style::BUTTON_AMBER
+                    } else if pick > 0.88 {
+                        style::BUTTON_ON
+                    } else {
+                        style::BUTTON
+                    };
                     pbutton(m, &g, x, vy - 0.003, 0.0115, 0.0105, st, 0);
                     label(m, &g, x, vy + 0.0155, 0.013, 0.003, style::TEXT, 0);
                 }
@@ -541,14 +1224,32 @@ fn populate(m: &mut Mesh, f: &Face, u0: f32, v0: f32, u1: f32, v1: f32, seed: f3
 }
 
 /// A stretch of panel made of plates, each populated.
-fn panel_run(m: &mut Mesh, f: &Face, u0: f32, v0: f32, u1: f32, v1: f32, cols: usize, rows: usize, seed: f32) {
+fn panel_run(
+    m: &mut Mesh,
+    f: &Face,
+    u0: f32,
+    v0: f32,
+    u1: f32,
+    v1: f32,
+    cols: usize,
+    rows: usize,
+    seed: f32,
+) {
     let (dw, dh) = ((u1 - u0) / cols as f32, (v1 - v0) / rows as f32);
     for i in 0..cols {
         for j in 0..rows {
             let (a, b) = (u0 + i as f32 * dw, v0 + j as f32 * dh);
             let s = seed + (i * 7 + j * 3) as f32;
             plate(m, f, a, b, a + dw, b + dh, s);
-            populate(m, f, a + 0.004, b + 0.004, a + dw - 0.004, b + dh - 0.004, s);
+            populate(
+                m,
+                f,
+                a + 0.004,
+                b + 0.004,
+                a + dw - 0.004,
+                b + dh - 0.004,
+                s,
+            );
         }
     }
 }
@@ -599,7 +1300,11 @@ fn lining(m: &mut Mesh) {
             let (mut a, mut c) = (0.0f32, PI);
             for _ in 0..30 {
                 let mid = (a + c) * 0.5;
-                if sec_pt(&s, mid).y > FLOOR - 0.02 { a = mid } else { c = mid }
+                if sec_pt(&s, mid).y > FLOOR - 0.02 {
+                    a = mid
+                } else {
+                    c = mid
+                }
             }
             let mut arc = 0.0;
             let mut prev = sec_pt(&s, 0.0);
@@ -649,7 +1354,12 @@ fn lining(m: &mut Mesh) {
             Vec3::new(if th > PI { -q.x } else { q.x }, q.y.max(FLOOR - 0.02), zf)
         })
         .collect();
-    m.fan(&mt(mat::PLASTIC, 0.10, 0.09, 0.08), Vec3::new(0.0, FLOOR + 0.5, zf), &ring, Vec3::Z);
+    m.fan(
+        &mt(mat::PLASTIC, 0.10, 0.09, 0.08),
+        Vec3::new(0.0, FLOOR + 0.5, zf),
+        &ring,
+        Vec3::Z,
+    );
 }
 
 // ---------------------------------------------------------------- window frames and posts
@@ -670,7 +1380,10 @@ fn win_k(k: usize, p: Vec3) -> f32 {
     }
     let w = WIN[k];
     let th = p.x.atan2(p.y - 0.3);
-    let q = Vec2::new((d - (w[0] + w[1]) * 0.5).abs() - (w[1] - w[0]) * 0.5, ((th - (w[2] + w[3]) * 0.5).abs() - (w[3] - w[2]) * 0.5) * 3.4);
+    let q = Vec2::new(
+        (d - (w[0] + w[1]) * 0.5).abs() - (w[1] - w[0]) * 0.5,
+        ((th - (w[2] + w[3]) * 0.5).abs() - (w[3] - w[2]) * 0.5) * 3.4,
+    );
     let q = q + Vec2::splat(0.06);
     q.max(Vec2::ZERO).length() + q.x.max(q.y).min(0.0) - 0.06
 }
@@ -709,12 +1422,20 @@ fn shell_n(p: Vec3, lining: bool) -> Vec3 {
     let dz = shell_pt(z + e, a, lining) - shell_pt(z - e, a, lining);
     let da = shell_pt(z, a + e, lining) - shell_pt(z, a - e, lining);
     let n = dz.cross(da).normalize_or_zero();
-    if n.dot(Vec3::new(p.x, p.y - 0.3, 0.0)) < 0.0 { -n } else { n }
+    if n.dot(Vec3::new(p.x, p.y - 0.3, 0.0)) < 0.0 {
+        -n
+    } else {
+        n
+    }
 }
 /// Direction along a shell (normal n) in which f grows fastest.
 fn grad_on(p: Vec3, n: Vec3, f: &dyn Fn(Vec3) -> f32) -> Vec3 {
     let e = 0.002;
-    let g = Vec3::new(f(p + Vec3::X * e) - f(p - Vec3::X * e), f(p + Vec3::Y * e) - f(p - Vec3::Y * e), f(p + Vec3::Z * e) - f(p - Vec3::Z * e));
+    let g = Vec3::new(
+        f(p + Vec3::X * e) - f(p - Vec3::X * e),
+        f(p + Vec3::Y * e) - f(p - Vec3::Y * e),
+        f(p + Vec3::Z * e) - f(p - Vec3::Z * e),
+    );
     (g - n * g.dot(n)).normalize_or_zero()
 }
 /// From p, along the shell in direction g, the point where f reaches `level`.
@@ -775,7 +1496,10 @@ fn edge_ring(k: usize) -> Vec<Vec3> {
         .collect()
 }
 /// Moving average along an open run, ends held.
-fn smooth<T: Copy + std::ops::Add<Output = T> + std::ops::Mul<f32, Output = T>>(v: &mut [T], passes: usize) {
+fn smooth<T: Copy + std::ops::Add<Output = T> + std::ops::Mul<f32, Output = T>>(
+    v: &mut [T],
+    passes: usize,
+) {
     for _ in 0..passes {
         let o = v.to_vec();
         for i in 1..v.len().saturating_sub(1) {
@@ -798,7 +1522,8 @@ struct Post {
 impl Post {
     /// Whether a point of the skin lies at least `margin` inside the cover where it stands proud.
     fn covers(&self, p: Vec3, margin: f32) -> bool {
-        (0..self.c.len()).any(|i| self.sink[i] < 0.5 && (self.c[i] - p).length() + margin < self.half[i])
+        (0..self.c.len())
+            .any(|i| self.sink[i] < 0.5 && (self.c[i] - p).length() + margin < self.half[i])
     }
 }
 
@@ -810,7 +1535,11 @@ fn post_between(a: &[Vec3], b: &[Vec3], maxgap: f32, over: f32, min_half: f32, e
     let near: Vec<(Vec3, f32)> = a
         .iter()
         .map(|&p| {
-            let q = b.iter().copied().min_by(|x, y| (*x - p).length().total_cmp(&(*y - p).length())).unwrap();
+            let q = b
+                .iter()
+                .copied()
+                .min_by(|x, y| (*x - p).length().total_cmp(&(*y - p).length()))
+                .unwrap();
             (snap((p + q) * 0.5, false), (q - p).length())
         })
         .collect();
@@ -857,13 +1586,21 @@ fn post_between(a: &[Vec3], b: &[Vec3], maxgap: f32, over: f32, min_half: f32, e
     // Carried on past each end, sinking into the lining as it goes.
     let mut sink = vec![0.0f32; line.len()];
     for end in [0usize, 1] {
-        let (p, q) = if end == 0 { (line[0], line[3]) } else { (line[line.len() - 1], line[line.len() - 4]) };
+        let (p, q) = if end == 0 {
+            (line[0], line[3])
+        } else {
+            (line[line.len() - 1], line[line.len() - 4])
+        };
         let d = (p - q).normalize();
         let steps = (ext / 0.012).ceil() as usize;
         for s in 1..=steps {
             let f = s as f32 / steps as f32;
             let e = snap(p + d * (ext * f), false);
-            let h = if end == 0 { half[0] } else { *half.last().unwrap() };
+            let h = if end == 0 {
+                half[0]
+            } else {
+                *half.last().unwrap()
+            };
             let k = smoothstep(0.15, 0.85, f);
             if end == 0 {
                 line.insert(0, e);
@@ -903,7 +1640,13 @@ fn post_between(a: &[Vec3], b: &[Vec3], maxgap: f32, over: f32, min_half: f32, e
         })
         .collect();
     smooth(&mut depth, 10);
-    Post { c: line, half, sink, ax, depth }
+    Post {
+        c: line,
+        half,
+        sink,
+        ax,
+        depth,
+    }
 }
 impl Post {
     /// A face on the cover's crown at fraction f of its proud length, upright
@@ -933,7 +1676,15 @@ fn post_cover(m: &mut Mesh, p: &Post) {
             arc += (p.c[i] - p.c[i - 1]).length();
         }
         let (c, (_, s, d), h, dd) = (p.c[i], frames[i], p.half[i], depth[i]);
-        let side = [(h, 0.002), (h - 0.002, 0.008), (h - 0.009, dd * 0.45), (h - 0.018, dd - 0.011), (h - 0.025, dd - 0.003), (h - 0.036, dd), (h * 0.45, dd + 0.004)];
+        let side = [
+            (h, 0.002),
+            (h - 0.002, 0.008),
+            (h - 0.009, dd * 0.45),
+            (h - 0.018, dd - 0.011),
+            (h - 0.025, dd - 0.003),
+            (h - 0.036, dd),
+            (h * 0.45, dd + 0.004),
+        ];
         let mut prof: Vec<(f32, f32)> = side.iter().map(|&(x, y)| (-x, y)).collect();
         prof.push((0.0, dd + 0.0048));
         prof.extend(side.iter().rev().copied());
@@ -979,17 +1730,34 @@ fn frame_window(m: &mut Mesh, k: usize, ring: &[Vec3], posts: &[&Post]) -> Vec<(
     let fl = |p: Vec3| lin_k(k, p);
     let n = ring.len();
     // How wide the surround can be before it meets the next window's.
-    let mut w: Vec<f32> = ring.iter().map(|&p| ((win_other(k, p) - 2.0 * TRIM) * 0.5 - 0.004).clamp(0.012, 0.042)).collect();
+    let mut w: Vec<f32> = ring
+        .iter()
+        .map(|&p| ((win_other(k, p) - 2.0 * TRIM) * 0.5 - 0.004).clamp(0.012, 0.042))
+        .collect();
     for _ in 0..8 {
         let o = w.clone();
         for i in 0..n {
-            w[i] = o[(i + n - 1) % n].min(o[i]).min(o[(i + 1) % n]) * 0.5 + (o[(i + n - 1) % n] + o[i] + o[(i + 1) % n]) / 6.0;
+            w[i] = o[(i + n - 1) % n].min(o[i]).min(o[(i + 1) % n]) * 0.5
+                + (o[(i + n - 1) % n] + o[i] + o[(i + 1) % n]) / 6.0;
         }
     }
-    let prof: [(f32, f32); 9] = [(-0.004, 0.0065), (-0.001, 0.0105), (0.004, 0.0125), (0.010, 0.0118), (0.30, 0.0085), (0.55, 0.0055), (0.78, 0.003), (0.93, 0.0015), (1.0, 0.0006)];
+    let prof: [(f32, f32); 9] = [
+        (-0.004, 0.0065),
+        (-0.001, 0.0105),
+        (0.004, 0.0125),
+        (0.010, 0.0118),
+        (0.30, 0.0085),
+        (0.55, 0.0055),
+        (0.78, 0.003),
+        (0.93, 0.0015),
+        (1.0, 0.0006),
+    ];
     // Where a post hides the whole frame (out to the lining's cut) leave it out;
     // where it hides only part, the frame runs on under the post's side.
-    let hidden: Vec<bool> = ring.iter().map(|&p| posts.iter().any(|q| q.covers(p, TRIM + 0.006))).collect();
+    let hidden: Vec<bool> = ring
+        .iter()
+        .map(|&p| posts.iter().any(|q| q.covers(p, TRIM + 0.006)))
+        .collect();
     // Start the loop where it is hidden, so runs don't wrap.
     let first = (0..n).find(|&i| hidden[i]).map(|i| i + 1).unwrap_or(0);
     let mut runs: Vec<(Vec<Vec<SP>>, Vec<Vec<SP>>)> = Vec::new();
@@ -1062,8 +1830,26 @@ fn frame_window(m: &mut Mesh, k: usize, ring: &[Vec3], posts: &[&Post]) -> Vec<(
 
 /// A screw in a cup washer, painted over with the trim.
 fn trim_screw(m: &mut Mesh, p: Vec3, n: Vec3, seed: f32) {
-    m.lathe(&mt(mat::PLASTIC, 0.27, 0.25, 0.215), p, n, &[[0.0048, 0.0], [0.0048, 0.0005], [0.0035, 0.0013], [0.0, 0.0013]], 14, false);
-    m.screw(&mt(mat::SCREW, 0.30, 0.28, 0.25).x(1.0), p + n * 0.001, n, 0.0027, seed);
+    m.lathe(
+        &mt(mat::PLASTIC, 0.27, 0.25, 0.215),
+        p,
+        n,
+        &[
+            [0.0048, 0.0],
+            [0.0048, 0.0005],
+            [0.0035, 0.0013],
+            [0.0, 0.0013],
+        ],
+        14,
+        false,
+    );
+    m.screw(
+        &mt(mat::SCREW, 0.30, 0.28, 0.25).x(1.0),
+        p + n * 0.001,
+        n,
+        0.0027,
+        seed,
+    );
 }
 
 fn window_frames(m: &mut Mesh) {
@@ -1081,7 +1867,12 @@ fn window_frames(m: &mut Mesh) {
     post_cover(&mut side, &aft);
     let mut screws = Vec::new();
     for k in 0..3 {
-        screws.extend(frame_window(&mut side, k, &rings[k], &[&centre, &fwd, &aft]));
+        screws.extend(frame_window(
+            &mut side,
+            k,
+            &rings[k],
+            &[&centre, &fwd, &aft],
+        ));
     }
     for (p, n, seed) in screws {
         trim_screw(&mut side, p, n, seed);
@@ -1091,10 +1882,37 @@ fn window_frames(m: &mut Mesh) {
     m.append(&side);
     // A deviation card under the standby compass at the top of the centre post.
     let f = centre.face(0.94);
-    rect(m, &mt(mat::PLASTIC, 0.05, 0.05, 0.05), f.at_h(0.0, 0.0, 0.0008), f.ax, f.ay, 0.034, 0.026);
-    rect(m, &legend_mat(style::PLACARD, 0, Vec3::new(0.80, 0.79, 0.74)), f.at_h(0.0, 0.0, 0.0016), f.ax, f.ay, 0.030, 0.022);
-    for (u, v) in [(-0.028f32, 0.020f32), (0.028, 0.020), (-0.028, -0.020), (0.028, -0.020)] {
-        m.screw(&SCREW_BLACK, f.at_h(u, v, 0.0012), f.n(), 0.0018, u * 31.0 + v);
+    rect(
+        m,
+        &mt(mat::PLASTIC, 0.05, 0.05, 0.05),
+        f.at_h(0.0, 0.0, 0.0008),
+        f.ax,
+        f.ay,
+        0.034,
+        0.026,
+    );
+    rect(
+        m,
+        &legend_mat(style::PLACARD, 0, Vec3::new(0.80, 0.79, 0.74)),
+        f.at_h(0.0, 0.0, 0.0016),
+        f.ax,
+        f.ay,
+        0.030,
+        0.022,
+    );
+    for (u, v) in [
+        (-0.028f32, 0.020f32),
+        (0.028, 0.020),
+        (-0.028, -0.020),
+        (0.028, -0.020),
+    ] {
+        m.screw(
+            &SCREW_BLACK,
+            f.at_h(u, v, 0.0012),
+            f.n(),
+            0.0018,
+            u * 31.0 + v,
+        );
     }
 }
 
@@ -1122,47 +1940,130 @@ fn window_fittings(m: &mut Mesh, rings: &[Vec<Vec3>], fwd: &Post, aft: &Post) {
     // Flood lights: four swivelling cans on the header over each windshield,
     // aimed down at the glareshield and the panel.
     for (k, xt) in [0.50f32, 0.60, 0.70, 0.80].iter().enumerate() {
-        let Some(&p) = rings[0].iter().filter(|p| (p.x - xt).abs() < 0.012).max_by(|a, b| a.y.total_cmp(&b.y)) else { continue };
+        let Some(&p) = rings[0]
+            .iter()
+            .filter(|p| (p.x - xt).abs() < 0.012)
+            .max_by(|a, b| a.y.total_cmp(&b.y))
+        else {
+            continue;
+        };
         let (q, n) = beyond(0, p, 0.062);
-        m.lathe(&black, q, n, &[[0.016, -0.002], [0.016, 0.002], [0.012, 0.005], [0.0, 0.006]], 16, false);
+        m.lathe(
+            &black,
+            q,
+            n,
+            &[
+                [0.016, -0.002],
+                [0.016, 0.002],
+                [0.012, 0.005],
+                [0.0, 0.006],
+            ],
+            16,
+            false,
+        );
         let ball = q + n * 0.008;
         m.dome(&black, ball - n * 0.003, n, 0.0075, 0.0075, 10, 0.0);
         let aim = (Vec3::new(xt * 0.55, 3.10, EYE.z - 0.80 + k as f32 * 0.05) - ball).normalize();
         let can = ball + aim * 0.007;
-        m.lathe(&black, can, aim, &[[0.0, 0.0], [0.010, 0.0], [0.012, 0.008], [0.012, 0.027], [0.0125, 0.0285], [0.0125, 0.031], [0.0102, 0.031]], 16, false);
-        m.disc(&mt(mat::PLASTIC, 0.16, 0.15, 0.13), can + aim * 0.0295, aim, Vec3::Y, 0.0103, 16);
+        m.lathe(
+            &black,
+            can,
+            aim,
+            &[
+                [0.0, 0.0],
+                [0.010, 0.0],
+                [0.012, 0.008],
+                [0.012, 0.027],
+                [0.0125, 0.0285],
+                [0.0125, 0.031],
+                [0.0102, 0.031],
+            ],
+            16,
+            false,
+        );
+        m.disc(
+            &mt(mat::PLASTIC, 0.16, 0.15, 0.13),
+            can + aim * 0.0295,
+            aim,
+            Vec3::Y,
+            0.0103,
+            16,
+        );
         // The cooling ribs round the back of the can.
         for r in 0..3 {
-            m.lathe(&black, can + aim * (0.010 + r as f32 * 0.005), aim, &[[0.0121, 0.0], [0.0129, 0.001], [0.0121, 0.002]], 16, true);
+            m.lathe(
+                &black,
+                can + aim * (0.010 + r as f32 * 0.005),
+                aim,
+                &[[0.0121, 0.0], [0.0129, 0.001], [0.0121, 0.002]],
+                16,
+                true,
+            );
         }
     }
 
     // Sun visor stowed flat against the ceiling over the No. 2 window, on a
     // track running fore and aft.
     let c1 = rings[1].iter().copied().sum::<Vec3>() / rings[1].len() as f32;
-    let top = rings[1].iter().copied().filter(|p| (p.z - c1.z).abs() < 0.02 && p.y > c1.y).max_by(|a, b| a.y.total_cmp(&b.y)).unwrap();
+    let top = rings[1]
+        .iter()
+        .copied()
+        .filter(|p| (p.z - c1.z).abs() < 0.02 && p.y > c1.y)
+        .max_by(|a, b| a.y.total_cmp(&b.y))
+        .unwrap();
     let (q, n) = beyond(1, top, 0.13);
     let f = lining_face(q, n, 0.016);
     let visor: Vec<Vec2> = outline_rr(0.15, 0.08, 0.025);
     let rim: Vec<Vec2> = outline_rr(0.156, 0.086, 0.029);
-    m.slab(&black, &rim, &[visor.clone()], f.at_h(0.0, 0.0, 0.0025), f.ax, f.ay, 0.006);
-    m.slab(&mt(mat::PAINT, 0.075, 0.068, 0.058), &visor, &[], f.at_h(0.0, 0.0, 0.001), f.ax, f.ay, 0.003);
+    m.slab(
+        &black,
+        &rim,
+        &[visor.clone()],
+        f.at_h(0.0, 0.0, 0.0025),
+        f.ax,
+        f.ay,
+        0.006,
+    );
+    m.slab(
+        &mt(mat::PAINT, 0.075, 0.068, 0.058),
+        &visor,
+        &[],
+        f.at_h(0.0, 0.0, 0.001),
+        f.ax,
+        f.ay,
+        0.003,
+    );
     // Its arm to the carriage on the track, the track screwed to the ceiling.
     let (tq, tn) = beyond(1, top, 0.225);
     let tf = lining_face(tq, tn, 0.0);
-    let rail: Vec<Vec3> = (0..=8).map(|j| {
-        let p = snap(tf.at(-0.13 + j as f32 * 0.04, 0.0), true);
-        p - shell_n(p, true) * 0.006
-    }).collect();
+    let rail: Vec<Vec3> = (0..=8)
+        .map(|j| {
+            let p = snap(tf.at(-0.13 + j as f32 * 0.04, 0.0), true);
+            p - shell_n(p, true) * 0.006
+        })
+        .collect();
     m.tube(&mt(mat::ALU, 0.36, 0.36, 0.37), &rail, &|_| 0.005, 8, true);
     for j in [1usize, 4, 7] {
-        m.screw(&SCREW_STEEL, rail[j] + tf.n() * 0.0048, tf.n(), 0.0018, j as f32);
+        m.screw(
+            &SCREW_STEEL,
+            rail[j] + tf.n() * 0.0048,
+            tf.n(),
+            0.0018,
+            j as f32,
+        );
     }
     let car = tf.at_h(-0.07, 0.0, 0.010);
     m.rbox(&black, car, Vec3::new(0.02, 0.011, 0.009), 0.004, tf.rot());
     let hinge = f.at_h(-0.07, 0.083, 0.004);
     m.tube(&black, &[car, hinge], &|_| 0.004, 8, true);
-    m.lathe(&CHROME, hinge, f.ax, &[[0.0055, -0.018], [0.0055, 0.018]], 10, false);
+    m.lathe(
+        &CHROME,
+        hinge,
+        f.ax,
+        &[[0.0055, -0.018], [0.0055, 0.018]],
+        10,
+        false,
+    );
 
     // The No. 2 window slides aft to open: rails along its sill and head.
     let fs = |p: Vec3| win_k(1, p);
@@ -1174,11 +2075,15 @@ fn window_fittings(m: &mut Mesh, rings: &[Vec<Vec3>], fwd: &Post, aft: &Post) {
             .collect();
         let mut pts = pts;
         pts.sort_by(|a, b| a.z.total_cmp(&b.z));
-        let rail: Vec<Vec3> = pts.iter().step_by(3).map(|&p| {
-            let ns = shell_n(p, false);
-            let g = grad_on(p, ns, &fs);
-            p - ns * 0.022 - g * 0.006
-        }).collect();
+        let rail: Vec<Vec3> = pts
+            .iter()
+            .step_by(3)
+            .map(|&p| {
+                let ns = shell_n(p, false);
+                let g = grad_on(p, ns, &fs);
+                p - ns * 0.022 - g * 0.006
+            })
+            .collect();
         if rail.len() > 2 {
             m.tube(&mt(mat::ALU, 0.42, 0.42, 0.43), &rail, &|_| 0.0045, 8, true);
         }
@@ -1189,33 +2094,115 @@ fn window_fittings(m: &mut Mesh, rings: &[Vec<Vec3>], fwd: &Post, aft: &Post) {
     let side = (c1 - pf.o).dot(pf.ax).signum();
     let hf = pf.sub(side * 0.004, 0.0, 0.0);
     let at = |u: f32, v: f32, h: f32| hf.at_h(u * side, v, h);
-    m.rbox(&black, at(0.0, 0.0, 0.010), Vec3::new(0.026, 0.045, 0.012), 0.008, hf.rot());
+    m.rbox(
+        &black,
+        at(0.0, 0.0, 0.010),
+        Vec3::new(0.026, 0.045, 0.012),
+        0.008,
+        hf.rot(),
+    );
     let hub = at(0.0, 0.012, 0.024);
-    m.lathe(&CHROME, hub - hf.n() * 0.004, hf.n(), &[[0.013, 0.0], [0.013, 0.006], [0.010, 0.009], [0.0, 0.009]], 14, false);
+    m.lathe(
+        &CHROME,
+        hub - hf.n() * 0.004,
+        hf.n(),
+        &[[0.013, 0.0], [0.013, 0.006], [0.010, 0.009], [0.0, 0.009]],
+        14,
+        false,
+    );
     let tip = at(0.008, -0.085, 0.030);
-    m.tube(&black, &[hub + hf.n() * 0.004, at(0.004, -0.04, 0.030), tip], &|t| 0.0058 - 0.0015 * t, 8, true);
-    m.lathe(&black, tip, hf.n(), &[[0.0075, 0.0], [0.0085, 0.012], [0.0078, 0.026], [0.0, 0.028]], 12, true);
+    m.tube(
+        &black,
+        &[hub + hf.n() * 0.004, at(0.004, -0.04, 0.030), tip],
+        &|t| 0.0058 - 0.0015 * t,
+        8,
+        true,
+    );
+    m.lathe(
+        &black,
+        tip,
+        hf.n(),
+        &[
+            [0.0075, 0.0],
+            [0.0085, 0.012],
+            [0.0078, 0.026],
+            [0.0, 0.028],
+        ],
+        12,
+        true,
+    );
     let lock = [at(-0.012, -0.02, 0.020), at(-0.026, -0.035, 0.024)];
     m.tube(&black, &lock, &|_| 0.0042, 8, true);
-    m.dome(&mt(mat::PAINT, 0.55, 0.05, 0.04), lock[1], (lock[1] - lock[0]).normalize(), 0.0055, 0.008, 10, 0.0);
-    rect(m, &legend_mat(style::PLACARD, 0, Vec3::new(0.80, 0.79, 0.74)), at(0.0, 0.075, 0.0012), hf.ax, hf.ay, 0.022, 0.016);
+    m.dome(
+        &mt(mat::PAINT, 0.55, 0.05, 0.04),
+        lock[1],
+        (lock[1] - lock[0]).normalize(),
+        0.0055,
+        0.008,
+        10,
+        0.0,
+    );
+    rect(
+        m,
+        &legend_mat(style::PLACARD, 0, Vec3::new(0.80, 0.79, 0.74)),
+        at(0.0, 0.075, 0.0012),
+        hf.ax,
+        hf.ay,
+        0.022,
+        0.016,
+    );
 
     // Gaspers on the posts, at shoulder height.
     for (post, f) in [(fwd, 0.42f32), (aft, 0.55)] {
         let pf = post.face(f);
         let c = pf.at_h(0.0, 0.0, 0.0);
         let n = pf.n();
-        m.lathe(&mt(mat::PLASTIC, 0.20, 0.19, 0.17), c, n, &[[0.026, -0.001], [0.026, 0.004], [0.022, 0.010], [0.016, 0.012]], 18, true);
+        m.lathe(
+            &mt(mat::PLASTIC, 0.20, 0.19, 0.17),
+            c,
+            n,
+            &[
+                [0.026, -0.001],
+                [0.026, 0.004],
+                [0.022, 0.010],
+                [0.016, 0.012],
+            ],
+            18,
+            true,
+        );
         let aim = (n * 0.85 + (EYE - c).normalize() * 0.5).normalize();
-        m.dome(&mt(mat::PLASTIC, 0.16, 0.155, 0.14), c + n * 0.006, aim, 0.0155, 0.012, 14, 0.0);
-        m.lathe(&CHROME, c + n * 0.006 + aim * 0.010, aim, &[[0.0065, 0.0], [0.0065, 0.008], [0.0045, 0.009], [0.0, 0.009]], 12, false);
+        m.dome(
+            &mt(mat::PLASTIC, 0.16, 0.155, 0.14),
+            c + n * 0.006,
+            aim,
+            0.0155,
+            0.012,
+            14,
+            0.0,
+        );
+        m.lathe(
+            &CHROME,
+            c + n * 0.006 + aim * 0.010,
+            aim,
+            &[
+                [0.0065, 0.0],
+                [0.0065, 0.008],
+                [0.0045, 0.009],
+                [0.0, 0.009],
+            ],
+            12,
+            false,
+        );
     }
 }
 
 /// A rounded rectangle outline, half sizes hx, hy and corner radius r.
 fn outline_rr(hx: f32, hy: f32, r: f32) -> Vec<Vec2> {
     let mut v = Vec::new();
-    for (q, (sx, sy)) in [(1.0f32, 1.0f32), (-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)].iter().enumerate() {
+    for (q, (sx, sy)) in [(1.0f32, 1.0f32), (-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)]
+        .iter()
+        .enumerate()
+    {
         let c = Vec2::new(sx * (hx - r), sy * (hy - r));
         for i in 0..=6 {
             let a = (q as f32 + i as f32 / 6.0) * FRAC_PI_2;
@@ -1235,7 +2222,13 @@ fn floor(m: &mut Mesh) {
     // Seat tracks either side of each pilot, scuff plates at the side walls.
     for sx in [-1.0f32, 1.0] {
         for dx in [-0.17f32, 0.17] {
-            m.rbox(&ALU.pat(pat::KNURL), Vec3::new(sx * EYE.x.abs() + dx, FLOOR + 0.006, EYE.z - 0.05), Vec3::new(0.016, 0.006, 0.42), 0.002, Quat::IDENTITY);
+            m.rbox(
+                &ALU.pat(pat::KNURL),
+                Vec3::new(sx * EYE.x.abs() + dx, FLOOR + 0.006, EYE.z - 0.05),
+                Vec3::new(0.016, 0.006, 0.42),
+                0.002,
+                Quat::IDENTITY,
+            );
         }
     }
 }
@@ -1245,7 +2238,11 @@ fn floor(m: &mut Mesh) {
 /// The main panel's face: displays centred at v = 0.
 fn main_face() -> Face {
     let tilt: f32 = 0.17;
-    Face::new(Vec3::new(0.0, EYE.y - 0.47, EYE.z - 0.82), Vec3::X, Vec3::new(0.0, tilt.cos(), -tilt.sin()))
+    Face::new(
+        Vec3::new(0.0, EYE.y - 0.47, EYE.z - 0.82),
+        Vec3::X,
+        Vec3::new(0.0, tilt.cos(), -tilt.sin()),
+    )
 }
 /// Display units: half size of the bezel, and where they sit (u).
 const DU: f32 = 0.11;
@@ -1258,7 +2255,19 @@ fn main_panel(m: &mut Mesh) -> Face {
     // down to meet the pedestal, angled wings at the ends.
     let top = 0.175;
     let bot = -0.20;
-    let outline: Vec<Vec2> = [(-0.90, top), (0.90, top), (0.97, bot), (0.145, bot), (0.145, -0.43), (-0.145, -0.43), (-0.145, bot), (-0.97, bot)].iter().map(|&(x, y)| Vec2::new(x, y)).collect();
+    let outline: Vec<Vec2> = [
+        (-0.90, top),
+        (0.90, top),
+        (0.97, bot),
+        (0.145, bot),
+        (0.145, -0.43),
+        (-0.145, -0.43),
+        (-0.145, bot),
+        (-0.97, bot),
+    ]
+    .iter()
+    .map(|&(x, y)| Vec2::new(x, y))
+    .collect();
     m.slab(&PANEL_DK, &outline, &[], f.o, f.ax, f.ay, 0.03);
     // A lip along the bottom edge of the outboard panels.
     for sx in [-1.0f32, 1.0] {
@@ -1288,15 +2297,50 @@ fn main_panel(m: &mut Mesh) -> Face {
     // the alternate gear extension switches, the flap limit placard over it.
     plate(m, &g, 0.114, -0.112, 0.222, 0.112, 41.0);
     let gp = g.sub(0.0, 0.0, 0.0043);
-    rect(m, &mt(mat::PLASTIC, 0.012, 0.012, 0.012), gp.at_h(0.150, 0.0, 0.0005), f.ax, f.ay, 0.011, 0.075);
-    label(m, &gp, 0.198, 0.089, 0.018, 0.016, style::TEXT2, sid("FLAPS"));
+    rect(
+        m,
+        &mt(mat::PLASTIC, 0.012, 0.012, 0.012),
+        gp.at_h(0.150, 0.0, 0.0005),
+        f.ax,
+        f.ay,
+        0.011,
+        0.075,
+    );
+    label(
+        m,
+        &gp,
+        0.198,
+        0.089,
+        0.018,
+        0.016,
+        style::TEXT2,
+        sid("FLAPS"),
+    );
     word(m, &gp, 0.135, 0.068, 0.0045, "UP");
     word(m, &gp, 0.135, 0.0, 0.0045, "OFF");
     word(m, &gp, 0.135, -0.068, 0.0045, "DN");
     rbutton(m, &gp, 0.195, 0.03, 0.006, &BTN);
     word(m, &gp, 0.195, 0.045, 0.0035, "LOCK OVRD");
-    pbutton(m, &gp, 0.195, -0.02, 0.011, 0.01, style::BUTTON, sid("NOSE/BODY"));
-    pbutton(m, &gp, 0.195, -0.055, 0.011, 0.01, style::BUTTON, sid("WING"));
+    pbutton(
+        m,
+        &gp,
+        0.195,
+        -0.02,
+        0.011,
+        0.01,
+        style::BUTTON,
+        sid("NOSE/BODY"),
+    );
+    pbutton(
+        m,
+        &gp,
+        0.195,
+        -0.055,
+        0.011,
+        0.01,
+        style::BUTTON,
+        sid("WING"),
+    );
     word(m, &gp, 0.195, -0.075, 0.0032, "ALTN");
 
     // Above the displays: heading reference and display source switches over
@@ -1308,7 +2352,16 @@ fn main_panel(m: &mut Mesh) -> Face {
         for k in 0..4 {
             let u = sx * (0.29 + k as f32 * 0.09);
             knob(m, &gq, u, 0.136, 0.0058, s + k as f32, true);
-            label(m, &gq, u, 0.159, 0.017, 0.0033, style::TEXT, [sid("EIU"), sid("FMC"), sid("IRS"), sid("NAV")][k]);
+            label(
+                m,
+                &gq,
+                u,
+                0.159,
+                0.017,
+                0.0033,
+                style::TEXT,
+                [sid("EIU"), sid("FMC"), sid("IRS"), sid("NAV")][k],
+            );
         }
         // Outboard: the clock, master warning and caution, the panel light knobs.
         let oo = sx * 0.78;
@@ -1317,14 +2370,66 @@ fn main_panel(m: &mut Mesh) -> Face {
         let (ua, ub) = (ua.min(ub), ua.max(ub));
         let _ = (ua, ub);
         instrument(m, &gq, oo, 0.075, 0.032, 14.0, 61.0 + s);
-        readout(m, &gq.sub(0.0, 0.0, 0.011), oo, 0.062, 0.014, 0.0055, screen::CLOCK);
-        pbutton(m, &gq, oo - 0.03, -0.012, 0.016, 0.011, style::BUTTON_LIT, sid("WARNING"));
-        pbutton(m, &gq, oo + 0.03, -0.012, 0.016, 0.011, style::BUTTON, sid("CAUTION"));
+        readout(
+            m,
+            &gq.sub(0.0, 0.0, 0.011),
+            oo,
+            0.062,
+            0.014,
+            0.0055,
+            screen::CLOCK,
+        );
+        pbutton(
+            m,
+            &gq,
+            oo - 0.03,
+            -0.012,
+            0.016,
+            0.011,
+            style::BUTTON_LIT,
+            sid("WARNING"),
+        );
+        pbutton(
+            m,
+            &gq,
+            oo + 0.03,
+            -0.012,
+            0.016,
+            0.011,
+            style::BUTTON,
+            sid("CAUTION"),
+        );
         for k in 0..3 {
-            knob(m, &gq, oo + (k as f32 - 1.0) * 0.04, -0.085, 0.0055, s + 20.0 + k as f32, true);
-            label(m, &gq, oo + (k as f32 - 1.0) * 0.04, -0.062, 0.016, 0.003, style::TEXT, [sid("PANEL"), sid("FLOOD"), sid("DSPL")][k]);
+            knob(
+                m,
+                &gq,
+                oo + (k as f32 - 1.0) * 0.04,
+                -0.085,
+                0.0055,
+                s + 20.0 + k as f32,
+                true,
+            );
+            label(
+                m,
+                &gq,
+                oo + (k as f32 - 1.0) * 0.04,
+                -0.062,
+                0.016,
+                0.003,
+                style::TEXT,
+                [sid("PANEL"), sid("FLOOD"), sid("DSPL")][k],
+            );
         }
-        pbutton(m, &gq, oo, -0.15, 0.02, 0.012, style::BUTTON, sid("GND PROX"));
+        pbutton(
+            m,
+            &gq,
+            oo,
+            -0.15,
+            0.02,
+            0.012,
+            style::BUTTON,
+            sid("GND PROX"),
+        );
         // Under each pilot's pair: the ground proximity panel and the
         // display select switches.
         plate(m, &g, sx * 0.665, -0.19, sx * 0.222, -0.112, 70.0 + s);
@@ -1348,9 +2453,36 @@ fn main_panel(m: &mut Mesh) -> Face {
     // Under the upper EICAS, the autobrake selector.
     plate(m, &g, -0.145, -0.17, 0.145, -0.112, 90.0);
     knob(m, &gq, -0.06, -0.142, 0.009, 91.0, true);
-    label(m, &gq, -0.06, -0.12, 0.03, 0.0032, style::TEXT, sid("AUTOBRAKES"));
-    pbutton(m, &gq, 0.05, -0.142, 0.013, 0.011, style::BUTTON, sid("EICAS"));
-    pbutton(m, &gq, 0.09, -0.142, 0.013, 0.011, style::BUTTON, sid("STAT"));
+    label(
+        m,
+        &gq,
+        -0.06,
+        -0.12,
+        0.03,
+        0.0032,
+        style::TEXT,
+        sid("AUTOBRAKES"),
+    );
+    pbutton(
+        m,
+        &gq,
+        0.05,
+        -0.142,
+        0.013,
+        0.011,
+        style::BUTTON,
+        sid("EICAS"),
+    );
+    pbutton(
+        m,
+        &gq,
+        0.09,
+        -0.142,
+        0.013,
+        0.011,
+        style::BUTTON,
+        sid("STAT"),
+    );
     // Either side of the lower EICAS: the EICAS display select panel and the
     // standby engine indicator.
     for sx in [-1.0f32, 1.0] {
@@ -1366,7 +2498,11 @@ fn glareshield(m: &mut Mesh, f: &Face) {
     // The MCP's face: under the glareshield's lip, leaning back.
     let lip = f.at_h(0.0, 0.175, 0.0);
     let mcp_t: f32 = 0.38;
-    let mcp = Face::new(lip + Vec3::new(0.0, 0.006, 0.135), Vec3::X, Vec3::new(0.0, mcp_t.cos(), -mcp_t.sin()));
+    let mcp = Face::new(
+        lip + Vec3::new(0.0, 0.006, 0.135),
+        Vec3::X,
+        Vec3::new(0.0, mcp_t.cos(), -mcp_t.sin()),
+    );
     let mh = 0.058; // half height of the MCP strip
     let top_edge = mcp.at(0.0, mh + 0.004);
 
@@ -1404,7 +2540,13 @@ fn glareshield(m: &mut Mesh, f: &Face) {
     });
 
     // The MCP box and its face.
-    m.rbox(&PANEL_DK, mcp.at_h(0.0, 0.0, -0.03), Vec3::new(0.69, mh + 0.004, 0.03), 0.004, mcp.rot());
+    m.rbox(
+        &PANEL_DK,
+        mcp.at_h(0.0, 0.0, -0.03),
+        Vec3::new(0.69, mh + 0.004, 0.03),
+        0.004,
+        mcp.rot(),
+    );
     let g = mcp.sub(0.0, 0.0, 0.0);
     // EFIS control panels at the ends, the MCP proper in the middle.
     for sx in [-1.0f32, 1.0] {
@@ -1414,14 +2556,53 @@ fn glareshield(m: &mut Mesh, f: &Face) {
         // Minimums and baro knobs (concentric), mode and range selectors, map option buttons.
         knob(m, &e, c - 0.062, 0.012, 0.0072, 201.0 + sx, false);
         readout(m, &e, c - 0.062, -0.025, 0.012, 0.0045, screen::EFIS_MINS);
-        label(m, &e, c - 0.062, 0.042, 0.012, 0.0032, style::TEXT, sid("MINS"));
+        label(
+            m,
+            &e,
+            c - 0.062,
+            0.042,
+            0.012,
+            0.0032,
+            style::TEXT,
+            sid("MINS"),
+        );
         knob(m, &e, c + 0.062, 0.012, 0.0072, 202.0 + sx, false);
-        label(m, &e, c + 0.062, 0.042, 0.012, 0.0032, style::TEXT, sid("BARO"));
+        label(
+            m,
+            &e,
+            c + 0.062,
+            0.042,
+            0.012,
+            0.0032,
+            style::TEXT,
+            sid("BARO"),
+        );
         knob(m, &e, c - 0.02, 0.008, 0.0068, 203.0 + sx, true);
-        label(m, &e, c - 0.02, 0.042, 0.012, 0.0032, style::TEXT, sid("MAP"));
+        label(
+            m,
+            &e,
+            c - 0.02,
+            0.042,
+            0.012,
+            0.0032,
+            style::TEXT,
+            sid("MAP"),
+        );
         knob(m, &e, c + 0.022, 0.008, 0.0068, 204.0 + sx, true);
-        label(m, &e, c + 0.022, 0.042, 0.014, 0.0032, style::TEXT, sid("RANGE"));
-        for (k, s) in ["WXR", "STA", "WPT", "ARPT", "DATA", "POS", "TERR"].iter().enumerate() {
+        label(
+            m,
+            &e,
+            c + 0.022,
+            0.042,
+            0.014,
+            0.0032,
+            style::TEXT,
+            sid("RANGE"),
+        );
+        for (k, s) in ["WXR", "STA", "WPT", "ARPT", "DATA", "POS", "TERR"]
+            .iter()
+            .enumerate()
+        {
             let u = c - 0.075 + k as f32 * 0.025;
             rbutton(m, &e, u, -0.037, 0.0052, &BTN);
             label(m, &e, u, -0.024, 0.011, 0.0028, style::TEXT, sid(s));
@@ -1434,41 +2615,193 @@ fn glareshield(m: &mut Mesh, f: &Face) {
     // V/S window and wheel, ALT window and knob, ALT HOLD, autopilot CMD
     // buttons, disengage bar, LOC / APP, F/D on the right.
     toggle(m, &e, -0.268, -0.005, true);
-    label(m, &e, -0.268, 0.024, 0.008, 0.0045, style::TEXT2, sid("F/D"));
+    label(
+        m,
+        &e,
+        -0.268,
+        0.024,
+        0.008,
+        0.0045,
+        style::TEXT2,
+        sid("F/D"),
+    );
     toggle(m, &e, -0.238, 0.014, true);
-    label(m, &e, -0.238, 0.041, 0.012, 0.003, style::TEXT, sid("A/T ARM"));
-    pbutton(m, &e, -0.238, -0.021, 0.0095, 0.0085, style::BUTTON, sid("THR"));
-    pbutton(m, &e, -0.238, -0.044, 0.0095, 0.0085, style::BUTTON, sid("SPD"));
+    label(
+        m,
+        &e,
+        -0.238,
+        0.041,
+        0.012,
+        0.003,
+        style::TEXT,
+        sid("A/T ARM"),
+    );
+    pbutton(
+        m,
+        &e,
+        -0.238,
+        -0.021,
+        0.0095,
+        0.0085,
+        style::BUTTON,
+        sid("THR"),
+    );
+    pbutton(
+        m,
+        &e,
+        -0.238,
+        -0.044,
+        0.0095,
+        0.0085,
+        style::BUTTON,
+        sid("SPD"),
+    );
     readout(m, &e, -0.19, 0.022, 0.022, 0.0085, screen::MCP_IAS);
-    label(m, &e, -0.19, 0.043, 0.017, 0.0032, style::TEXT, sid("IAS/MACH"));
+    label(
+        m,
+        &e,
+        -0.19,
+        0.043,
+        0.017,
+        0.0032,
+        style::TEXT,
+        sid("IAS/MACH"),
+    );
     knob(m, &e, -0.19, -0.022, 0.0088, 211.0, false);
     rbutton(m, &e, -0.215, -0.004, 0.0035, &BTN);
-    pbutton(m, &e, -0.142, 0.026, 0.0095, 0.0085, style::BUTTON_LIT, sid("LNAV"));
-    pbutton(m, &e, -0.142, 0.002, 0.0095, 0.0085, style::BUTTON_LIT, sid("VNAV"));
-    pbutton(m, &e, -0.142, -0.028, 0.0095, 0.0085, style::BUTTON, sid("FL CH"));
+    pbutton(
+        m,
+        &e,
+        -0.142,
+        0.026,
+        0.0095,
+        0.0085,
+        style::BUTTON_LIT,
+        sid("LNAV"),
+    );
+    pbutton(
+        m,
+        &e,
+        -0.142,
+        0.002,
+        0.0095,
+        0.0085,
+        style::BUTTON_LIT,
+        sid("VNAV"),
+    );
+    pbutton(
+        m,
+        &e,
+        -0.142,
+        -0.028,
+        0.0095,
+        0.0085,
+        style::BUTTON,
+        sid("FL CH"),
+    );
     readout(m, &e, -0.09, 0.022, 0.02, 0.0085, screen::MCP_HDG);
     label(m, &e, -0.09, 0.043, 0.008, 0.0032, style::TEXT, sid("HDG"));
     knob(m, &e, -0.09, -0.014, 0.0085, 212.0, true);
-    pbutton(m, &e, -0.09, -0.044, 0.0095, 0.0075, style::BUTTON, sid("HOLD"));
+    pbutton(
+        m,
+        &e,
+        -0.09,
+        -0.044,
+        0.0095,
+        0.0075,
+        style::BUTTON,
+        sid("HOLD"),
+    );
     readout(m, &e, -0.03, 0.022, 0.022, 0.0085, screen::MCP_VS);
-    label(m, &e, -0.03, 0.043, 0.016, 0.0032, style::TEXT, sid("VERT SPD"));
+    label(
+        m,
+        &e,
+        -0.03,
+        0.043,
+        0.016,
+        0.0032,
+        style::TEXT,
+        sid("VERT SPD"),
+    );
     // The V/S thumbwheel.
-    m.lathe(&CREAM.pat(pat::KNURL), e.at_h(-0.03, -0.014, 0.004) - Vec3::X * 0.006, Vec3::X, &[[0.0, 0.0], [0.011, 0.0], [0.011, 0.012], [0.0, 0.012]], 18, false);
-    pbutton(m, &e, -0.03, -0.044, 0.0095, 0.0075, style::BUTTON, sid("V/S"));
+    m.lathe(
+        &CREAM.pat(pat::KNURL),
+        e.at_h(-0.03, -0.014, 0.004) - Vec3::X * 0.006,
+        Vec3::X,
+        &[[0.0, 0.0], [0.011, 0.0], [0.011, 0.012], [0.0, 0.012]],
+        18,
+        false,
+    );
+    pbutton(
+        m,
+        &e,
+        -0.03,
+        -0.044,
+        0.0095,
+        0.0075,
+        style::BUTTON,
+        sid("V/S"),
+    );
     readout(m, &e, 0.035, 0.022, 0.026, 0.0085, screen::MCP_ALT);
     label(m, &e, 0.035, 0.043, 0.008, 0.0032, style::TEXT, sid("ALT"));
     knob(m, &e, 0.035, -0.014, 0.0088, 213.0, false);
-    pbutton(m, &e, 0.035, -0.044, 0.0095, 0.0075, style::BUTTON, sid("HOLD"));
+    pbutton(
+        m,
+        &e,
+        0.035,
+        -0.044,
+        0.0095,
+        0.0075,
+        style::BUTTON,
+        sid("HOLD"),
+    );
     for (k, s) in ["CMD L", "CMD C", "CMD R"].iter().enumerate() {
         let u = 0.1 + k as f32 * 0.03;
-        pbutton(m, &e, u, 0.018, 0.0105, 0.009, if k == 1 { style::BUTTON_LIT } else { style::BUTTON }, sid(s));
+        pbutton(
+            m,
+            &e,
+            u,
+            0.018,
+            0.0105,
+            0.009,
+            if k == 1 {
+                style::BUTTON_LIT
+            } else {
+                style::BUTTON
+            },
+            sid(s),
+        );
     }
     label(m, &e, 0.13, 0.04, 0.02, 0.0032, style::TEXT, sid("CMD"));
     // The disengage bar.
-    m.rbox(&CREAM, e.at_h(0.13, -0.022, 0.006), Vec3::new(0.04, 0.005, 0.004), 0.002, e.rot());
-    label(m, &e, 0.13, -0.036, 0.022, 0.0028, style::TEXT, sid("DISENGAGE"));
+    m.rbox(
+        &CREAM,
+        e.at_h(0.13, -0.022, 0.006),
+        Vec3::new(0.04, 0.005, 0.004),
+        0.002,
+        e.rot(),
+    );
+    label(
+        m,
+        &e,
+        0.13,
+        -0.036,
+        0.022,
+        0.0028,
+        style::TEXT,
+        sid("DISENGAGE"),
+    );
     pbutton(m, &e, 0.2, 0.014, 0.0095, 0.0085, style::BUTTON, sid("LOC"));
-    pbutton(m, &e, 0.2, -0.018, 0.0095, 0.0085, style::BUTTON, sid("APP"));
+    pbutton(
+        m,
+        &e,
+        0.2,
+        -0.018,
+        0.0095,
+        0.0085,
+        style::BUTTON,
+        sid("APP"),
+    );
     toggle(m, &e, 0.248, -0.005, true);
     label(m, &e, 0.248, 0.024, 0.008, 0.0045, style::TEXT2, sid("F/D"));
     // Display select panels at the strip's ends.
@@ -1476,13 +2809,43 @@ fn glareshield(m: &mut Mesh, f: &Face) {
         let c = sx * 0.585;
         plate(m, &g, c - 0.104, -mh, c + 0.104, mh, 220.0 + sx);
         let dd = g.sub(0.0, 0.0, 0.0043);
-        for (k, s) in ["EICAS", "ENG", "STAT", "ELEC/HYD", "FUEL", "ECS"].iter().enumerate() {
+        for (k, s) in ["EICAS", "ENG", "STAT", "ELEC/HYD", "FUEL", "ECS"]
+            .iter()
+            .enumerate()
+        {
             let u = c - 0.075 + k as f32 * 0.03;
             pbutton(m, &dd, u, 0.012, 0.0105, 0.0095, style::BUTTON, sid(s));
         }
-        pbutton(m, &dd, c + 0.075, -0.026, 0.012, 0.009, style::BUTTON, sid("CANC"));
-        pbutton(m, &dd, c + 0.045, -0.026, 0.012, 0.009, style::BUTTON, sid("RCL"));
-        label(m, &dd, c - 0.04, -0.03, 0.04, 0.004, style::TEXT, sid("EICAS"));
+        pbutton(
+            m,
+            &dd,
+            c + 0.075,
+            -0.026,
+            0.012,
+            0.009,
+            style::BUTTON,
+            sid("CANC"),
+        );
+        pbutton(
+            m,
+            &dd,
+            c + 0.045,
+            -0.026,
+            0.012,
+            0.009,
+            style::BUTTON,
+            sid("RCL"),
+        );
+        label(
+            m,
+            &dd,
+            c - 0.04,
+            -0.03,
+            0.04,
+            0.004,
+            style::TEXT,
+            sid("EICAS"),
+        );
         label(m, &dd, c, 0.043, 0.05, 0.0035, style::TEXT, 0);
     }
     // Sunlight round the windshield's lower frame: the standby compass on the
@@ -1494,34 +2857,112 @@ fn glareshield(m: &mut Mesh, f: &Face) {
 /// The forward pedestal's CDU faces (right one; the left mirrors it).
 fn cdu_face(sx: f32) -> Face {
     let a: f32 = 0.70;
-    Face::new(Vec3::new(sx * 0.218, EYE.y - 0.775, EYE.z - 0.475), Vec3::X, Vec3::new(0.0, a.sin(), -a.cos()))
+    Face::new(
+        Vec3::new(sx * 0.218, EYE.y - 0.775, EYE.z - 0.475),
+        Vec3::X,
+        Vec3::new(0.0, a.sin(), -a.cos()),
+    )
 }
 fn cdu(m: &mut Mesh, f: &Face, id: f32, seed: f32) {
     let (hw, hh) = (0.073, 0.114);
-    m.rbox(&PANEL_DK, f.at_h(0.0, 0.0, -0.02), Vec3::new(hw, hh, 0.02), 0.004, f.rot());
+    m.rbox(
+        &PANEL_DK,
+        f.at_h(0.0, 0.0, -0.02),
+        Vec3::new(hw, hh, 0.02),
+        0.004,
+        f.rot(),
+    );
     plate(m, f, -hw, -hh, hw, hh, seed);
     let g = f.sub(0.0, 0.0, 0.0043);
     // Screen, its line select keys either side, the keypad below.
     let sv = 0.052;
-    m.rbox(&FRAME, g.at_h(0.0, sv, 0.001), Vec3::new(0.05, 0.044, 0.002), 0.003, g.rot());
-    screen_quad(m, &mt(mat::DISPLAY, 0.0, 0.0, 0.0).x(id), g.at_h(0.0, sv, 0.0032), g.ax, g.ay, 0.044, 0.038);
+    m.rbox(
+        &FRAME,
+        g.at_h(0.0, sv, 0.001),
+        Vec3::new(0.05, 0.044, 0.002),
+        0.003,
+        g.rot(),
+    );
+    screen_quad(
+        m,
+        &mt(mat::DISPLAY, 0.0, 0.0, 0.0).x(id),
+        g.at_h(0.0, sv, 0.0032),
+        g.ax,
+        g.ay,
+        0.044,
+        0.038,
+    );
     for k in 0..6 {
         let v = sv + 0.031 - k as f32 * 0.0125;
         for sx in [-1.0f32, 1.0] {
-            m.rbox(&BTN, g.at_h(sx * 0.061, v, 0.002), Vec3::new(0.005, 0.0035, 0.0025), 0.001, g.rot());
-            rect(m, &mt(mat::PLASTIC, 0.6, 0.6, 0.6), g.at_h(sx * 0.061, v, 0.0046), g.ax, g.ay, 0.003, 0.0006);
+            m.rbox(
+                &BTN,
+                g.at_h(sx * 0.061, v, 0.002),
+                Vec3::new(0.005, 0.0035, 0.0025),
+                0.001,
+                g.rot(),
+            );
+            rect(
+                m,
+                &mt(mat::PLASTIC, 0.6, 0.6, 0.6),
+                g.at_h(sx * 0.061, v, 0.0046),
+                g.ax,
+                g.ay,
+                0.003,
+                0.0006,
+            );
         }
     }
     // Function keys: three rows of five.
-    let fkeys = [["INIT", "RTE", "DEP ARR", "ALTN", "VNAV"], ["FIX", "LEGS", "HOLD", "FMC", "PROG"], ["MENU", "NAV RAD", "PREV PAGE", "NEXT PAGE", "EXEC"]];
+    let fkeys = [
+        ["INIT", "RTE", "DEP ARR", "ALTN", "VNAV"],
+        ["FIX", "LEGS", "HOLD", "FMC", "PROG"],
+        ["MENU", "NAV RAD", "PREV PAGE", "NEXT PAGE", "EXEC"],
+    ];
     let _ = fkeys;
     for r in 0..3 {
         for c in 0..5 {
             let u = -0.052 + c as f32 * 0.026;
             let v = 0.0 - r as f32 * 0.017;
-            let s = [[sid("INIT"), sid("REF"), sid("DEP ARR"), sid("ALTN"), sid("VNAV")], [sid("FIX"), sid("LEGS"), sid("HOLD"), sid("FMC"), sid("PROG")], [sid("MENU"), sid("NAV RAD"), sid("PREV PAGE"), sid("NEXT PAGE"), sid("EXEC")]][r][c];
-            m.rbox(&BTN, g.at_h(u, v, 0.0025), Vec3::new(0.011, 0.0065, 0.0028), 0.0015, g.rot());
-            rect(m, &legend_mat(style::KEY, s, Vec3::new(0.025, 0.025, 0.027)), g.at_h(u, v, 0.0054), g.ax, g.ay, 0.0105, 0.006);
+            let s = [
+                [
+                    sid("INIT"),
+                    sid("REF"),
+                    sid("DEP ARR"),
+                    sid("ALTN"),
+                    sid("VNAV"),
+                ],
+                [
+                    sid("FIX"),
+                    sid("LEGS"),
+                    sid("HOLD"),
+                    sid("FMC"),
+                    sid("PROG"),
+                ],
+                [
+                    sid("MENU"),
+                    sid("NAV RAD"),
+                    sid("PREV PAGE"),
+                    sid("NEXT PAGE"),
+                    sid("EXEC"),
+                ],
+            ][r][c];
+            m.rbox(
+                &BTN,
+                g.at_h(u, v, 0.0025),
+                Vec3::new(0.011, 0.0065, 0.0028),
+                0.0015,
+                g.rot(),
+            );
+            rect(
+                m,
+                &legend_mat(style::KEY, s, Vec3::new(0.025, 0.025, 0.027)),
+                g.at_h(u, v, 0.0054),
+                g.ax,
+                g.ay,
+                0.0105,
+                0.006,
+            );
         }
     }
     // The alphabet and number keys.
@@ -1529,20 +2970,48 @@ fn cdu(m: &mut Mesh, f: &Face, id: f32, seed: f32) {
         for c in 0..5 {
             let u = -0.030 + c as f32 * 0.017;
             let v = -0.056 - r as f32 * 0.0105;
-            m.rbox(&BTN, g.at_h(u, v, 0.0025), Vec3::new(0.0065, 0.0042, 0.0028), 0.0015, g.rot());
-            rect(m, &legend_mat(style::KEY, 0, Vec3::new(0.025, 0.025, 0.027)), g.at_h(u, v, 0.0054), g.ax, g.ay, 0.006, 0.004);
+            m.rbox(
+                &BTN,
+                g.at_h(u, v, 0.0025),
+                Vec3::new(0.0065, 0.0042, 0.0028),
+                0.0015,
+                g.rot(),
+            );
+            rect(
+                m,
+                &legend_mat(style::KEY, 0, Vec3::new(0.025, 0.025, 0.027)),
+                g.at_h(u, v, 0.0054),
+                g.ax,
+                g.ay,
+                0.006,
+                0.004,
+            );
         }
     }
     for r in 0..4 {
         for c in 0..3 {
             let u = -0.062 + c as f32 * 0.011;
             let v = -0.056 - r as f32 * 0.013;
-            m.rbox(&mt(mat::PLASTIC, 0.5, 0.48, 0.42), g.at_h(u, v, 0.0025), Vec3::new(0.0045, 0.0052, 0.0028), 0.002, g.rot());
+            m.rbox(
+                &mt(mat::PLASTIC, 0.5, 0.48, 0.42),
+                g.at_h(u, v, 0.0025),
+                Vec3::new(0.0045, 0.0052, 0.0028),
+                0.002,
+                g.rot(),
+            );
         }
     }
     // Annunciators down the side (EXEC, MSG, OFST...)
     for k in 0..4 {
-        rect(m, &legend_mat(style::BUTTON, 0, Vec3::new(0.02, 0.02, 0.02)), g.at_h(0.066, -0.06 - k as f32 * 0.012, 0.0005), g.ax, g.ay, 0.004, 0.0035);
+        rect(
+            m,
+            &legend_mat(style::BUTTON, 0, Vec3::new(0.02, 0.02, 0.02)),
+            g.at_h(0.066, -0.06 - k as f32 * 0.012, 0.0005),
+            g.ax,
+            g.ay,
+            0.004,
+            0.0035,
+        );
     }
 }
 
@@ -1558,28 +3027,66 @@ fn pedestal_fixed(m: &mut Mesh) {
     let ytq = EYE.y - 0.80;
     let yaft = EYE.y - 0.86;
     // Sides and top as one shape swept from the panel to the aft end.
-    let w_at = |z: f32| if z < zm - 0.06 { 0.30 } else if z < zm { 0.30 - (z - (zm - 0.06)) / 0.06 * 0.07 } else { 0.23 };
-    let top_at = |z: f32| if z < zm { ytq } else { ytq + (yaft - ytq) * ((z - zm) / (za - zm)) };
+    let w_at = |z: f32| {
+        if z < zm - 0.06 {
+            0.30
+        } else if z < zm {
+            0.30 - (z - (zm - 0.06)) / 0.06 * 0.07
+        } else {
+            0.23
+        }
+    };
+    let top_at = |z: f32| {
+        if z < zm {
+            ytq
+        } else {
+            ytq + (yaft - ytq) * ((z - zm) / (za - zm))
+        }
+    };
     let n = 40;
     let rows: Vec<Vec<SP>> = (0..=n)
         .map(|i| {
             let z = zf + (za - zf) * i as f32 / n as f32;
             let (w, t) = (w_at(z), top_at(z));
-            let pts = [Vec3::new(-w, FLOOR, z), Vec3::new(-w, t - 0.015, z), Vec3::new(-w + 0.015, t, z), Vec3::new(w - 0.015, t, z), Vec3::new(w, t - 0.015, z), Vec3::new(w, FLOOR, z)];
-            pts.iter().enumerate().map(|(k, p)| (*p, [z, k as f32 * 0.2], 0.0)).collect()
+            let pts = [
+                Vec3::new(-w, FLOOR, z),
+                Vec3::new(-w, t - 0.015, z),
+                Vec3::new(-w + 0.015, t, z),
+                Vec3::new(w - 0.015, t, z),
+                Vec3::new(w, t - 0.015, z),
+                Vec3::new(w, FLOOR, z),
+            ];
+            pts.iter()
+                .enumerate()
+                .map(|(k, p)| (*p, [z, k as f32 * 0.2], 0.0))
+                .collect()
         })
         .collect();
     m.grid(&PANEL_DK, &rows, false, true);
     // The aft end.
     let w = w_at(za);
     let t = top_at(za);
-    m.quad(&PANEL_DK, [Vec3::new(-w, FLOOR, za), Vec3::new(w, FLOOR, za), Vec3::new(w, t, za), Vec3::new(-w, t, za)]);
+    m.quad(
+        &PANEL_DK,
+        [
+            Vec3::new(-w, FLOOR, za),
+            Vec3::new(w, FLOOR, za),
+            Vec3::new(w, t, za),
+            Vec3::new(-w, t, za),
+        ],
+    );
 
     // The CDUs.
     for sx in [-1.0f32, 1.0] {
         let cf = cdu_face(sx);
         // The wedge they sit on.
-        m.rbox(&PANEL_DK, cf.at_h(0.0, 0.0, -0.06), Vec3::new(0.08, 0.12, 0.06), 0.004, cf.rot());
+        m.rbox(
+            &PANEL_DK,
+            cf.at_h(0.0, 0.0, -0.06),
+            Vec3::new(0.08, 0.12, 0.06),
+            0.004,
+            cf.rot(),
+        );
         cdu(m, &cf, screen::CDU, 300.0 + sx);
     }
 
@@ -1594,70 +3101,178 @@ fn pedestal_fixed(m: &mut Mesh) {
         arc.push(qc + Vec3::new(0.0, a.cos() * qr, a.sin() * qr));
     }
     let tqh = 0.145;
-    let rows: Vec<Vec<SP>> = arc.iter().map(|p| vec![(*p + Vec3::new(-tqh, -0.25, 0.0) * Vec3::new(1.0, 0.0, 1.0) + Vec3::new(0.0, 0.0, 0.0), [p.z, 0.0], 0.0), (*p - Vec3::X * tqh, [p.z, 0.1], 0.0), (*p + Vec3::X * tqh, [p.z, 0.4], 0.0)]).collect();
+    let rows: Vec<Vec<SP>> = arc
+        .iter()
+        .map(|p| {
+            vec![
+                (
+                    *p + Vec3::new(-tqh, -0.25, 0.0) * Vec3::new(1.0, 0.0, 1.0)
+                        + Vec3::new(0.0, 0.0, 0.0),
+                    [p.z, 0.0],
+                    0.0,
+                ),
+                (*p - Vec3::X * tqh, [p.z, 0.1], 0.0),
+                (*p + Vec3::X * tqh, [p.z, 0.4], 0.0),
+            ]
+        })
+        .collect();
     let _ = rows;
-    m.patch(&mt(mat::PLASTIC, 0.27, 0.235, 0.19).pat(pat::PANEL), 16, 8, true, |a, c| {
-        let ang = (a - 0.5) * 1.15;
-        let x = (c - 0.5) * 2.0 * tqh;
-        let p = qc + Vec3::new(x, ang.cos() * qr, ang.sin() * qr);
-        (p, [x, ang], 0.0)
-    });
+    m.patch(
+        &mt(mat::PLASTIC, 0.27, 0.235, 0.19).pat(pat::PANEL),
+        16,
+        8,
+        true,
+        |a, c| {
+            let ang = (a - 0.5) * 1.15;
+            let x = (c - 0.5) * 2.0 * tqh;
+            let p = qc + Vec3::new(x, ang.cos() * qr, ang.sin() * qr);
+            (p, [x, ang], 0.0)
+        },
+    );
     for sx in [-1.0f32, 1.0] {
-        let ring: Vec<Vec3> = (0..=16).map(|k| { let a = (k as f32 / 16.0 - 0.5) * 1.15; qc + Vec3::new(sx * tqh, a.cos() * qr, a.sin() * qr) }).collect();
+        let ring: Vec<Vec3> = (0..=16)
+            .map(|k| {
+                let a = (k as f32 / 16.0 - 0.5) * 1.15;
+                qc + Vec3::new(sx * tqh, a.cos() * qr, a.sin() * qr)
+            })
+            .collect();
         let mut r2 = ring.clone();
         r2.push(Vec3::new(sx * tqh, ytq - 0.01, ring[16].z));
         r2.push(Vec3::new(sx * tqh, ytq - 0.01, ring[0].z));
-        m.fan(&mt(mat::PLASTIC, 0.27, 0.235, 0.19), Vec3::new(sx * tqh, ytq + 0.02, qc.z), &r2, Vec3::X * sx);
+        m.fan(
+            &mt(mat::PLASTIC, 0.27, 0.235, 0.19),
+            Vec3::new(sx * tqh, ytq + 0.02, qc.z),
+            &r2,
+            Vec3::X * sx,
+        );
     }
     // Slots for the four levers, the speedbrake and the flaps.
     for x in [-0.075f32, -0.025, 0.025, 0.075, -0.125, 0.125] {
         m.patch(&BTN, 12, 1, true, |a, c| {
             let ang = (a - 0.5) * 0.95;
-            let p = qc + Vec3::new(x + (c - 0.5) * 0.008, ang.cos() * (qr + 0.0006), ang.sin() * (qr + 0.0006));
+            let p = qc
+                + Vec3::new(
+                    x + (c - 0.5) * 0.008,
+                    ang.cos() * (qr + 0.0006),
+                    ang.sin() * (qr + 0.0006),
+                );
             (p, [a, c], 0.0)
         });
     }
     // Scale marks along the flap gate.
     let gate = Face::new(qc + Vec3::new(0.137, qr - 0.02, 0.0), Vec3::Z, Vec3::Y);
     let _ = gate;
-    for (k, ang) in [-0.40f32, -0.27, -0.14, -0.01, 0.12, 0.25, 0.38].iter().enumerate() {
+    for (k, ang) in [-0.40f32, -0.27, -0.14, -0.01, 0.12, 0.25, 0.38]
+        .iter()
+        .enumerate()
+    {
         let p = qc + Vec3::new(0.137, ang.cos() * (qr + 0.001), -ang.sin() * (qr + 0.001));
         let nrm = (p - qc - Vec3::X * 0.137).normalize();
         let ax = Vec3::X;
         let ay = nrm.cross(ax);
-        rect(m, &legend_mat(style::TEXT, sid(["UP", "1", "2", "3", "4", "25", "30"][k.min(6)]), Vec3::new(0.27, 0.235, 0.19)), p, ax, -ay, 0.006, 0.0035);
+        rect(
+            m,
+            &legend_mat(
+                style::TEXT,
+                sid(["UP", "1", "2", "3", "4", "25", "30"][k.min(6)]),
+                Vec3::new(0.27, 0.235, 0.19),
+            ),
+            p,
+            ax,
+            -ay,
+            0.006,
+            0.0035,
+        );
     }
 
     // Fuel control switches and the stabiliser trim cutouts behind the quadrant.
-    let ft = Face::new(Vec3::new(0.0, top_at(zm + 0.08) + 0.0005, zm + 0.08), Vec3::X, Vec3::new(0.0, 0.0, -1.0));
-    let ft = Face::new(ft.o, Vec3::X, Vec3::new(0.0, (yaft - ytq) / (za - zm), -1.0));
+    let ft = Face::new(
+        Vec3::new(0.0, top_at(zm + 0.08) + 0.0005, zm + 0.08),
+        Vec3::X,
+        Vec3::new(0.0, 0.0, -1.0),
+    );
+    let ft = Face::new(
+        ft.o,
+        Vec3::X,
+        Vec3::new(0.0, (yaft - ytq) / (za - zm), -1.0),
+    );
     plate(m, &ft, -0.225, -0.05, 0.225, 0.055, 400.0);
     let g = ft.sub(0.0, 0.0, 0.0043);
-    label(m, &g, -0.035, 0.038, 0.05, 0.0045, style::TEXT, sid("FUEL CONTROL"));
+    label(
+        m,
+        &g,
+        -0.035,
+        0.038,
+        0.05,
+        0.0045,
+        style::TEXT,
+        sid("FUEL CONTROL"),
+    );
     for k in 0..4 {
         let u = -0.11 + k as f32 * 0.05;
         let c = g.at(u, 0.0);
-        m.lathe(&CHROME, c, g.n(), &[[0.009, 0.0], [0.009, 0.004], [0.004, 0.006], [0.004, 0.018]], 12, false);
-        m.dome(&BTN, c + g.n() * 0.02 + g.ay * 0.006, g.n(), 0.011, 0.014, 14, 0.0);
-        label(m, &g, u, -0.032, 0.008, 0.005, style::TEXT, sid(["1", "2", "3", "4"][k]));
+        m.lathe(
+            &CHROME,
+            c,
+            g.n(),
+            &[[0.009, 0.0], [0.009, 0.004], [0.004, 0.006], [0.004, 0.018]],
+            12,
+            false,
+        );
+        m.dome(
+            &BTN,
+            c + g.n() * 0.02 + g.ay * 0.006,
+            g.n(),
+            0.011,
+            0.014,
+            14,
+            0.0,
+        );
+        label(
+            m,
+            &g,
+            u,
+            -0.032,
+            0.008,
+            0.005,
+            style::TEXT,
+            sid(["1", "2", "3", "4"][k]),
+        );
     }
     word(m, &g, -0.035, 0.022, 0.004, "RUN");
     word(m, &g, -0.035, -0.04, 0.004, "CUTOFF");
     for k in 0..2 {
         guarded(m, &g, 0.09 + k as f32 * 0.03, 0.0, true);
     }
-    label(m, &g, 0.105, 0.035, 0.03, 0.004, style::TEXT, sid("STAB TRIM"));
+    label(
+        m,
+        &g,
+        0.105,
+        0.035,
+        0.03,
+        0.004,
+        style::TEXT,
+        sid("STAB TRIM"),
+    );
     toggle(m, &g, 0.175, 0.0, false);
     label(m, &g, 0.175, 0.03, 0.02, 0.0035, style::TEXT, sid("ALTN"));
 
     // The aft electronic panels: radio tuning, audio, the third CDU, weather
     // radar, transponder, the evacuation panel.
     let z0 = zm + 0.17;
-    let pa = Face::new(Vec3::new(0.0, top_at(z0) + 0.0005, z0), Vec3::X, Vec3::new(0.0, (yaft - ytq) / (za - zm), -1.0));
+    let pa = Face::new(
+        Vec3::new(0.0, top_at(z0) + 0.0005, z0),
+        Vec3::X,
+        Vec3::new(0.0, (yaft - ytq) / (za - zm), -1.0),
+    );
     let pa = Face::new(pa.o, pa.ax, pa.ay);
     // Panels are 146 mm wide in three columns; heights in the usual multiples.
     let cols = [-0.149f32, 0.0, 0.149];
-    let heights = [[0.095, 0.115, 0.085, 0.095, 0.10], [0.24, 0.07, 0.095, 0.085, 0.0], [0.095, 0.115, 0.085, 0.095, 0.10]];
+    let heights = [
+        [0.095, 0.115, 0.085, 0.095, 0.10],
+        [0.24, 0.07, 0.095, 0.085, 0.0],
+        [0.095, 0.115, 0.085, 0.095, 0.10],
+    ];
     for (ci, &cu) in cols.iter().enumerate() {
         let mut v = 0.0f32;
         for (k, &h) in heights[ci].iter().enumerate() {
@@ -1669,7 +3284,15 @@ fn pedestal_fixed(m: &mut Mesh) {
             if -v0 > za - z0 + 0.0 {
                 break;
             }
-            plate(m, &pa, cu - 0.072, v0, cu + 0.072, v1, 500.0 + (ci * 10 + k) as f32);
+            plate(
+                m,
+                &pa,
+                cu - 0.072,
+                v0,
+                cu + 0.072,
+                v1,
+                500.0 + (ci * 10 + k) as f32,
+            );
             let gg = pa.sub(0.0, 0.0, 0.0043);
             let mid = (v0 + v1) * 0.5;
             match (ci, k) {
@@ -1683,9 +3306,32 @@ fn pedestal_fixed(m: &mut Mesh) {
                     readout(m, &gg, cu - 0.034, v1 - 0.022, 0.026, 0.0075, screen::RADIO);
                     readout(m, &gg, cu + 0.034, v1 - 0.022, 0.026, 0.0075, screen::RADIO);
                     pbutton(m, &gg, cu, v1 - 0.022, 0.0065, 0.006, style::BUTTON, 0);
-                    knob(m, &gg, cu + 0.052, mid - 0.018, 0.0075, 530.0 + ci as f32, false);
+                    knob(
+                        m,
+                        &gg,
+                        cu + 0.052,
+                        mid - 0.018,
+                        0.0075,
+                        530.0 + ci as f32,
+                        false,
+                    );
                     for b in 0..5 {
-                        pbutton(m, &gg, cu - 0.06 + b as f32 * 0.02, mid - 0.016, 0.0072, 0.0058, style::BUTTON, [sid("VHF L"), sid("VHF C"), sid("VHF R"), sid("HF L"), sid("HF R")][b]);
+                        pbutton(
+                            m,
+                            &gg,
+                            cu - 0.06 + b as f32 * 0.02,
+                            mid - 0.016,
+                            0.0072,
+                            0.0058,
+                            style::BUTTON,
+                            [
+                                sid("VHF L"),
+                                sid("VHF C"),
+                                sid("VHF R"),
+                                sid("HF L"),
+                                sid("HF R"),
+                            ][b],
+                        );
                     }
                 }
                 (0, 1) | (2, 1) => {
@@ -1693,41 +3339,142 @@ fn pedestal_fixed(m: &mut Mesh) {
                     for b in 0..6 {
                         let u = cu - 0.055 + b as f32 * 0.022;
                         pbutton(m, &gg, u, v1 - 0.02, 0.0075, 0.0065, style::BUTTON, 0);
-                        m.lathe(&CREAM, gg.at(u, mid - 0.005), gg.n(), &[[0.0055, 0.0], [0.0055, 0.008], [0.004, 0.0095], [0.0, 0.0095]], 10, false);
-                        m.lathe(&CREAM, gg.at(u, v0 + 0.025), gg.n(), &[[0.0055, 0.0], [0.0055, 0.008], [0.004, 0.0095], [0.0, 0.0095]], 10, false);
+                        m.lathe(
+                            &CREAM,
+                            gg.at(u, mid - 0.005),
+                            gg.n(),
+                            &[
+                                [0.0055, 0.0],
+                                [0.0055, 0.008],
+                                [0.004, 0.0095],
+                                [0.0, 0.0095],
+                            ],
+                            10,
+                            false,
+                        );
+                        m.lathe(
+                            &CREAM,
+                            gg.at(u, v0 + 0.025),
+                            gg.n(),
+                            &[
+                                [0.0055, 0.0],
+                                [0.0055, 0.008],
+                                [0.004, 0.0095],
+                                [0.0, 0.0095],
+                            ],
+                            10,
+                            false,
+                        );
                     }
-                    knob(m, &gg, cu + 0.05, v0 + 0.012, 0.006, 540.0 + ci as f32, true);
+                    knob(
+                        m,
+                        &gg,
+                        cu + 0.05,
+                        v0 + 0.012,
+                        0.006,
+                        540.0 + ci as f32,
+                        true,
+                    );
                 }
                 (1, 1) => {
                     readout(m, &gg, cu - 0.02, mid, 0.022, 0.007, screen::XPDR);
                     knob(m, &gg, cu + 0.04, mid, 0.0065, 550.0, true);
-                    pbutton(m, &gg, cu - 0.06, mid, 0.0065, 0.006, style::BUTTON, sid("TEST"));
+                    pbutton(
+                        m,
+                        &gg,
+                        cu - 0.06,
+                        mid,
+                        0.0065,
+                        0.006,
+                        style::BUTTON,
+                        sid("TEST"),
+                    );
                 }
                 (1, 2) => {
                     // Weather radar: mode buttons, tilt and gain knobs.
                     for b in 0..5 {
-                        pbutton(m, &gg, cu - 0.05 + b as f32 * 0.02, mid + 0.02, 0.0075, 0.0065, style::BUTTON, 0);
+                        pbutton(
+                            m,
+                            &gg,
+                            cu - 0.05 + b as f32 * 0.02,
+                            mid + 0.02,
+                            0.0075,
+                            0.0065,
+                            style::BUTTON,
+                            0,
+                        );
                     }
                     knob(m, &gg, cu - 0.03, mid - 0.018, 0.0075, 560.0, true);
                     knob(m, &gg, cu + 0.03, mid - 0.018, 0.0075, 561.0, true);
-                    label(m, &gg, cu - 0.03, mid + 0.002, 0.01, 0.003, style::TEXT, sid("TILT"));
-                    label(m, &gg, cu + 0.03, mid + 0.002, 0.01, 0.003, style::TEXT, sid("GAIN"));
+                    label(
+                        m,
+                        &gg,
+                        cu - 0.03,
+                        mid + 0.002,
+                        0.01,
+                        0.003,
+                        style::TEXT,
+                        sid("TILT"),
+                    );
+                    label(
+                        m,
+                        &gg,
+                        cu + 0.03,
+                        mid + 0.002,
+                        0.01,
+                        0.003,
+                        style::TEXT,
+                        sid("GAIN"),
+                    );
                 }
                 (1, 3) => {
                     // Evacuation command: a red guarded switch, the horn shutoff, its light.
                     guarded(m, &gg, cu - 0.03, mid, true);
-                    annunciator(m, &gg, cu + 0.015, mid + 0.01, 0.013, 0.007, sid("EVAC"), false);
+                    annunciator(
+                        m,
+                        &gg,
+                        cu + 0.015,
+                        mid + 0.01,
+                        0.013,
+                        0.007,
+                        sid("EVAC"),
+                        false,
+                    );
                     rbutton(m, &gg, cu + 0.05, mid, 0.006, &BTN);
                 }
-                _ => populate(m, &gg, cu - 0.068, v0 + 0.004, cu + 0.068, v1 - 0.004, 570.0 + (ci * 10 + k) as f32),
+                _ => populate(
+                    m,
+                    &gg,
+                    cu - 0.068,
+                    v0 + 0.004,
+                    cu + 0.068,
+                    v1 - 0.004,
+                    570.0 + (ci * 10 + k) as f32,
+                ),
             }
         }
     }
     // The cabin interphone handset at the very aft end.
     let hz = za - 0.06;
     let hy = top_at(hz) + 0.012;
-    m.rbox(&mt(mat::PLASTIC, 0.55, 0.53, 0.5), Vec3::new(0.0, hy, hz), Vec3::new(0.10, 0.012, 0.028), 0.01, Quat::IDENTITY);
-    m.tube(&BTN, &[Vec3::new(0.09, hy, hz), Vec3::new(0.12, hy - 0.03, hz + 0.02), Vec3::new(0.15, hy - 0.12, hz + 0.01)], &|_| 0.003, 6, true);
+    m.rbox(
+        &mt(mat::PLASTIC, 0.55, 0.53, 0.5),
+        Vec3::new(0.0, hy, hz),
+        Vec3::new(0.10, 0.012, 0.028),
+        0.01,
+        Quat::IDENTITY,
+    );
+    m.tube(
+        &BTN,
+        &[
+            Vec3::new(0.09, hy, hz),
+            Vec3::new(0.12, hy - 0.03, hz + 0.02),
+            Vec3::new(0.15, hy - 0.12, hz + 0.01),
+        ],
+        &|_| 0.003,
+        6,
+        true,
+    );
 }
 
 // ---------------------------------------------------------------- moving controls
@@ -1745,37 +3492,163 @@ fn levers(b: &mut Builder) {
         let x = -0.075 + k as f32 * 0.05;
         let mut m = Mesh::default();
         let piv = Vec3::new(x, qc.y, qc.z);
-        let arm = [piv + Vec3::new(0.0, 0.20, 0.0), piv + Vec3::new(0.0, 0.30, 0.012), piv + Vec3::new(0.0, 0.345, -0.005)];
-        m.rbox(&mt(mat::PLASTIC, 0.03, 0.03, 0.032), piv + Vec3::new(0.0, 0.25, 0.006), Vec3::new(0.007, 0.06, 0.03), 0.004, Quat::from_rotation_x(0.1));
+        let arm = [
+            piv + Vec3::new(0.0, 0.20, 0.0),
+            piv + Vec3::new(0.0, 0.30, 0.012),
+            piv + Vec3::new(0.0, 0.345, -0.005),
+        ];
+        m.rbox(
+            &mt(mat::PLASTIC, 0.03, 0.03, 0.032),
+            piv + Vec3::new(0.0, 0.25, 0.006),
+            Vec3::new(0.007, 0.06, 0.03),
+            0.004,
+            Quat::from_rotation_x(0.1),
+        );
         m.tube(&ALU, &arm, &|_| 0.0055, 8, false);
         let kc = piv + Vec3::new(0.0, 0.352, -0.01);
-        m.lathe(&mt(mat::PLASTIC, 0.70, 0.67, 0.58), kc - Vec3::X * 0.024, Vec3::X, &[[0.0, 0.0], [0.016, 0.0], [0.018, 0.004], [0.014, 0.012], [0.013, 0.024], [0.014, 0.036], [0.018, 0.044], [0.016, 0.048], [0.0, 0.048]], 18, true);
-        b.add("thrust lever", G_ENGINE, m, Anim::hinge(Drive::new(Input::Throttle, -0.55).offset(0.28)), piv, Vec3::X, None);
+        m.lathe(
+            &mt(mat::PLASTIC, 0.70, 0.67, 0.58),
+            kc - Vec3::X * 0.024,
+            Vec3::X,
+            &[
+                [0.0, 0.0],
+                [0.016, 0.0],
+                [0.018, 0.004],
+                [0.014, 0.012],
+                [0.013, 0.024],
+                [0.014, 0.036],
+                [0.018, 0.044],
+                [0.016, 0.048],
+                [0.0, 0.048],
+            ],
+            18,
+            true,
+        );
+        b.add(
+            "thrust lever",
+            G_ENGINE,
+            m,
+            Anim::hinge(Drive::new(Input::Throttle, -0.55).offset(0.28)),
+            piv,
+            Vec3::X,
+            None,
+        );
         let mut r = Mesh::default();
         let rp = piv + Vec3::new(0.0, 0.27, -0.03);
-        r.rbox(&BTN, rp + Vec3::new(0.0, 0.02, -0.005), Vec3::new(0.006, 0.03, 0.006), 0.003, Quat::IDENTITY);
-        r.rbox(&BTN.pat(pat::KNURL), rp + Vec3::new(0.0, 0.05, -0.012), Vec3::new(0.012, 0.01, 0.008), 0.004, Quat::IDENTITY);
-        b.add("reverse lever", G_ENGINE, r, Anim::hinge2(Drive::new(Input::Throttle, -0.55).offset(0.28), Drive::new(Input::Reverser, 0.9)), piv, Vec3::X, None);
+        r.rbox(
+            &BTN,
+            rp + Vec3::new(0.0, 0.02, -0.005),
+            Vec3::new(0.006, 0.03, 0.006),
+            0.003,
+            Quat::IDENTITY,
+        );
+        r.rbox(
+            &BTN.pat(pat::KNURL),
+            rp + Vec3::new(0.0, 0.05, -0.012),
+            Vec3::new(0.012, 0.01, 0.008),
+            0.004,
+            Quat::IDENTITY,
+        );
+        b.add(
+            "reverse lever",
+            G_ENGINE,
+            r,
+            Anim::hinge2(
+                Drive::new(Input::Throttle, -0.55).offset(0.28),
+                Drive::new(Input::Reverser, 0.9),
+            ),
+            piv,
+            Vec3::X,
+            None,
+        );
     }
     // Speedbrake lever (left of the quadrant) and flap lever (right).
     let mut s = Mesh::default();
     let sp = Vec3::new(-0.125, qc.y, qc.z);
-    s.tube(&ALU, &[sp + Vec3::Y * 0.2, sp + Vec3::new(0.0, 0.32, 0.0)], &|_| 0.004, 8, false);
-    s.rbox(&mt(mat::PLASTIC, 0.72, 0.70, 0.66), sp + Vec3::new(0.0, 0.335, -0.004), Vec3::new(0.008, 0.032, 0.008), 0.006, Quat::from_rotation_x(-0.2));
-    b.add("speedbrake lever", G_ENGINE, s, Anim::hinge(Drive::new(Input::Spoiler(-1.0), 0.75).offset(-0.38)), sp, Vec3::X, None);
+    s.tube(
+        &ALU,
+        &[sp + Vec3::Y * 0.2, sp + Vec3::new(0.0, 0.32, 0.0)],
+        &|_| 0.004,
+        8,
+        false,
+    );
+    s.rbox(
+        &mt(mat::PLASTIC, 0.72, 0.70, 0.66),
+        sp + Vec3::new(0.0, 0.335, -0.004),
+        Vec3::new(0.008, 0.032, 0.008),
+        0.006,
+        Quat::from_rotation_x(-0.2),
+    );
+    b.add(
+        "speedbrake lever",
+        G_ENGINE,
+        s,
+        Anim::hinge(Drive::new(Input::Spoiler(-1.0), 0.75).offset(-0.38)),
+        sp,
+        Vec3::X,
+        None,
+    );
     let mut fl = Mesh::default();
     let fp = Vec3::new(0.125, qc.y, qc.z);
-    fl.tube(&ALU, &[fp + Vec3::Y * 0.2, fp + Vec3::new(0.0, 0.31, 0.0)], &|_| 0.0045, 8, false);
-    fl.rbox(&mt(mat::PLASTIC, 0.72, 0.70, 0.66), fp + Vec3::new(0.0, 0.322, 0.0), Vec3::new(0.016, 0.012, 0.022), 0.006, Quat::IDENTITY);
-    b.add("flap lever", G_ENGINE, fl, Anim::hinge(Drive::new(Input::FlapLever, 0.78).offset(-0.38)), fp, Vec3::X, None);
+    fl.tube(
+        &ALU,
+        &[fp + Vec3::Y * 0.2, fp + Vec3::new(0.0, 0.31, 0.0)],
+        &|_| 0.0045,
+        8,
+        false,
+    );
+    fl.rbox(
+        &mt(mat::PLASTIC, 0.72, 0.70, 0.66),
+        fp + Vec3::new(0.0, 0.322, 0.0),
+        Vec3::new(0.016, 0.012, 0.022),
+        0.006,
+        Quat::IDENTITY,
+    );
+    b.add(
+        "flap lever",
+        G_ENGINE,
+        fl,
+        Anim::hinge(Drive::new(Input::FlapLever, 0.78).offset(-0.38)),
+        fp,
+        Vec3::X,
+        None,
+    );
 
     // The gear lever: a wheel-shaped knob on an arm that moves up and down.
     let f2 = main_face();
     let gp = f2.at_h(0.150, 0.0, 0.03);
     let mut g = Mesh::default();
-    g.tube(&ALU, &[gp - f2.n() * 0.02, gp + f2.n() * 0.03], &|_| 0.005, 8, false);
-    g.lathe(&mt(mat::PLASTIC, 0.08, 0.075, 0.07), gp + f2.n() * 0.03 - Vec3::X * 0.014, Vec3::X, &[[0.0, 0.0], [0.016, 0.0], [0.02, 0.004], [0.02, 0.024], [0.016, 0.028], [0.0, 0.028]], 20, false);
-    b.add("gear lever", G_ENGINE, g, Anim::slide(Drive::new(Input::GearHandle, -0.055), f2.ay), gp, Vec3::X, None);
+    g.tube(
+        &ALU,
+        &[gp - f2.n() * 0.02, gp + f2.n() * 0.03],
+        &|_| 0.005,
+        8,
+        false,
+    );
+    g.lathe(
+        &mt(mat::PLASTIC, 0.08, 0.075, 0.07),
+        gp + f2.n() * 0.03 - Vec3::X * 0.014,
+        Vec3::X,
+        &[
+            [0.0, 0.0],
+            [0.016, 0.0],
+            [0.02, 0.004],
+            [0.02, 0.024],
+            [0.016, 0.028],
+            [0.0, 0.028],
+        ],
+        20,
+        false,
+    );
+    b.add(
+        "gear lever",
+        G_ENGINE,
+        g,
+        Anim::slide(Drive::new(Input::GearHandle, -0.055), f2.ay),
+        gp,
+        Vec3::X,
+        None,
+    );
 }
 
 fn columns(b: &mut Builder) {
@@ -1785,11 +3658,45 @@ fn columns(b: &mut Builder) {
         // The column, hinged at the floor.
         let mut c = Mesh::default();
         let top = Vec3::new(x, EYE.y - 0.58, EYE.z - 0.50);
-        c.lathe(&COLUMN, base, Vec3::Y, &[[0.065, 0.0], [0.065, 0.02], [0.05, 0.04], [0.045, 0.06]], 18, false);
-        c.tube(&COLUMN, &[base + Vec3::Y * 0.05, top - Vec3::Y * 0.03], &|t| 0.042 - 0.006 * t, 16, false);
-        c.lathe(&mt(mat::PLASTIC, 0.06, 0.06, 0.06).pat(pat::KNURL), base + Vec3::Y * 0.06, Vec3::Y, &[[0.047, 0.0], [0.047, 0.08], [0.044, 0.09]], 18, false);
-        c.rbox(&COLUMN, top, Vec3::new(0.04, 0.035, 0.045), 0.02, Quat::IDENTITY);
-        let ci = b.add("control column", G_ENGINE, c, Anim::hinge(Drive::new(Input::Pitch, 0.09)), base, Vec3::X, None);
+        c.lathe(
+            &COLUMN,
+            base,
+            Vec3::Y,
+            &[[0.065, 0.0], [0.065, 0.02], [0.05, 0.04], [0.045, 0.06]],
+            18,
+            false,
+        );
+        c.tube(
+            &COLUMN,
+            &[base + Vec3::Y * 0.05, top - Vec3::Y * 0.03],
+            &|t| 0.042 - 0.006 * t,
+            16,
+            false,
+        );
+        c.lathe(
+            &mt(mat::PLASTIC, 0.06, 0.06, 0.06).pat(pat::KNURL),
+            base + Vec3::Y * 0.06,
+            Vec3::Y,
+            &[[0.047, 0.0], [0.047, 0.08], [0.044, 0.09]],
+            18,
+            false,
+        );
+        c.rbox(
+            &COLUMN,
+            top,
+            Vec3::new(0.04, 0.035, 0.045),
+            0.02,
+            Quat::IDENTITY,
+        );
+        let ci = b.add(
+            "control column",
+            G_ENGINE,
+            c,
+            Anim::hinge(Drive::new(Input::Pitch, 0.09)),
+            base,
+            Vec3::X,
+            None,
+        );
         // The yoke: a wheel of two horns on a hub, a clipboard on top.
         let mut y = Mesh::default();
         let hub = top + Vec3::new(0.0, 0.03, 0.04);
@@ -1797,18 +3704,77 @@ fn columns(b: &mut Builder) {
         let rot = Quat::from_rotation_arc(Vec3::Z, n);
         y.rbox(&COLUMN, hub, Vec3::new(0.06, 0.05, 0.03), 0.02, rot);
         for s in [-1.0f32, 1.0] {
-            let pts: Vec<Vec3> = [(0.03, -0.035), (0.10, -0.05), (0.15, -0.035), (0.172, 0.01), (0.168, 0.06), (0.152, 0.095)].iter().map(|&(a, c)| hub + rot * Vec3::new(s * a, c, 0.0)).collect();
+            let pts: Vec<Vec3> = [
+                (0.03, -0.035),
+                (0.10, -0.05),
+                (0.15, -0.035),
+                (0.172, 0.01),
+                (0.168, 0.06),
+                (0.152, 0.095),
+            ]
+            .iter()
+            .map(|&(a, c)| hub + rot * Vec3::new(s * a, c, 0.0))
+            .collect();
             y.tube(&COLUMN, &pts, &|t| 0.017 + 0.004 * (t * PI).sin(), 12, true);
             // Push-to-talk, autopilot disconnect, trim switches on the grips.
-            y.dome(&mt(mat::PLASTIC, 0.35, 0.03, 0.03), hub + rot * Vec3::new(s * 0.156, 0.098, 0.012), rot * Vec3::new(0.0, 1.0, 0.4), 0.006, 0.005, 10, 0.0);
-            y.rbox(&BTN, hub + rot * Vec3::new(s * 0.152, 0.06, 0.018), Vec3::new(0.005, 0.009, 0.004), 0.002, rot);
+            y.dome(
+                &mt(mat::PLASTIC, 0.35, 0.03, 0.03),
+                hub + rot * Vec3::new(s * 0.156, 0.098, 0.012),
+                rot * Vec3::new(0.0, 1.0, 0.4),
+                0.006,
+                0.005,
+                10,
+                0.0,
+            );
+            y.rbox(
+                &BTN,
+                hub + rot * Vec3::new(s * 0.152, 0.06, 0.018),
+                Vec3::new(0.005, 0.009, 0.004),
+                0.002,
+                rot,
+            );
         }
         // Checklist holder and the card.
-        y.rbox(&mt(mat::ALU, 0.55, 0.55, 0.56), hub + rot * Vec3::new(0.0, 0.06, 0.03), Vec3::new(0.04, 0.008, 0.006), 0.003, rot);
-        y.rbox(&mt(mat::PLASTIC, 0.78, 0.77, 0.72), hub + rot * Vec3::new(0.0, 0.10, 0.036), Vec3::new(0.038, 0.055, 0.0012), 0.001, rot);
-        rect(&mut y, &legend_mat(style::PLACARD, 0, Vec3::new(0.78, 0.77, 0.72)), hub + rot * Vec3::new(0.0, 0.10, 0.0375), rot * Vec3::X, rot * Vec3::Y, 0.036, 0.053);
-        y.disc(&mt(mat::ALU, 0.6, 0.6, 0.62), hub + rot * Vec3::new(0.0, 0.0, 0.031), n, rot * Vec3::Y, 0.016, 18);
-        b.add("yoke", G_ENGINE, y, Anim::hinge(Drive::new(Input::Roll, -0.8)), hub, n, Some(ci));
+        y.rbox(
+            &mt(mat::ALU, 0.55, 0.55, 0.56),
+            hub + rot * Vec3::new(0.0, 0.06, 0.03),
+            Vec3::new(0.04, 0.008, 0.006),
+            0.003,
+            rot,
+        );
+        y.rbox(
+            &mt(mat::PLASTIC, 0.78, 0.77, 0.72),
+            hub + rot * Vec3::new(0.0, 0.10, 0.036),
+            Vec3::new(0.038, 0.055, 0.0012),
+            0.001,
+            rot,
+        );
+        rect(
+            &mut y,
+            &legend_mat(style::PLACARD, 0, Vec3::new(0.78, 0.77, 0.72)),
+            hub + rot * Vec3::new(0.0, 0.10, 0.0375),
+            rot * Vec3::X,
+            rot * Vec3::Y,
+            0.036,
+            0.053,
+        );
+        y.disc(
+            &mt(mat::ALU, 0.6, 0.6, 0.62),
+            hub + rot * Vec3::new(0.0, 0.0, 0.031),
+            n,
+            rot * Vec3::Y,
+            0.016,
+            18,
+        );
+        b.add(
+            "yoke",
+            G_ENGINE,
+            y,
+            Anim::hinge(Drive::new(Input::Roll, -0.8)),
+            hub,
+            n,
+            Some(ci),
+        );
         // Rudder pedals with their brake tops.
         for dx in [-0.10f32, 0.10] {
             let mut p = Mesh::default();
@@ -1816,17 +3782,68 @@ fn columns(b: &mut Builder) {
             let pc = Vec3::new(x + dx, FLOOR + 0.18, EYE.z - 0.95);
             p.tube(&STEEL, &[pv, pc], &|_| 0.011, 8, true);
             let tilt = Quat::from_rotation_x(-0.35);
-            p.rbox(&mt(mat::ALU, 0.35, 0.35, 0.36), pc + Vec3::new(0.0, 0.0, 0.01), Vec3::new(0.045, 0.085, 0.008), 0.006, tilt);
-            p.rbox(&RUBBER.pat(pat::KNURL), pc + Vec3::new(0.0, 0.0, 0.019), Vec3::new(0.04, 0.075, 0.0025), 0.002, tilt);
-            b.add("rudder pedal", G_ENGINE, p, Anim::hinge(Drive::new(Input::Yaw, dx.signum() * 0.18)), pv, Vec3::X, None);
+            p.rbox(
+                &mt(mat::ALU, 0.35, 0.35, 0.36),
+                pc + Vec3::new(0.0, 0.0, 0.01),
+                Vec3::new(0.045, 0.085, 0.008),
+                0.006,
+                tilt,
+            );
+            p.rbox(
+                &RUBBER.pat(pat::KNURL),
+                pc + Vec3::new(0.0, 0.0, 0.019),
+                Vec3::new(0.04, 0.075, 0.0025),
+                0.002,
+                tilt,
+            );
+            b.add(
+                "rudder pedal",
+                G_ENGINE,
+                p,
+                Anim::hinge(Drive::new(Input::Yaw, dx.signum() * 0.18)),
+                pv,
+                Vec3::X,
+                None,
+            );
         }
     }
     // The nose wheel tiller on the captain's side console.
     let mut t = Mesh::default();
     let tc = Vec3::new(-0.93, FLOOR + 0.62, EYE.z - 0.30);
-    t.lathe(&mt(mat::PLASTIC, 0.05, 0.045, 0.04), tc, Vec3::Y, &[[0.012, 0.0], [0.012, 0.03], [0.07, 0.035], [0.075, 0.045], [0.07, 0.05], [0.0, 0.052]], 24, false);
-    t.tube(&mt(mat::PLASTIC, 0.05, 0.045, 0.04), &[tc + Vec3::new(0.05, 0.05, 0.0), tc + Vec3::new(0.05, 0.09, 0.0)], &|_| 0.008, 8, true);
-    b.add("tiller", G_ENGINE, t, Anim::hinge(Drive::new(Input::Steer, -1.8)), tc, Vec3::Y, None);
+    t.lathe(
+        &mt(mat::PLASTIC, 0.05, 0.045, 0.04),
+        tc,
+        Vec3::Y,
+        &[
+            [0.012, 0.0],
+            [0.012, 0.03],
+            [0.07, 0.035],
+            [0.075, 0.045],
+            [0.07, 0.05],
+            [0.0, 0.052],
+        ],
+        24,
+        false,
+    );
+    t.tube(
+        &mt(mat::PLASTIC, 0.05, 0.045, 0.04),
+        &[
+            tc + Vec3::new(0.05, 0.05, 0.0),
+            tc + Vec3::new(0.05, 0.09, 0.0),
+        ],
+        &|_| 0.008,
+        8,
+        true,
+    );
+    b.add(
+        "tiller",
+        G_ENGINE,
+        t,
+        Anim::hinge(Drive::new(Input::Steer, -1.8)),
+        tc,
+        Vec3::Y,
+        None,
+    );
 }
 
 // ---------------------------------------------------------------- overhead panel
@@ -1843,24 +3860,67 @@ fn overhead(m: &mut Mesh) {
     let y1 = yk + 0.04;
     // Seen from the seats the panels read with their tops aft (+X right,
     // up toward the tail), so they face down and back at the crew.
-    let fwd = Face::new(Vec3::new(0.0, (y0 + yk) * 0.5, (z0 + zk) * 0.5), Vec3::X, Vec3::new(0.0, yk - y0, zk - z0));
-    let aft = Face::new(Vec3::new(0.0, (yk + y1) * 0.5, (zk + z1) * 0.5), Vec3::X, Vec3::new(0.0, y1 - yk, z1 - zk));
+    let fwd = Face::new(
+        Vec3::new(0.0, (y0 + yk) * 0.5, (z0 + zk) * 0.5),
+        Vec3::X,
+        Vec3::new(0.0, yk - y0, zk - z0),
+    );
+    let aft = Face::new(
+        Vec3::new(0.0, (yk + y1) * 0.5, (zk + z1) * 0.5),
+        Vec3::X,
+        Vec3::new(0.0, y1 - yk, z1 - zk),
+    );
     let lf = ((zk - z0).powi(2) + (yk - y0).powi(2)).sqrt() * 0.5;
     let la = ((z1 - zk).powi(2) + (y1 - yk).powi(2)).sqrt() * 0.5;
     // The box: sides up to the ceiling.
     for sx in [-1.0f32, 1.0] {
         let x = sx * (hw + 0.012);
-        let pts = [Vec3::new(x, y0, z0), Vec3::new(x, yk, zk), Vec3::new(x, y1, z1)];
+        let pts = [
+            Vec3::new(x, y0, z0),
+            Vec3::new(x, yk, zk),
+            Vec3::new(x, y1, z1),
+        ];
         for k in 0..2 {
             let (a, c) = (pts[k], pts[k + 1]);
             let (ta, tc) = (lin_top(a.z, x) + 0.02, lin_top(c.z, x) + 0.02);
-            m.quad(&PANEL_DK, [a, c, Vec3::new(x, tc, c.z), Vec3::new(x, ta, a.z)]);
+            m.quad(
+                &PANEL_DK,
+                [a, c, Vec3::new(x, tc, c.z), Vec3::new(x, ta, a.z)],
+            );
         }
     }
-    m.quad(&PANEL_DK, [Vec3::new(-hw - 0.012, y1, z1), Vec3::new(hw + 0.012, y1, z1), Vec3::new(hw + 0.012, lin_top(z1, hw) + 0.02, z1), Vec3::new(-hw - 0.012, lin_top(z1, hw) + 0.02, z1)]);
-    m.quad(&PANEL_DK, [Vec3::new(-hw - 0.012, y0, z0), Vec3::new(hw + 0.012, y0, z0), Vec3::new(hw + 0.012, lin_top(z0, hw) + 0.02, z0), Vec3::new(-hw - 0.012, lin_top(z0, hw) + 0.02, z0)]);
-    m.rbox(&PANEL_DK, fwd.at_h(0.0, 0.0, -0.01), Vec3::new(hw + 0.012, lf, 0.01), 0.004, fwd.rot());
-    m.rbox(&PANEL_DK, aft.at_h(0.0, 0.0, -0.01), Vec3::new(hw + 0.012, la, 0.01), 0.004, aft.rot());
+    m.quad(
+        &PANEL_DK,
+        [
+            Vec3::new(-hw - 0.012, y1, z1),
+            Vec3::new(hw + 0.012, y1, z1),
+            Vec3::new(hw + 0.012, lin_top(z1, hw) + 0.02, z1),
+            Vec3::new(-hw - 0.012, lin_top(z1, hw) + 0.02, z1),
+        ],
+    );
+    m.quad(
+        &PANEL_DK,
+        [
+            Vec3::new(-hw - 0.012, y0, z0),
+            Vec3::new(hw + 0.012, y0, z0),
+            Vec3::new(hw + 0.012, lin_top(z0, hw) + 0.02, z0),
+            Vec3::new(-hw - 0.012, lin_top(z0, hw) + 0.02, z0),
+        ],
+    );
+    m.rbox(
+        &PANEL_DK,
+        fwd.at_h(0.0, 0.0, -0.01),
+        Vec3::new(hw + 0.012, lf, 0.01),
+        0.004,
+        fwd.rot(),
+    );
+    m.rbox(
+        &PANEL_DK,
+        aft.at_h(0.0, 0.0, -0.01),
+        Vec3::new(hw + 0.012, la, 0.01),
+        0.004,
+        aft.rot(),
+    );
 
     // Forward overhead, in the three columns of the real one (seen from the
     // captain's seat: electrical and hydraulics on the left, engine start,
@@ -1876,21 +3936,84 @@ fn overhead(m: &mut Mesh) {
             let g = fwd.sub(0.0, 0.0, 0.0043);
             for k in 0..4 {
                 let u = u0 + 0.035 + k as f32 * 0.0615;
-                m.rbox(&mt(mat::PLASTIC, 0.04, 0.04, 0.042), g.at_h(u, lf - 0.045, 0.012), Vec3::new(0.011, 0.028, 0.012), 0.005, g.rot());
-                rect(m, &legend_mat(style::BUTTON, sid("DISCH"), Vec3::new(0.03, 0.03, 0.03)), g.at_h(u, lf - 0.045, 0.0242), g.ax, g.ay, 0.008, 0.02);
-                label(m, &g, u, lf - 0.085, 0.014, 0.005, style::TEXT, sid(["1", "2", "3", "4"][k]));
+                m.rbox(
+                    &mt(mat::PLASTIC, 0.04, 0.04, 0.042),
+                    g.at_h(u, lf - 0.045, 0.012),
+                    Vec3::new(0.011, 0.028, 0.012),
+                    0.005,
+                    g.rot(),
+                );
+                rect(
+                    m,
+                    &legend_mat(style::BUTTON, sid("DISCH"), Vec3::new(0.03, 0.03, 0.03)),
+                    g.at_h(u, lf - 0.045, 0.0242),
+                    g.ax,
+                    g.ay,
+                    0.008,
+                    0.02,
+                );
+                label(
+                    m,
+                    &g,
+                    u,
+                    lf - 0.085,
+                    0.014,
+                    0.005,
+                    style::TEXT,
+                    sid(["1", "2", "3", "4"][k]),
+                );
             }
             plate(m, &fwd, u0, lf - 0.20, u1, lf - 0.10, 601.0);
             for k in 0..4 {
                 let u = u0 + 0.035 + k as f32 * 0.0615;
-                m.lathe(&BTN, g.at(u, lf - 0.125), g.n(), &[[0.011, 0.0], [0.011, 0.006], [0.009, 0.008], [0.009, 0.02], [0.0, 0.021]], 14, false);
-                label(m, &g, u, lf - 0.108, 0.006, 0.0045, style::TEXT, sid(["1", "2", "3", "4"][k]));
+                m.lathe(
+                    &BTN,
+                    g.at(u, lf - 0.125),
+                    g.n(),
+                    &[
+                        [0.011, 0.0],
+                        [0.011, 0.006],
+                        [0.009, 0.008],
+                        [0.009, 0.02],
+                        [0.0, 0.021],
+                    ],
+                    14,
+                    false,
+                );
+                label(
+                    m,
+                    &g,
+                    u,
+                    lf - 0.108,
+                    0.006,
+                    0.0045,
+                    style::TEXT,
+                    sid(["1", "2", "3", "4"][k]),
+                );
                 knob(m, &g, u, lf - 0.17, 0.0062, 610.0 + k as f32, true);
             }
-            label(m, &g, *cu, lf - 0.145, 0.03, 0.004, style::TEXT, sid("ENG START"));
+            label(
+                m,
+                &g,
+                *cu,
+                lf - 0.145,
+                0.03,
+                0.004,
+                style::TEXT,
+                sid("ENG START"),
+            );
             // Fuel panel with its flow lines.
             plate(m, &fwd, u0, -lf + 0.11, u1, lf - 0.20, 602.0);
-            label(m, &g, *cu, (-lf + 0.11 + lf - 0.20) * 0.5, cw * 0.46, (2.0 * lf - 0.31) * 0.46, style::LINES, 0);
+            label(
+                m,
+                &g,
+                *cu,
+                (-lf + 0.11 + lf - 0.20) * 0.5,
+                cw * 0.46,
+                (2.0 * lf - 0.31) * 0.46,
+                style::LINES,
+                0,
+            );
             for r in 0..3 {
                 for k in 0..6 {
                     let u = u0 + 0.03 + k as f32 * 0.039;
@@ -1898,13 +4021,44 @@ fn overhead(m: &mut Mesh) {
                     if v < -lf + 0.13 {
                         continue;
                     }
-                    pbutton(m, &g, u, v, 0.0105, 0.0095, if (r * 6 + k) % 7 == 3 { style::BUTTON_ON } else { style::BUTTON }, if r == 0 { sid("X FEED") } else { sid("PUMPS") });
+                    pbutton(
+                        m,
+                        &g,
+                        u,
+                        v,
+                        0.0105,
+                        0.0095,
+                        if (r * 6 + k) % 7 == 3 {
+                            style::BUTTON_ON
+                        } else {
+                            style::BUTTON
+                        },
+                        if r == 0 { sid("X FEED") } else { sid("PUMPS") },
+                    );
                 }
             }
             plate(m, &fwd, u0, -lf + 0.005, u1, -lf + 0.11, 603.0);
-            populate(m, &g, u0 + 0.004, -lf + 0.009, u1 - 0.004, -lf + 0.106, 604.0);
+            populate(
+                m,
+                &g,
+                u0 + 0.004,
+                -lf + 0.009,
+                u1 - 0.004,
+                -lf + 0.106,
+                604.0,
+            );
         } else {
-            panel_run(m, &fwd, u0, -lf + 0.005, u1, lf - 0.005, 1, 5, 620.0 + ci as f32 * 31.0);
+            panel_run(
+                m,
+                &fwd,
+                u0,
+                -lf + 0.005,
+                u1,
+                lf - 0.005,
+                1,
+                5,
+                620.0 + ci as f32 * 31.0,
+            );
         }
     }
     // The lights strip along the forward edge.
@@ -1918,14 +4072,42 @@ fn overhead(m: &mut Mesh) {
         } else {
             plate(m, &aft, u0, -la + 0.005, u1, la - 0.005, 710.0 + ci as f32);
             let g = aft.sub(0.0, 0.0, 0.0043);
-            breakers(m, &g, u0 + 0.012, -la + 0.02, u1 - 0.012, la - 0.02, 720.0 + ci as f32);
+            breakers(
+                m,
+                &g,
+                u0 + 0.012,
+                -la + 0.02,
+                u1 - 0.012,
+                la - 0.02,
+                720.0 + ci as f32,
+            );
         }
     }
     // The standby compass hanging from the top of the centre post.
     let cp = Vec3::new(0.0, y0 - 0.02, z0 - 0.025);
-    m.rbox(&BTN, cp, Vec3::new(0.035, 0.028, 0.03), 0.01, Quat::IDENTITY);
-    rect(m, &mt(mat::GAUGE, 0.02, 0.02, 0.02).x(17.0), cp + Vec3::new(0.0, 0.0, 0.0302), Vec3::X, Vec3::Y, 0.024, 0.016);
-    m.tube(&BTN, &[cp + Vec3::Y * 0.02, cp + Vec3::new(0.0, 0.07, -0.01)], &|_| 0.006, 8, false);
+    m.rbox(
+        &BTN,
+        cp,
+        Vec3::new(0.035, 0.028, 0.03),
+        0.01,
+        Quat::IDENTITY,
+    );
+    rect(
+        m,
+        &mt(mat::GAUGE, 0.02, 0.02, 0.02).x(17.0),
+        cp + Vec3::new(0.0, 0.0, 0.0302),
+        Vec3::X,
+        Vec3::Y,
+        0.024,
+        0.016,
+    );
+    m.tube(
+        &BTN,
+        &[cp + Vec3::Y * 0.02, cp + Vec3::new(0.0, 0.07, -0.01)],
+        &|_| 0.006,
+        8,
+        false,
+    );
     // Air outlets, flood lights and speakers beside the overhead.
     for sx in [-1.0f32, 1.0] {
         for (k, dz) in [0.0f32, 0.35, 0.7].iter().enumerate() {
@@ -1934,16 +4116,43 @@ fn overhead(m: &mut Mesh) {
             let y = lin_top(z, x) - 0.012;
             let p = Vec3::new(x, y, z);
             if k == 1 {
-                m.lathe(&mt(mat::PLASTIC, 0.35, 0.33, 0.30), p, Vec3::NEG_Y, &[[0.032, 0.0], [0.032, 0.008], [0.026, 0.016], [0.0, 0.017]], 18, true);
-                m.lathe(&CHROME, p - Vec3::Y * 0.016, Vec3::NEG_Y, &[[0.012, 0.0], [0.012, 0.01], [0.0, 0.012]], 12, true);
+                m.lathe(
+                    &mt(mat::PLASTIC, 0.35, 0.33, 0.30),
+                    p,
+                    Vec3::NEG_Y,
+                    &[[0.032, 0.0], [0.032, 0.008], [0.026, 0.016], [0.0, 0.017]],
+                    18,
+                    true,
+                );
+                m.lathe(
+                    &CHROME,
+                    p - Vec3::Y * 0.016,
+                    Vec3::NEG_Y,
+                    &[[0.012, 0.0], [0.012, 0.01], [0.0, 0.012]],
+                    12,
+                    true,
+                );
             } else {
-                m.lathe(&mt(mat::PLASTIC, 0.30, 0.28, 0.26), p, Vec3::new(-sx * 0.3, -1.0, 0.0), &[[0.022, 0.0], [0.022, 0.012], [0.018, 0.02], [0.0, 0.02]], 16, false);
+                m.lathe(
+                    &mt(mat::PLASTIC, 0.30, 0.28, 0.26),
+                    p,
+                    Vec3::new(-sx * 0.3, -1.0, 0.0),
+                    &[[0.022, 0.0], [0.022, 0.012], [0.018, 0.02], [0.0, 0.02]],
+                    16,
+                    false,
+                );
             }
         }
         // A map light and a speaker grille in the ceiling behind the side windows.
         let p = Vec3::new(sx * 0.9, lin_top(EYE.z + 0.3, 0.9) - 0.01, EYE.z + 0.3);
         let p = inside(p, 0.012);
-        m.rbox(&mt(mat::PLASTIC, 0.26, 0.24, 0.22), p, Vec3::new(0.07, 0.008, 0.05), 0.006, Quat::IDENTITY);
+        m.rbox(
+            &mt(mat::PLASTIC, 0.26, 0.24, 0.22),
+            p,
+            Vec3::new(0.07, 0.008, 0.05),
+            0.006,
+            Quat::IDENTITY,
+        );
     }
 }
 
@@ -1954,17 +4163,47 @@ fn breakers(m: &mut Mesh, f: &Face, u0: f32, v0: f32, u1: f32, v1: f32, seed: f3
     let nv = ((v1 - v0) / pv) as usize;
     for j in 0..nv {
         let v = v1 - (j as f32 + 0.6) * pv;
-        label(m, f, (u0 + u1) * 0.5, v + 0.013, (u1 - u0) * 0.48, 0.0026, style::TEXT, 0);
+        label(
+            m,
+            f,
+            (u0 + u1) * 0.5,
+            v + 0.013,
+            (u1 - u0) * 0.48,
+            0.0026,
+            style::TEXT,
+            0,
+        );
         for i in 0..nu {
             let u = u0 + (i as f32 + 0.5) * pu;
             if hash(seed + (j * 31 + i) as f32) < 0.08 {
                 continue;
             }
             let c = f.at(u, v);
-            m.lathe(&CB_BLACK, c, f.n(), &[[0.0052, 0.0], [0.0052, 0.0016], [0.0038, 0.0022], [0.0038, 0.0085], [0.0032, 0.0095], [0.0, 0.0095]], 8, false);
+            m.lathe(
+                &CB_BLACK,
+                c,
+                f.n(),
+                &[
+                    [0.0052, 0.0],
+                    [0.0052, 0.0016],
+                    [0.0038, 0.0022],
+                    [0.0038, 0.0085],
+                    [0.0032, 0.0095],
+                    [0.0, 0.0095],
+                ],
+                8,
+                false,
+            );
             // The white collar shows when a breaker has popped.
             if hash(seed * 3.3 + (j * 31 + i) as f32) < 0.015 {
-                m.lathe(&PAINT_WHITE, c + f.n() * 0.004, f.n(), &[[0.0039, 0.0], [0.0039, 0.003]], 8, false);
+                m.lathe(
+                    &PAINT_WHITE,
+                    c + f.n() * 0.004,
+                    f.n(),
+                    &[[0.0039, 0.0], [0.0039, 0.003]],
+                    8,
+                    false,
+                );
             }
         }
     }
@@ -1977,29 +4216,83 @@ fn seats(m: &mut Mesh) {
         let x = sx * EYE.x.abs();
         let zc = EYE.z;
         // Pedestal on the tracks, the pan, the cushion with its sheepskin.
-        m.rbox(&SEAT_SHELL, Vec3::new(x, FLOOR + 0.13, zc + 0.05), Vec3::new(0.17, 0.12, 0.22), 0.03, Quat::IDENTITY);
-        m.rbox(&SEAT_SHELL, Vec3::new(x, FLOOR + 0.30, zc + 0.02), Vec3::new(0.25, 0.05, 0.25), 0.03, Quat::IDENTITY);
+        m.rbox(
+            &SEAT_SHELL,
+            Vec3::new(x, FLOOR + 0.13, zc + 0.05),
+            Vec3::new(0.17, 0.12, 0.22),
+            0.03,
+            Quat::IDENTITY,
+        );
+        m.rbox(
+            &SEAT_SHELL,
+            Vec3::new(x, FLOOR + 0.30, zc + 0.02),
+            Vec3::new(0.25, 0.05, 0.25),
+            0.03,
+            Quat::IDENTITY,
+        );
         let tilt = Quat::from_rotation_x(-0.06);
-        m.rbox(&FLEECE, Vec3::new(x, FLOOR + 0.415, zc - 0.02), Vec3::new(0.24, 0.06, 0.24), 0.05, tilt);
+        m.rbox(
+            &FLEECE,
+            Vec3::new(x, FLOOR + 0.415, zc - 0.02),
+            Vec3::new(0.24, 0.06, 0.24),
+            0.05,
+            tilt,
+        );
         // The back, leaning back a little, and the headrest.
         let lean = Quat::from_rotation_x(0.14);
         let bc = Vec3::new(x, FLOOR + 0.82, zc + 0.29);
-        m.rbox(&SEAT_SHELL, bc + Vec3::new(0.0, 0.0, 0.055), Vec3::new(0.25, 0.37, 0.04), 0.035, lean);
+        m.rbox(
+            &SEAT_SHELL,
+            bc + Vec3::new(0.0, 0.0, 0.055),
+            Vec3::new(0.25, 0.37, 0.04),
+            0.035,
+            lean,
+        );
         m.rbox(&FLEECE, bc, Vec3::new(0.235, 0.35, 0.05), 0.045, lean);
-        m.rbox(&SEAT_SIDE, Vec3::new(x, FLOOR + 1.30, zc + 0.33), Vec3::new(0.14, 0.09, 0.05), 0.04, lean);
+        m.rbox(
+            &SEAT_SIDE,
+            Vec3::new(x, FLOOR + 1.30, zc + 0.33),
+            Vec3::new(0.14, 0.09, 0.05),
+            0.04,
+            lean,
+        );
         // Armrests, inboard and outboard.
         for ax in [-1.0f32, 1.0] {
             let p = Vec3::new(x + ax * 0.27, FLOOR + 0.62, zc + 0.02);
-            m.rbox(&SEAT_SIDE, p, Vec3::new(0.035, 0.035, 0.17), 0.03, Quat::IDENTITY);
-            m.rbox(&SEAT_SHELL, p + Vec3::new(0.0, -0.08, 0.14), Vec3::new(0.025, 0.08, 0.03), 0.015, Quat::IDENTITY);
+            m.rbox(
+                &SEAT_SIDE,
+                p,
+                Vec3::new(0.035, 0.035, 0.17),
+                0.03,
+                Quat::IDENTITY,
+            );
+            m.rbox(
+                &SEAT_SHELL,
+                p + Vec3::new(0.0, -0.08, 0.14),
+                Vec3::new(0.025, 0.08, 0.03),
+                0.015,
+                Quat::IDENTITY,
+            );
         }
         // The harness: shoulder straps over the back, the lap belts on the cushion.
         for dx in [-0.09f32, 0.09] {
             let a = bc + Vec3::new(dx, 0.36, -0.02);
             let c = Vec3::new(x + dx * 1.6, FLOOR + 0.47, zc - 0.05);
-            m.tube(&mt(mat::FABRIC, 0.08, 0.07, 0.05), &[a, a + Vec3::new(0.0, -0.02, -0.06), c], &|_| 0.012, 6, true);
+            m.tube(
+                &mt(mat::FABRIC, 0.08, 0.07, 0.05),
+                &[a, a + Vec3::new(0.0, -0.02, -0.06), c],
+                &|_| 0.012,
+                6,
+                true,
+            );
         }
-        m.rbox(&CHROME, Vec3::new(x, FLOOR + 0.48, zc - 0.10), Vec3::new(0.05, 0.008, 0.04), 0.008, Quat::IDENTITY);
+        m.rbox(
+            &CHROME,
+            Vec3::new(x, FLOOR + 0.48, zc - 0.10),
+            Vec3::new(0.05, 0.008, 0.04),
+            0.008,
+            Quat::IDENTITY,
+        );
     }
 }
 
@@ -2012,30 +4305,133 @@ fn side_consoles(m: &mut Mesh) {
         let ys = FLOOR + 0.64;
         // The console's top, its inboard face, the wall behind it up to the
         // window sill and the sill out to the lining.
-        m.quad(&PANEL, [Vec3::new(x0, yt, z0), Vec3::new(x1, yt, z0), Vec3::new(x1, yt, z1), Vec3::new(x0, yt, z1)]);
-        m.quad(&PANEL_DK, [Vec3::new(x0, FLOOR, z0), Vec3::new(x0, FLOOR, z1), Vec3::new(x0, yt, z1), Vec3::new(x0, yt, z0)]);
-        m.quad(&PANEL_DK, [Vec3::new(x0, FLOOR, z0), Vec3::new(x1, FLOOR, z0), Vec3::new(x1, yt, z0), Vec3::new(x0, yt, z0)]);
-        m.tube(&PANEL, &[Vec3::new(x0, yt - 0.01, z0), Vec3::new(x0, yt - 0.01, z1)], &|_| 0.012, 8, true);
+        m.quad(
+            &PANEL,
+            [
+                Vec3::new(x0, yt, z0),
+                Vec3::new(x1, yt, z0),
+                Vec3::new(x1, yt, z1),
+                Vec3::new(x0, yt, z1),
+            ],
+        );
+        m.quad(
+            &PANEL_DK,
+            [
+                Vec3::new(x0, FLOOR, z0),
+                Vec3::new(x0, FLOOR, z1),
+                Vec3::new(x0, yt, z1),
+                Vec3::new(x0, yt, z0),
+            ],
+        );
+        m.quad(
+            &PANEL_DK,
+            [
+                Vec3::new(x0, FLOOR, z0),
+                Vec3::new(x1, FLOOR, z0),
+                Vec3::new(x1, yt, z0),
+                Vec3::new(x0, yt, z0),
+            ],
+        );
+        m.tube(
+            &PANEL,
+            &[Vec3::new(x0, yt - 0.01, z0), Vec3::new(x0, yt - 0.01, z1)],
+            &|_| 0.012,
+            8,
+            true,
+        );
         let wall = mt(mat::PLASTIC, 0.26, 0.245, 0.225).pat(pat::PANEL);
-        m.quad(&wall, [Vec3::new(x1, yt, z0), Vec3::new(x1, ys, z0), Vec3::new(x1, ys, z1), Vec3::new(x1, yt, z1)]);
+        m.quad(
+            &wall,
+            [
+                Vec3::new(x1, yt, z0),
+                Vec3::new(x1, ys, z0),
+                Vec3::new(x1, ys, z1),
+                Vec3::new(x1, yt, z1),
+            ],
+        );
         m.patch(&wall, 24, 4, sx < 0.0, |a, c| {
             let z = z0 - 0.15 + (z1 - z0 + 0.35) * a;
             let xw = lin_x(z, ys) - 0.004;
             let x = x1 + (sx * xw - x1) * c;
             (Vec3::new(x, ys, z), [z, x], 0.0)
         });
-        m.tube(&wall, &[Vec3::new(x1, ys, z0 - 0.15), Vec3::new(x1, ys, z1 + 0.2)], &|_| 0.012, 8, true);
+        m.tube(
+            &wall,
+            &[Vec3::new(x1, ys, z0 - 0.15), Vec3::new(x1, ys, z1 + 0.2)],
+            &|_| 0.012,
+            8,
+            true,
+        );
         // On it: the oxygen mask box with its doors, the hand mic, the chart
         // holder, a cup holder; the flight deck light controls.
-        let f = Face::new(Vec3::new(x0 + sx * 0.16, yt, EYE.z), Vec3::new(0.0, 0.0, -sx), Vec3::new(sx, 0.0, 0.0));
-        let f = if f.n().y < 0.0 { Face::new(f.o, -f.ax, f.ay) } else { f };
-        m.rbox(&mt(mat::PLASTIC, 0.12, 0.10, 0.085), f.at_h(-0.33, 0.0, 0.04), Vec3::new(0.10, 0.08, 0.04), 0.008, f.rot());
-        label_c(m, &f, -0.33, 0.0, 0.05, 0.012, style::RED_PLACARD, sid("PUSH"), Vec3::new(0.12, 0.10, 0.085));
-        rect(m, &legend_mat(style::BUTTON, sid("TEST"), Vec3::new(0.02, 0.02, 0.02)), f.at_h(-0.33, -0.05, 0.0804), f.ax, f.ay, 0.014, 0.008);
+        let f = Face::new(
+            Vec3::new(x0 + sx * 0.16, yt, EYE.z),
+            Vec3::new(0.0, 0.0, -sx),
+            Vec3::new(sx, 0.0, 0.0),
+        );
+        let f = if f.n().y < 0.0 {
+            Face::new(f.o, -f.ax, f.ay)
+        } else {
+            f
+        };
+        m.rbox(
+            &mt(mat::PLASTIC, 0.12, 0.10, 0.085),
+            f.at_h(-0.33, 0.0, 0.04),
+            Vec3::new(0.10, 0.08, 0.04),
+            0.008,
+            f.rot(),
+        );
+        label_c(
+            m,
+            &f,
+            -0.33,
+            0.0,
+            0.05,
+            0.012,
+            style::RED_PLACARD,
+            sid("PUSH"),
+            Vec3::new(0.12, 0.10, 0.085),
+        );
+        rect(
+            m,
+            &legend_mat(style::BUTTON, sid("TEST"), Vec3::new(0.02, 0.02, 0.02)),
+            f.at_h(-0.33, -0.05, 0.0804),
+            f.ax,
+            f.ay,
+            0.014,
+            0.008,
+        );
         plate(m, &f, 0.05, -0.08, 0.25, 0.08, 800.0 + sx);
-        populate(m, &f.sub(0.0, 0.0, 0.0043), 0.054, -0.076, 0.246, 0.076, 801.0 + sx);
-        m.lathe(&BTN, f.at(-0.15, 0.06), f.n(), &[[0.035, 0.0], [0.035, 0.06], [0.03, 0.06], [0.03, 0.005], [0.0, 0.005]], 18, false);
-        m.rbox(&BTN, f.at_h(-0.10, -0.05, 0.02), Vec3::new(0.025, 0.04, 0.02), 0.012, f.rot());
+        populate(
+            m,
+            &f.sub(0.0, 0.0, 0.0043),
+            0.054,
+            -0.076,
+            0.246,
+            0.076,
+            801.0 + sx,
+        );
+        m.lathe(
+            &BTN,
+            f.at(-0.15, 0.06),
+            f.n(),
+            &[
+                [0.035, 0.0],
+                [0.035, 0.06],
+                [0.03, 0.06],
+                [0.03, 0.005],
+                [0.0, 0.005],
+            ],
+            18,
+            false,
+        );
+        m.rbox(
+            &BTN,
+            f.at_h(-0.10, -0.05, 0.02),
+            Vec3::new(0.025, 0.04, 0.02),
+            0.012,
+            f.rot(),
+        );
     }
 }
 
@@ -2052,20 +4448,89 @@ fn aft_deck(m: &mut Mesh) {
             Vec3::new(if th > PI { -q.x } else { q.x }, q.y.max(FLOOR - 0.01), zb)
         })
         .collect();
-    m.fan(&mt(mat::PLASTIC, 0.40, 0.38, 0.34), Vec3::new(0.0, FLOOR + 1.0, zb), &ring, Vec3::NEG_Z);
-    let door = Face::new(Vec3::new(0.25, FLOOR + 0.98, zb - 0.004), Vec3::NEG_X, Vec3::Y);
-    m.rbox(&mt(mat::PLASTIC, 0.30, 0.28, 0.25), door.at_h(0.0, 0.0, 0.01), Vec3::new(0.40, 0.96, 0.012), 0.01, door.rot());
-    m.rbox(&CHROME, door.at_h(0.32, 0.0, 0.03), Vec3::new(0.012, 0.06, 0.012), 0.008, door.rot());
-    m.disc(&mt(mat::GLASS, 0.0, 0.0, 0.0), door.at_h(0.0, 0.45, 0.023), door.n(), Vec3::Y, 0.03, 16);
-    m.lathe(&CHROME, door.at_h(0.0, 0.45, 0.022), door.n(), &[[0.035, 0.0], [0.035, 0.003], [0.03, 0.004]], 16, false);
+    m.fan(
+        &mt(mat::PLASTIC, 0.40, 0.38, 0.34),
+        Vec3::new(0.0, FLOOR + 1.0, zb),
+        &ring,
+        Vec3::NEG_Z,
+    );
+    let door = Face::new(
+        Vec3::new(0.25, FLOOR + 0.98, zb - 0.004),
+        Vec3::NEG_X,
+        Vec3::Y,
+    );
+    m.rbox(
+        &mt(mat::PLASTIC, 0.30, 0.28, 0.25),
+        door.at_h(0.0, 0.0, 0.01),
+        Vec3::new(0.40, 0.96, 0.012),
+        0.01,
+        door.rot(),
+    );
+    m.rbox(
+        &CHROME,
+        door.at_h(0.32, 0.0, 0.03),
+        Vec3::new(0.012, 0.06, 0.012),
+        0.008,
+        door.rot(),
+    );
+    m.disc(
+        &mt(mat::GLASS, 0.0, 0.0, 0.0),
+        door.at_h(0.0, 0.45, 0.023),
+        door.n(),
+        Vec3::Y,
+        0.03,
+        16,
+    );
+    m.lathe(
+        &CHROME,
+        door.at_h(0.0, 0.45, 0.022),
+        door.n(),
+        &[[0.035, 0.0], [0.035, 0.003], [0.03, 0.004]],
+        16,
+        false,
+    );
 
     // Observer seats: the first behind the pedestal, the second against the right wall.
-    for (k, p) in [Vec3::new(-0.05, FLOOR, EYE.z + 1.12), Vec3::new(0.95, FLOOR, EYE.z + 1.35)].iter().enumerate() {
-        let q = if k == 1 { Quat::from_rotation_y(-0.9) } else { Quat::IDENTITY };
-        m.rbox(&SEAT_SHELL, *p + q * Vec3::new(0.0, 0.22, 0.0), Vec3::new(0.12, 0.2, 0.12), 0.02, q);
-        m.rbox(&SEAT_SIDE, *p + q * Vec3::new(0.0, 0.46, 0.0), Vec3::new(0.22, 0.05, 0.21), 0.04, q);
-        m.rbox(&SEAT_SIDE, *p + q * Vec3::new(0.0, 0.85, 0.2), Vec3::new(0.21, 0.32, 0.05), 0.04, q * Quat::from_rotation_x(0.1));
-        m.rbox(&SEAT_SIDE, *p + q * Vec3::new(0.0, 1.25, 0.24), Vec3::new(0.12, 0.08, 0.05), 0.035, q);
+    for (k, p) in [
+        Vec3::new(-0.05, FLOOR, EYE.z + 1.12),
+        Vec3::new(0.95, FLOOR, EYE.z + 1.35),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let q = if k == 1 {
+            Quat::from_rotation_y(-0.9)
+        } else {
+            Quat::IDENTITY
+        };
+        m.rbox(
+            &SEAT_SHELL,
+            *p + q * Vec3::new(0.0, 0.22, 0.0),
+            Vec3::new(0.12, 0.2, 0.12),
+            0.02,
+            q,
+        );
+        m.rbox(
+            &SEAT_SIDE,
+            *p + q * Vec3::new(0.0, 0.46, 0.0),
+            Vec3::new(0.22, 0.05, 0.21),
+            0.04,
+            q,
+        );
+        m.rbox(
+            &SEAT_SIDE,
+            *p + q * Vec3::new(0.0, 0.85, 0.2),
+            Vec3::new(0.21, 0.32, 0.05),
+            0.04,
+            q * Quat::from_rotation_x(0.1),
+        );
+        m.rbox(
+            &SEAT_SIDE,
+            *p + q * Vec3::new(0.0, 1.25, 0.24),
+            Vec3::new(0.12, 0.08, 0.05),
+            0.035,
+            q,
+        );
     }
     // The circuit breaker panels on the walls behind each pilot.
     for sx in [-1.0f32, 1.0] {
@@ -2075,48 +4540,181 @@ fn aft_deck(m: &mut Mesh) {
         let zc = (za + zb2) * 0.5;
         let yc = (y0 + y1) * 0.5;
         let xw = lin_x(zc, yc) - 0.03;
-        let f = Face::new(Vec3::new(sx * xw, yc, zc), Vec3::new(0.0, 0.0, -sx), Vec3::Y);
-        let f = if f.n().x * sx > 0.0 { Face::new(f.o, -f.ax, f.ay) } else { f };
+        let f = Face::new(
+            Vec3::new(sx * xw, yc, zc),
+            Vec3::new(0.0, 0.0, -sx),
+            Vec3::Y,
+        );
+        let f = if f.n().x * sx > 0.0 {
+            Face::new(f.o, -f.ax, f.ay)
+        } else {
+            f
+        };
         let hz = (zb2 - za) * 0.5;
         let hy = (y1 - y0) * 0.5;
-        m.rbox(&PANEL_DK, f.at_h(0.0, 0.0, -0.02), Vec3::new(hz, hy, 0.025), 0.006, f.rot());
+        m.rbox(
+            &PANEL_DK,
+            f.at_h(0.0, 0.0, -0.02),
+            Vec3::new(hz, hy, 0.025),
+            0.006,
+            f.rot(),
+        );
         for r in 0..3 {
-            let (v0, v1) = (-hy + r as f32 * hy * 2.0 / 3.0, -hy + (r + 1) as f32 * hy * 2.0 / 3.0);
+            let (v0, v1) = (
+                -hy + r as f32 * hy * 2.0 / 3.0,
+                -hy + (r + 1) as f32 * hy * 2.0 / 3.0,
+            );
             plate(m, &f, -hz, v0, hz, v1, 900.0 + sx * 10.0 + r as f32);
-            breakers(m, &f.sub(0.0, 0.0, 0.0043), -hz + 0.015, v0 + 0.012, hz - 0.015, v1 - 0.012, 910.0 + sx + r as f32);
+            breakers(
+                m,
+                &f.sub(0.0, 0.0, 0.0043),
+                -hz + 0.015,
+                v0 + 0.012,
+                hz - 0.015,
+                v1 - 0.012,
+                910.0 + sx + r as f32,
+            );
         }
     }
     // On the bulkhead: a halon extinguisher in its bracket, the crash axe,
     // a portable oxygen bottle, smoke goggles; placards by the door.
     let zf = zb - 0.06;
     let ext = Vec3::new(-0.55, FLOOR + 0.55, zf);
-    m.tube(&mt(mat::PAINT, 0.42, 0.03, 0.02), &[ext, ext + Vec3::Y * 0.32], &|t| if t > 0.9 { 0.04 } else { 0.055 }, 18, true);
-    m.lathe(&BTN, ext + Vec3::Y * 0.32, Vec3::Y, &[[0.03, 0.0], [0.02, 0.05], [0.012, 0.06]], 12, true);
-    m.rbox(&BTN, ext + Vec3::new(0.02, 0.39, 0.0), Vec3::new(0.04, 0.008, 0.012), 0.004, Quat::IDENTITY);
+    m.tube(
+        &mt(mat::PAINT, 0.42, 0.03, 0.02),
+        &[ext, ext + Vec3::Y * 0.32],
+        &|t| if t > 0.9 { 0.04 } else { 0.055 },
+        18,
+        true,
+    );
+    m.lathe(
+        &BTN,
+        ext + Vec3::Y * 0.32,
+        Vec3::Y,
+        &[[0.03, 0.0], [0.02, 0.05], [0.012, 0.06]],
+        12,
+        true,
+    );
+    m.rbox(
+        &BTN,
+        ext + Vec3::new(0.02, 0.39, 0.0),
+        Vec3::new(0.04, 0.008, 0.012),
+        0.004,
+        Quat::IDENTITY,
+    );
     for t in [0.08f32, 0.24] {
-        m.rbox(&ALU, ext + Vec3::new(0.0, t, 0.03), Vec3::new(0.065, 0.012, 0.012), 0.004, Quat::IDENTITY);
+        m.rbox(
+            &ALU,
+            ext + Vec3::new(0.0, t, 0.03),
+            Vec3::new(0.065, 0.012, 0.012),
+            0.004,
+            Quat::IDENTITY,
+        );
     }
-    rect(m, &legend_mat(style::PLACARD, 0, Vec3::new(0.85, 0.83, 0.75)), ext + Vec3::new(0.0, 0.17, -0.057), Vec3::NEG_X, Vec3::Y, 0.03, 0.05);
+    rect(
+        m,
+        &legend_mat(style::PLACARD, 0, Vec3::new(0.85, 0.83, 0.75)),
+        ext + Vec3::new(0.0, 0.17, -0.057),
+        Vec3::NEG_X,
+        Vec3::Y,
+        0.03,
+        0.05,
+    );
     let axe = Vec3::new(-0.80, FLOOR + 0.9, zf + 0.01);
-    m.tube(&mt(mat::PAINT, 0.6, 0.45, 0.05), &[axe, axe + Vec3::new(0.0, 0.38, 0.0)], &|_| 0.014, 10, true);
-    m.rbox(&mt(mat::PAINT, 0.45, 0.03, 0.02), axe + Vec3::new(0.05, 0.36, 0.0), Vec3::new(0.06, 0.035, 0.006), 0.004, Quat::IDENTITY);
+    m.tube(
+        &mt(mat::PAINT, 0.6, 0.45, 0.05),
+        &[axe, axe + Vec3::new(0.0, 0.38, 0.0)],
+        &|_| 0.014,
+        10,
+        true,
+    );
+    m.rbox(
+        &mt(mat::PAINT, 0.45, 0.03, 0.02),
+        axe + Vec3::new(0.05, 0.36, 0.0),
+        Vec3::new(0.06, 0.035, 0.006),
+        0.004,
+        Quat::IDENTITY,
+    );
     let ox = Vec3::new(0.62, FLOOR + 0.5, zf);
-    m.tube(&mt(mat::PAINT, 0.12, 0.35, 0.12), &[ox, ox + Vec3::Y * 0.36], &|t| if t > 0.92 { 0.03 } else { 0.05 }, 18, true);
-    m.lathe(&CHROME, ox + Vec3::Y * 0.36, Vec3::Y, &[[0.022, 0.0], [0.022, 0.03], [0.0, 0.035]], 10, true);
+    m.tube(
+        &mt(mat::PAINT, 0.12, 0.35, 0.12),
+        &[ox, ox + Vec3::Y * 0.36],
+        &|t| if t > 0.92 { 0.03 } else { 0.05 },
+        18,
+        true,
+    );
+    m.lathe(
+        &CHROME,
+        ox + Vec3::Y * 0.36,
+        Vec3::Y,
+        &[[0.022, 0.0], [0.022, 0.03], [0.0, 0.035]],
+        10,
+        true,
+    );
     for (k, y) in [1.55f32, 1.45].iter().enumerate() {
-        rect(m, &legend_mat(if k == 0 { style::RED_PLACARD } else { style::TEXT }, 0, Vec3::new(0.82, 0.8, 0.74)), Vec3::new(0.25, FLOOR + y, zb - 0.02), Vec3::NEG_X, Vec3::Y, 0.09, 0.025);
+        rect(
+            m,
+            &legend_mat(
+                if k == 0 {
+                    style::RED_PLACARD
+                } else {
+                    style::TEXT
+                },
+                0,
+                Vec3::new(0.82, 0.8, 0.74),
+            ),
+            Vec3::new(0.25, FLOOR + y, zb - 0.02),
+            Vec3::NEG_X,
+            Vec3::Y,
+            0.09,
+            0.025,
+        );
     }
     // Door frame trim.
     let dz = zb - 0.004;
-    for (a, b) in [(Vec3::new(-0.17, FLOOR, dz), Vec3::new(-0.17, FLOOR + 1.96, dz)), (Vec3::new(0.67, FLOOR, dz), Vec3::new(0.67, FLOOR + 1.96, dz)), (Vec3::new(-0.17, FLOOR + 1.96, dz), Vec3::new(0.67, FLOOR + 1.96, dz))] {
-        m.tube(&mt(mat::PLASTIC, 0.22, 0.21, 0.19), &[a, b], &|_| 0.02, 8, true);
+    for (a, b) in [
+        (
+            Vec3::new(-0.17, FLOOR, dz),
+            Vec3::new(-0.17, FLOOR + 1.96, dz),
+        ),
+        (
+            Vec3::new(0.67, FLOOR, dz),
+            Vec3::new(0.67, FLOOR + 1.96, dz),
+        ),
+        (
+            Vec3::new(-0.17, FLOOR + 1.96, dz),
+            Vec3::new(0.67, FLOOR + 1.96, dz),
+        ),
+    ] {
+        m.tube(
+            &mt(mat::PLASTIC, 0.22, 0.21, 0.19),
+            &[a, b],
+            &|_| 0.02,
+            8,
+            true,
+        );
     }
     // Life vests and flashlights in pouches under the observer seats.
-    m.rbox(&mt(mat::FABRIC, 0.55, 0.42, 0.05), Vec3::new(-0.05, FLOOR + 0.06, EYE.z + 1.12), Vec3::new(0.12, 0.05, 0.08), 0.03, Quat::IDENTITY);
+    m.rbox(
+        &mt(mat::FABRIC, 0.55, 0.42, 0.05),
+        Vec3::new(-0.05, FLOOR + 0.06, EYE.z + 1.12),
+        Vec3::new(0.12, 0.05, 0.08),
+        0.03,
+        Quat::IDENTITY,
+    );
     // Coat hooks and a flashlight on the left wall behind the captain.
     let z = EYE.z + 0.75;
     let x = -(lin_x(z, FLOOR + 1.6) - 0.02);
-    m.tube(&mt(mat::PAINT, 0.4, 0.38, 0.05), &[Vec3::new(x + 0.03, FLOOR + 1.55, z), Vec3::new(x + 0.03, FLOOR + 1.75, z)], &|_| 0.02, 12, true);
+    m.tube(
+        &mt(mat::PAINT, 0.4, 0.38, 0.05),
+        &[
+            Vec3::new(x + 0.03, FLOOR + 1.55, z),
+            Vec3::new(x + 0.03, FLOOR + 1.75, z),
+        ],
+        &|_| 0.02,
+        12,
+        true,
+    );
 }
 
 // ---------------------------------------------------------------- outside
@@ -2134,7 +4732,11 @@ pub fn wipers(m: &mut Mesh) {
             let (mut lo, mut hi) = (0.0f32, PI);
             for _ in 0..24 {
                 let m = (lo + hi) * 0.5;
-                if sec_pt(&s, m).y > p.y { lo = m } else { hi = m }
+                if sec_pt(&s, m).y > p.y {
+                    lo = m
+                } else {
+                    hi = m
+                }
             }
             (lo + hi) * 0.5
         };
@@ -2144,10 +4746,23 @@ pub fn wipers(m: &mut Mesh) {
     let mut w = Mesh::default();
     let piv = on_skin(0.86, 0.0);
     let n = (on_skin(0.86, 0.1) - piv).normalize();
-    w.lathe(&BLACK, piv, n, &[[0.035, 0.0], [0.035, 0.03], [0.025, 0.045], [0.0, 0.05]], 14, false);
-    let arm: Vec<Vec3> = [0.84, 0.6, 0.35, 0.18].iter().map(|&t| on_skin(t, 0.045)).collect();
+    w.lathe(
+        &BLACK,
+        piv,
+        n,
+        &[[0.035, 0.0], [0.035, 0.03], [0.025, 0.045], [0.0, 0.05]],
+        14,
+        false,
+    );
+    let arm: Vec<Vec3> = [0.84, 0.6, 0.35, 0.18]
+        .iter()
+        .map(|&t| on_skin(t, 0.045))
+        .collect();
     w.tube(&BLACK, &arm, &|t| 0.012 - 0.004 * t, 8, true);
-    let blade: Vec<Vec3> = [0.66, 0.4, 0.14, 0.06].iter().map(|&t| on_skin(t, 0.022)).collect();
+    let blade: Vec<Vec3> = [0.66, 0.4, 0.14, 0.06]
+        .iter()
+        .map(|&t| on_skin(t, 0.022))
+        .collect();
     w.tube(&RUBBER, &blade, &|_| 0.009, 6, true);
     m.append(&w.mirror_x());
     m.append(&w);
@@ -2205,9 +4820,22 @@ mod tests {
 
     #[test]
     fn plane_shader_validates() {
-        let src = format!("{}\n{}\n{}\n{}\n{}", include_str!("../../shaders/common.wgsl"), include_str!("../../shaders/plane.wgsl"), strings_wgsl(), include_str!("../../shaders/deck747.wgsl"), include_str!("../../shaders/pit18.wgsl"));
-        let m = naga::front::wgsl::parse_str(&src).unwrap_or_else(|e| panic!("{}", e.emit_to_string(&src)));
-        if let Err(e) = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all()).validate(&m) {
+        let src = format!(
+            "{}\n{}\n{}\n{}\n{}",
+            include_str!("../../shaders/common.wgsl"),
+            include_str!("../../shaders/plane.wgsl"),
+            strings_wgsl(),
+            include_str!("../../shaders/deck747.wgsl"),
+            include_str!("../../shaders/pit18.wgsl")
+        );
+        let m = naga::front::wgsl::parse_str(&src)
+            .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&src)));
+        if let Err(e) = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&m)
+        {
             panic!("{}", e.emit_to_string(&src));
         }
     }
@@ -2234,9 +4862,15 @@ mod tests {
                 break;
             }
         }
-        println!("captain sees out from {:.1} to {:.1} deg", down.to_degrees(), up.to_degrees());
-        assert!(!sees_inside(EYE, Vec3::NEG_Z), "straight ahead is not out the windshield");
+        println!(
+            "captain sees out from {:.1} to {:.1} deg",
+            down.to_degrees(),
+            up.to_degrees()
+        );
+        assert!(
+            !sees_inside(EYE, Vec3::NEG_Z),
+            "straight ahead is not out the windshield"
+        );
         assert!(down.to_degrees() < -10.0);
     }
 }
-

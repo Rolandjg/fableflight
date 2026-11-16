@@ -3,7 +3,7 @@
 use crate::fetch::Fetcher;
 use crate::geo::{self, TileId};
 use crate::mvt;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use bytemuck::{Pod, Zeroable};
 use glam::DVec3;
 use parking_lot::{Condvar, Mutex};
@@ -34,7 +34,8 @@ impl ElevTile {
         let (x1, y1) = ((x0 + 1).min(w - 1), (y0 + 1).min(w - 1));
         let (fx, fy) = ((x - x0 as f64) as f32, (y - y0 as f64) as f32);
         let g = |x: usize, y: usize| self.h[y * w + x];
-        (g(x0, y0) * (1.0 - fx) + g(x1, y0) * fx) * (1.0 - fy) + (g(x0, y1) * (1.0 - fx) + g(x1, y1) * fx) * fy
+        (g(x0, y0) * (1.0 - fx) + g(x1, y0) * fx) * (1.0 - fy)
+            + (g(x0, y1) * (1.0 - fx) + g(x1, y1) * fx) * fy
     }
 }
 
@@ -132,7 +133,11 @@ fn parse_colour(s: &str) -> Option<[u8; 3]> {
         let v = u32::from_str_radix(h, 16).ok()?;
         return match h.len() {
             6 => Some([(v >> 16) as u8, (v >> 8) as u8, v as u8]),
-            3 => Some([((v >> 8) & 15) as u8 * 17, ((v >> 4) & 15) as u8 * 17, (v & 15) as u8 * 17]),
+            3 => Some([
+                ((v >> 8) & 15) as u8 * 17,
+                ((v >> 4) & 15) as u8 * 17,
+                (v & 15) as u8 * 17,
+            ]),
             _ => None,
         };
     }
@@ -164,7 +169,11 @@ struct Lru<T> {
 }
 impl<T> Lru<T> {
     fn new(cap: usize) -> Self {
-        Self { map: HashMap::new(), tick: 0, cap }
+        Self {
+            map: HashMap::new(),
+            tick: 0,
+            cap,
+        }
     }
     fn get(&mut self, id: TileId) -> Option<Arc<T>> {
         self.tick += 1;
@@ -200,24 +209,51 @@ pub struct Sources {
 
 impl Sources {
     pub fn new(fetch: Fetcher, imagery_url: String) -> Self {
-        Self::with_google(fetch, imagery_url, Arc::new(crate::gmaps::Google::disabled()))
+        Self::with_google(
+            fetch,
+            imagery_url,
+            Arc::new(crate::gmaps::Google::disabled()),
+        )
     }
 
-    pub fn with_google(fetch: Fetcher, imagery_url: String, google: Arc<crate::gmaps::Google>) -> Self {
-        Self { fetch, elev: Mutex::new(Lru::new(96)), raw: Mutex::new(Lru::new(160)), fields: Mutex::new(HashMap::new()), vec: Mutex::new(Lru::new(96)), vec_url: Mutex::new(None), imagery_url, google }
+    pub fn with_google(
+        fetch: Fetcher,
+        imagery_url: String,
+        google: Arc<crate::gmaps::Google>,
+    ) -> Self {
+        Self {
+            fetch,
+            elev: Mutex::new(Lru::new(96)),
+            raw: Mutex::new(Lru::new(160)),
+            fields: Mutex::new(HashMap::new()),
+            vec: Mutex::new(Lru::new(96)),
+            vec_url: Mutex::new(None),
+            imagery_url,
+            google,
+        }
     }
 
     /// Satellite image for a tile: Google's when that is on (and has the
     /// tile), the default imagery otherwise.
     pub fn imagery(&self, id: TileId) -> Result<image::RgbaImage> {
         if self.google.enabled() && !self.fetch.offline {
-            match self.google.tile(&self.fetch.root, id.z, id.x, id.y).and_then(|d| Ok(image::load_from_memory(&d)?.to_rgba8())) {
+            match self
+                .google
+                .tile(&self.fetch.root, id.z, id.x, id.y)
+                .and_then(|d| Ok(image::load_from_memory(&d)?.to_rgba8()))
+            {
                 Ok(img) => return Ok(img),
                 Err(e) => log::debug!("google tile {id:?}: {e}"),
             }
         }
-        let url = self.imagery_url.replace("{z}", &id.z.to_string()).replace("{x}", &id.x.to_string()).replace("{y}", &id.y.to_string());
-        let data = self.fetch.get_cached(&format!("img/{}/{}/{}.jpg", id.z, id.x, id.y), &url)?;
+        let url = self
+            .imagery_url
+            .replace("{z}", &id.z.to_string())
+            .replace("{x}", &id.x.to_string())
+            .replace("{y}", &id.y.to_string());
+        let data = self
+            .fetch
+            .get_cached(&format!("img/{}/{}/{}.jpg", id.z, id.x, id.y), &url)?;
         Ok(image::load_from_memory(&data)?.to_rgba8())
     }
 
@@ -226,11 +262,19 @@ impl Sources {
         if let Some(t) = self.raw.lock().get(id) {
             return Ok(t);
         }
-        let url = format!("https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{}/{}/{}.png", id.z, id.x, id.y);
-        let data = self.fetch.get_cached(&format!("elev/{}/{}/{}.png", id.z, id.x, id.y), &url)?;
+        let url = format!(
+            "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{}/{}/{}.png",
+            id.z, id.x, id.y
+        );
+        let data = self
+            .fetch
+            .get_cached(&format!("elev/{}/{}/{}.png", id.z, id.x, id.y), &url)?;
         let img = image::load_from_memory(&data)?.to_rgb8();
         let n = img.width() as usize;
-        let h = img.pixels().map(|p| p[0] as f32 * 256.0 + p[1] as f32 + p[2] as f32 / 256.0 - 32768.0).collect();
+        let h = img
+            .pixels()
+            .map(|p| p[0] as f32 * 256.0 + p[1] as f32 + p[2] as f32 / 256.0 - 32768.0)
+            .collect();
         let t = Arc::new(ElevTile { h, n, pad: 0 });
         self.raw.lock().put(id, t.clone());
         Ok(t)
@@ -260,12 +304,29 @@ impl Sources {
         let data = match std::fs::read(self.fetch.root.join(&key)) {
             Ok(d) if !d.is_empty() => d,
             _ => {
-                let url = self.vec_template()?.replace("{z}", &id.z.to_string()).replace("{x}", &id.x.to_string()).replace("{y}", &id.y.to_string());
+                let url = self
+                    .vec_template()?
+                    .replace("{z}", &id.z.to_string())
+                    .replace("{x}", &id.x.to_string())
+                    .replace("{y}", &id.y.to_string());
                 self.fetch.get_cached(&key, &url)?
             }
         };
-        let mut layers = mvt::decode(&data, &["water", "building", "transportation", "landcover", "landuse", "aeroway"]);
-        let mut vt = VecTile { extent: 4096.0, ..Default::default() };
+        let mut layers = mvt::decode(
+            &data,
+            &[
+                "water",
+                "building",
+                "transportation",
+                "landcover",
+                "landuse",
+                "aeroway",
+            ],
+        );
+        let mut vt = VecTile {
+            extent: 4096.0,
+            ..Default::default()
+        };
         if let Some(l) = layers.remove("water") {
             vt.extent = l.extent;
             for f in l.features {
@@ -289,9 +350,21 @@ impl Sources {
                 if f.props.get("hide_3d").is_some() {
                     continue;
                 }
-                let height = f.props.get("render_height").and_then(|v| v.num()).unwrap_or(6.0) as f32;
-                let min_height = f.props.get("render_min_height").and_then(|v| v.num()).unwrap_or(0.0) as f32;
-                let colour = f.props.get("colour").and_then(|v| v.str()).and_then(parse_colour);
+                let height = f
+                    .props
+                    .get("render_height")
+                    .and_then(|v| v.num())
+                    .unwrap_or(6.0) as f32;
+                let min_height = f
+                    .props
+                    .get("render_min_height")
+                    .and_then(|v| v.num())
+                    .unwrap_or(0.0) as f32;
+                let colour = f
+                    .props
+                    .get("colour")
+                    .and_then(|v| v.str())
+                    .and_then(parse_colour);
                 // Split multipolygons: a ring wound like the first one starts a new polygon.
                 let sign = mvt::signed_area(&f.rings[0]).signum();
                 let mut cur: Vec<Vec<[f32; 2]>> = Vec::new();
@@ -300,12 +373,22 @@ impl Sources {
                         continue;
                     }
                     if mvt::signed_area(&r).signum() == sign && !cur.is_empty() {
-                        vt.buildings.push(BuildingPoly { rings: std::mem::take(&mut cur), height, min_height, colour });
+                        vt.buildings.push(BuildingPoly {
+                            rings: std::mem::take(&mut cur),
+                            height,
+                            min_height,
+                            colour,
+                        });
                     }
                     cur.push(r);
                 }
                 if !cur.is_empty() {
-                    vt.buildings.push(BuildingPoly { rings: cur, height, min_height, colour });
+                    vt.buildings.push(BuildingPoly {
+                        rings: cur,
+                        height,
+                        min_height,
+                        colour,
+                    });
                 }
             }
         }
@@ -340,7 +423,8 @@ impl Sources {
                     _ => 0,
                 };
                 let num = |k: &str| f.props.get(k).and_then(|v| v.num()).unwrap_or(0.0);
-                let (oneway, ramp, layer) = (num("oneway") != 0.0, num("ramp") != 0.0, num("layer") as i8);
+                let (oneway, ramp, layer) =
+                    (num("oneway") != 0.0, num("ramp") != 0.0, num("layer") as i8);
                 let rev = num("oneway") < 0.0;
                 for mut pts in f.rings {
                     if pts.len() < 2 {
@@ -352,12 +436,22 @@ impl Sources {
                     if rev {
                         pts.reverse();
                     }
-                    vt.roads.push(RoadLine { pts, class, brunnel, oneway, ramp, layer, sub });
+                    vt.roads.push(RoadLine {
+                        pts,
+                        class,
+                        brunnel,
+                        oneway,
+                        ramp,
+                        layer,
+                        sub,
+                    });
                 }
             }
         }
         for (name, is_cover) in [("landcover", true), ("landuse", false)] {
-            let Some(l) = layers.remove(name) else { continue };
+            let Some(l) = layers.remove(name) else {
+                continue;
+            };
             let k = vt.extent / l.extent;
             for f in l.features {
                 if f.kind != 3 {
@@ -385,7 +479,11 @@ impl Sources {
                         _ => continue,
                     }
                 };
-                let rings = f.rings.into_iter().map(|r| r.into_iter().map(|p| [p[0] * k, p[1] * k]).collect()).collect();
+                let rings = f
+                    .rings
+                    .into_iter()
+                    .map(|r| r.into_iter().map(|p| [p[0] * k, p[1] * k]).collect())
+                    .collect();
                 if is_cover {
                     vt.landcover.push((kind, rings));
                 } else {
@@ -399,8 +497,15 @@ impl Sources {
             let unit_m = id.width_m() / vt.extent as f64;
             for f in l.features {
                 let class = f.props.get("class").and_then(|v| v.str()).unwrap_or("");
-                let name = f.props.get("ref").and_then(|v| v.str()).unwrap_or("").to_string();
-                let scale = |r: Vec<[f32; 2]>| -> Vec<[f32; 2]> { r.into_iter().map(|p| [p[0] * k, p[1] * k]).collect() };
+                let name = f
+                    .props
+                    .get("ref")
+                    .and_then(|v| v.str())
+                    .unwrap_or("")
+                    .to_string();
+                let scale = |r: Vec<[f32; 2]>| -> Vec<[f32; 2]> {
+                    r.into_iter().map(|p| [p[0] * k, p[1] * k]).collect()
+                };
                 match (f.kind, class) {
                     (2, "runway") | (2, "taxiway") => {
                         for pts in f.rings {
@@ -409,20 +514,50 @@ impl Sources {
                             }
                             let pts = scale(pts);
                             let (a, b) = (pts[0], pts[pts.len() - 1]);
-                            let (lat, lon) = id.lat_lon(((a[0] + b[0]) * 0.5 / vt.extent) as f64, ((a[1] + b[1]) * 0.5 / vt.extent) as f64);
+                            let (lat, lon) = id.lat_lon(
+                                ((a[0] + b[0]) * 0.5 / vt.extent) as f64,
+                                ((a[1] + b[1]) * 0.5 / vt.extent) as f64,
+                            );
                             let (lat, lon) = (lat.to_degrees(), lon.to_degrees());
                             if class == "runway" {
-                                let brg = ((b[0] - a[0]) as f64 * unit_m).atan2(-(b[1] - a[1]) as f64 * unit_m).to_degrees() as f32;
+                                let brg = ((b[0] - a[0]) as f64 * unit_m)
+                                    .atan2(-(b[1] - a[1]) as f64 * unit_m)
+                                    .to_degrees() as f32;
                                 let m = db.runway_meta(lat, lon, brg, &name);
-                                vt.aero_lines.push(AeroLine { pts, runway: true, name: name.clone(), width: m.width, paved: m.paved });
+                                vt.aero_lines.push(AeroLine {
+                                    pts,
+                                    runway: true,
+                                    name: name.clone(),
+                                    width: m.width,
+                                    paved: m.paved,
+                                });
                             } else {
-                                let kind = db.owner(lat, lon).map(|i| db.apts[i as usize].kind).unwrap_or(0);
-                                vt.aero_lines.push(AeroLine { pts, runway: false, name: name.clone(), width: crate::airports::taxi_width(kind), paved: true });
+                                let kind = db
+                                    .owner(lat, lon)
+                                    .map(|i| db.apts[i as usize].kind)
+                                    .unwrap_or(0);
+                                vt.aero_lines.push(AeroLine {
+                                    pts,
+                                    runway: false,
+                                    name: name.clone(),
+                                    width: crate::airports::taxi_width(kind),
+                                    paved: true,
+                                });
                             }
                         }
                     }
-                    (3, "apron") | (3, "runway") | (3, "taxiway") | (3, "helipad") | (3, "aerodrome") => {
-                        let kind = match class { "apron" => AP_APRON, "runway" => AP_RUNWAY, "taxiway" => AP_TAXIWAY, "aerodrome" => AP_GROUNDS, _ => AP_HELIPAD };
+                    (3, "apron")
+                    | (3, "runway")
+                    | (3, "taxiway")
+                    | (3, "helipad")
+                    | (3, "aerodrome") => {
+                        let kind = match class {
+                            "apron" => AP_APRON,
+                            "runway" => AP_RUNWAY,
+                            "taxiway" => AP_TAXIWAY,
+                            "aerodrome" => AP_GROUNDS,
+                            _ => AP_HELIPAD,
+                        };
                         if f.rings.is_empty() {
                             continue;
                         }
@@ -467,12 +602,22 @@ impl Sources {
         // step at the border).
         let aero = id.z == DATA_ZOOM && {
             let size = 1i64 << id.z;
-            (-1..=1i64).any(|dy| (-1..=1i64).any(|dx| {
-                let (x, y) = ((id.x as i64 + dx).rem_euclid(size), id.y as i64 + dy);
-                y >= 0 && y < size && self.vector(TileId::new(id.z, x as u32, y as u32)).is_ok_and(|vt| vt.has_aero())
-            }))
+            (-1..=1i64).any(|dy| {
+                (-1..=1i64).any(|dx| {
+                    let (x, y) = ((id.x as i64 + dx).rem_euclid(size), id.y as i64 + dy);
+                    y >= 0
+                        && y < size
+                        && self
+                            .vector(TileId::new(id.z, x as u32, y as u32))
+                            .is_ok_and(|vt| vt.has_aero())
+                })
+            })
         };
-        let t = Arc::new(if aero { self.level_airfield(id, &raw) } else { self.padded(id, &raw) });
+        let t = Arc::new(if aero {
+            self.level_airfield(id, &raw)
+        } else {
+            self.padded(id, &raw)
+        });
         self.elev.lock().put(id, t.clone());
         Ok(t)
     }
@@ -497,15 +642,27 @@ impl Sources {
         let mut runs: Vec<(glam::Vec2, glam::Vec2, f32)> = Vec::new();
         for ty in 0..3usize {
             for tx in 0..3usize {
-                let (x, y) = ((id.x as i64 + tx as i64 - 1).rem_euclid(size), id.y as i64 + ty as i64 - 1);
+                let (x, y) = (
+                    (id.x as i64 + tx as i64 - 1).rem_euclid(size),
+                    id.y as i64 + ty as i64 - 1,
+                );
                 if y < 0 || y >= size {
                     continue;
                 }
                 let nid = TileId::new(id.z, x as u32, y as u32);
-                let e = if nid == id { None } else { self.elev_raw(nid).ok() };
-                let e: &ElevTile = match &e { Some(e) if e.n == n => e, _ if nid == id => raw, _ => continue };
+                let e = if nid == id {
+                    None
+                } else {
+                    self.elev_raw(nid).ok()
+                };
+                let e: &ElevTile = match &e {
+                    Some(e) if e.n == n => e,
+                    _ if nid == id => raw,
+                    _ => continue,
+                };
                 for j in 0..n {
-                    h[(ty * n + j) * m + tx * n..(ty * n + j) * m + tx * n + n].copy_from_slice(&e.h[j * n..(j + 1) * n]);
+                    h[(ty * n + j) * m + tx * n..(ty * n + j) * m + tx * n + n]
+                        .copy_from_slice(&e.h[j * n..(j + 1) * n]);
                 }
                 let Ok(vt) = self.vector(nid) else { continue };
                 if !vt.has_aero() {
@@ -514,7 +671,10 @@ impl Sources {
                 let mut tile = vec![0u8; n * n];
                 let k = n as f32 / vt.extent;
                 for (_, rings) in vt.aero_polys.iter().filter(|p| p.0 != AP_GROUNDS) {
-                    let px: Vec<Vec<[f32; 2]>> = rings.iter().map(|r| r.iter().map(|p| [p[0] * k, p[1] * k]).collect()).collect();
+                    let px: Vec<Vec<[f32; 2]>> = rings
+                        .iter()
+                        .map(|r| r.iter().map(|p| [p[0] * k, p[1] * k]).collect())
+                        .collect();
                     mvt::fill_rings(&mut tile, n, n, &px, 1);
                 }
                 for l in &vt.aero_lines {
@@ -522,7 +682,11 @@ impl Sources {
                     thick_line(&l.pts, k, hw, n, |i| tile[i] = 1);
                     if l.runway {
                         let o = glam::Vec2::new((tx * n) as f32, (ty * n) as f32);
-                        runs.push((o + glam::Vec2::from(l.pts[0]) * k, o + glam::Vec2::from(l.pts[l.pts.len() - 1]) * k, l.width));
+                        runs.push((
+                            o + glam::Vec2::from(l.pts[0]) * k,
+                            o + glam::Vec2::from(l.pts[l.pts.len() - 1]) * k,
+                            l.width,
+                        ));
                     }
                 }
                 for j in 0..n {
@@ -541,7 +705,8 @@ impl Sources {
                 for horiz in [true, false] {
                     for line in 0..m {
                         let at = |k: usize| if horiz { line * m + k } else { k * m + line };
-                        let mut s: f32 = (0..=r.min(m - 1)).map(|k| a[at(k)]).sum::<f32>() + a[at(0)] * r as f32;
+                        let mut s: f32 =
+                            (0..=r.min(m - 1)).map(|k| a[at(k)]).sum::<f32>() + a[at(0)] * r as f32;
                         for k in 0..m {
                             b[at(k)] = s / w;
                             let add = a[at((k + r + 1).min(m - 1))];
@@ -577,7 +742,11 @@ impl Sources {
             let hit = joined.iter_mut().find(|j| {
                 let jd = (j.1 - j.0).normalize_or_zero();
                 let (s0, s1) = ((a - j.0).dot(jd), (b - j.0).dot(jd));
-                jd.dot(d).abs() > 0.997 && (a - j.0).perp_dot(jd).abs() < 2.5 && (b - j.0).perp_dot(jd).abs() < 2.5 && s0.min(s1) < (j.1 - j.0).length() + 8.0 && s0.max(s1) > -8.0
+                jd.dot(d).abs() > 0.997
+                    && (a - j.0).perp_dot(jd).abs() < 2.5
+                    && (b - j.0).perp_dot(jd).abs() < 2.5
+                    && s0.min(s1) < (j.1 - j.0).length() + 8.0
+                    && s0.max(s1) > -8.0
             });
             match hit {
                 Some(j) => {
@@ -590,10 +759,14 @@ impl Sources {
             }
         }
         let sample = |f: &[f32], p: glam::Vec2| {
-            let (x, y) = ((p.x - 0.5).clamp(0.0, m as f32 - 1.001), (p.y - 0.5).clamp(0.0, m as f32 - 1.001));
+            let (x, y) = (
+                (p.x - 0.5).clamp(0.0, m as f32 - 1.001),
+                (p.y - 0.5).clamp(0.0, m as f32 - 1.001),
+            );
             let (x0, y0) = (x as usize, y as usize);
             let (fx, fy) = (x - x0 as f32, y - y0 as f32);
-            (f[y0 * m + x0] * (1.0 - fx) + f[y0 * m + x0 + 1] * fx) * (1.0 - fy) + (f[(y0 + 1) * m + x0] * (1.0 - fx) + f[(y0 + 1) * m + x0 + 1] * fx) * fy
+            (f[y0 * m + x0] * (1.0 - fx) + f[y0 * m + x0 + 1] * fx) * (1.0 - fy)
+                + (f[(y0 + 1) * m + x0] * (1.0 - fx) + f[(y0 + 1) * m + x0 + 1] * fx) * fy
         };
         let sigma = 250.0 / px_m;
         for (a, b, width) in joined {
@@ -603,27 +776,39 @@ impl Sources {
             }
             let d = (b - a) / len;
             let ns = len.ceil() as usize + 1;
-            let mut prof: Vec<f32> = (0..ns).map(|k| sample(&lev, a + d * (k as f32).min(len))).collect();
+            let mut prof: Vec<f32> = (0..ns)
+                .map(|k| sample(&lev, a + d * (k as f32).min(len)))
+                .collect();
             // The steady slope stays (an altiport's runway is a ramp); only
             // what departs from it is smoothed.
             let (mx, my) = ((ns - 1) as f32 * 0.5, prof.iter().sum::<f32>() / ns as f32);
-            let slope = prof.iter().enumerate().map(|(k, v)| (k as f32 - mx) * (v - my)).sum::<f32>() / (0..ns).map(|k| (k as f32 - mx).powi(2)).sum::<f32>().max(1.0);
+            let slope = prof
+                .iter()
+                .enumerate()
+                .map(|(k, v)| (k as f32 - mx) * (v - my))
+                .sum::<f32>()
+                / (0..ns)
+                    .map(|k| (k as f32 - mx).powi(2))
+                    .sum::<f32>()
+                    .max(1.0);
             let line = |k: usize| my + slope * (k as f32 - mx);
             for (k, v) in prof.iter_mut().enumerate() {
                 *v -= line(k);
             }
             let reach = (sigma * 3.0) as i64;
-            let smooth: Vec<f32> = (0..ns as i64).map(|k| {
-                let (mut s, mut ws) = (0.0, 0.0);
-                for o in -reach..=reach {
-                    if k + o >= 0 && k + o < ns as i64 {
-                        let w = (-0.5 * (o as f32 / sigma).powi(2)).exp();
-                        s += prof[(k + o) as usize] * w;
-                        ws += w;
+            let smooth: Vec<f32> = (0..ns as i64)
+                .map(|k| {
+                    let (mut s, mut ws) = (0.0, 0.0);
+                    for o in -reach..=reach {
+                        if k + o >= 0 && k + o < ns as i64 {
+                            let w = (-0.5 * (o as f32 / sigma).powi(2)).exp();
+                            s += prof[(k + o) as usize] * w;
+                            ws += w;
+                        }
                     }
-                }
-                s / ws + line(k as usize)
-            }).collect();
+                    s / ws + line(k as usize)
+                })
+                .collect();
             let (half, fade) = ((width * 0.5 + 8.0) / px_m, 40.0 / px_m);
             let pad = half + fade + 1.0;
             let (lo, hi) = (a.min(b) - pad, a.max(b) + pad);
@@ -666,21 +851,32 @@ impl Sources {
             if y < 0 || y >= size {
                 return None;
             }
-            self.elev_raw(TileId::new(id.z, x as u32, y as u32)).ok().filter(|t| t.n == n)
+            self.elev_raw(TileId::new(id.z, x as u32, y as u32))
+                .ok()
+                .filter(|t| t.n == n)
         };
-        let tiles: Vec<Option<Arc<ElevTile>>> = (-1..=1i64).flat_map(|dy| (-1..=1i64).map(move |dx| (dx, dy))).map(|(dx, dy)| if dx == 0 && dy == 0 { None } else { nb(dx, dy) }).collect();
+        let tiles: Vec<Option<Arc<ElevTile>>> = (-1..=1i64)
+            .flat_map(|dy| (-1..=1i64).map(move |dx| (dx, dy)))
+            .map(|(dx, dy)| if dx == 0 && dy == 0 { None } else { nb(dx, dy) })
+            .collect();
         for j in 0..w {
             for i in 0..w {
                 // Mosaic coordinates of this sample.
                 let (gx, gy) = (i as i64 - 1, j as i64 - 1);
                 let (tx, ty) = (gx.div_euclid(n as i64), gy.div_euclid(n as i64));
-                let (lx, ly) = (gx.rem_euclid(n as i64) as usize, gy.rem_euclid(n as i64) as usize);
+                let (lx, ly) = (
+                    gx.rem_euclid(n as i64) as usize,
+                    gy.rem_euclid(n as i64) as usize,
+                );
                 let v = if tx == 0 && ty == 0 {
                     raw.h[ly * n + lx]
                 } else {
                     match &tiles[((ty + 1) * 3 + tx + 1) as usize] {
                         Some(t) => t.h[ly * n + lx],
-                        None => raw.h[gy.clamp(0, n as i64 - 1) as usize * n + gx.clamp(0, n as i64 - 1) as usize],
+                        None => {
+                            raw.h[gy.clamp(0, n as i64 - 1) as usize * n
+                                + gx.clamp(0, n as i64 - 1) as usize]
+                        }
                     }
                 };
                 out[j * w + i] = v;
@@ -695,8 +891,14 @@ impl Sources {
 pub fn thick_line(pts: &[[f32; 2]], k: f32, hw: f32, n: usize, mut hit: impl FnMut(usize)) {
     for s in pts.windows(2) {
         let (a, b) = ([s[0][0] * k, s[0][1] * k], [s[1][0] * k, s[1][1] * k]);
-        let (x0, x1) = ((a[0].min(b[0]) - hw).floor().max(0.0) as i64, (a[0].max(b[0]) + hw).ceil().min(n as f32) as i64);
-        let (y0, y1) = ((a[1].min(b[1]) - hw).floor().max(0.0) as i64, (a[1].max(b[1]) + hw).ceil().min(n as f32) as i64);
+        let (x0, x1) = (
+            (a[0].min(b[0]) - hw).floor().max(0.0) as i64,
+            (a[0].max(b[0]) + hw).ceil().min(n as f32) as i64,
+        );
+        let (y0, y1) = (
+            (a[1].min(b[1]) - hw).floor().max(0.0) as i64,
+            (a[1].max(b[1]) + hw).ceil().min(n as f32) as i64,
+        );
         let d = [b[0] - a[0], b[1] - a[1]];
         let dd = (d[0] * d[0] + d[1] * d[1]).max(1e-6);
         for y in y0..y1 {
@@ -750,8 +952,11 @@ pub fn mip_chain(mut data: Vec<u8>, mut size: usize, ch: usize) -> Vec<Vec<u8>> 
         for y in 0..half {
             for x in 0..half {
                 for c in 0..ch {
-                    let s = |dx: usize, dy: usize| data[((y * 2 + dy) * size + x * 2 + dx) * ch + c] as u32;
-                    next[(y * half + x) * ch + c] = ((s(0, 0) + s(1, 0) + s(0, 1) + s(1, 1) + 2) / 4) as u8;
+                    let s = |dx: usize, dy: usize| {
+                        data[((y * 2 + dy) * size + x * 2 + dx) * ch + c] as u32
+                    };
+                    next[(y * half + x) * ch + c] =
+                        ((s(0, 0) + s(1, 0) + s(0, 1) + s(1, 1) + 2) / 4) as u8;
                 }
             }
         }
@@ -772,8 +977,19 @@ fn water_mask(vt: &VecTile, ox: f64, oy: f64, scale: f64) -> Vec<u8> {
     // Lakes and rivers go on top of ocean so inland classes win where both exist.
     for pass in [1u8, 2, 3] {
         for (class, rings) in vt.water.iter().filter(|w| w.0 == pass) {
-            let px: Vec<Vec<[f32; 2]>> =
-                rings.iter().map(|r| r.iter().map(|p| [((p[0] as f64 - ox) * k) as f32, ((p[1] as f64 - oy) * k) as f32]).collect()).collect();
+            let px: Vec<Vec<[f32; 2]>> = rings
+                .iter()
+                .map(|r| {
+                    r.iter()
+                        .map(|p| {
+                            [
+                                ((p[0] as f64 - ox) * k) as f32,
+                                ((p[1] as f64 - oy) * k) as f32,
+                            ]
+                        })
+                        .collect()
+                })
+                .collect();
             let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
             for p in px.iter().flatten() {
                 lo = [lo[0].min(p[0]), lo[1].min(p[1])];
@@ -794,7 +1010,12 @@ fn water_mask(vt: &VecTile, ox: f64, oy: f64, scale: f64) -> Vec<u8> {
     let mut out = vec![0u8; MASK * MASK * 2];
     for y in 0..MASK {
         for x in 0..MASK {
-            let s = [cls[y * 2 * SS + x * 2], cls[y * 2 * SS + x * 2 + 1], cls[(y * 2 + 1) * SS + x * 2], cls[(y * 2 + 1) * SS + x * 2 + 1]];
+            let s = [
+                cls[y * 2 * SS + x * 2],
+                cls[y * 2 * SS + x * 2 + 1],
+                cls[(y * 2 + 1) * SS + x * 2],
+                cls[(y * 2 + 1) * SS + x * 2 + 1],
+            ];
             let n = s.iter().filter(|c| **c != 0).count();
             out[(y * MASK + x) * 2] = (n * 255 / 4) as u8;
             out[(y * MASK + x) * 2 + 1] = s.iter().copied().max().unwrap_or(0) * 80;
@@ -847,14 +1068,26 @@ impl NightLights {
             first += c * r;
         }
         let o = 7 + n * 6;
-        let offs: Vec<u32> = (0..=first as usize).map(|i| u32::from_le_bytes(data[o + i * 4..o + i * 4 + 4].try_into().unwrap())).collect();
+        let offs: Vec<u32> = (0..=first as usize)
+            .map(|i| u32::from_le_bytes(data[o + i * 4..o + i * 4 + 4].try_into().unwrap()))
+            .collect();
         let base = o + offs.len() * 4;
-        NightLights { data, b, levels, offs, base, cache: Mutex::new(HashMap::new()) }
+        NightLights {
+            data,
+            b,
+            levels,
+            offs,
+            base,
+            cache: Mutex::new(HashMap::new()),
+        }
     }
 
     /// Block `i` unpacked, or None where it is dark.
     fn block(&self, i: u32) -> Option<Arc<Vec<u8>>> {
-        let (a, z) = (self.offs[i as usize] as usize, self.offs[i as usize + 1] as usize);
+        let (a, z) = (
+            self.offs[i as usize] as usize,
+            self.offs[i as usize + 1] as usize,
+        );
         if a == z {
             return None;
         }
@@ -863,7 +1096,9 @@ impl NightLights {
         }
         use std::io::Read;
         let mut px = Vec::with_capacity(self.b * self.b);
-        flate2::read::ZlibDecoder::new(&self.data[self.base + a..self.base + z]).read_to_end(&mut px).ok()?;
+        flate2::read::ZlibDecoder::new(&self.data[self.base + a..self.base + z])
+            .read_to_end(&mut px)
+            .ok()?;
         px.resize(self.b * self.b, 0);
         let px = Arc::new(px);
         let mut c = self.cache.lock();
@@ -878,7 +1113,10 @@ impl NightLights {
     /// y clamps. Keeps the blocks it touched, so call it in nearby runs.
     fn texels(&self, lv: usize) -> impl FnMut(i64, i64) -> f32 + '_ {
         let (cols, rows, _, first) = self.levels[lv];
-        let (w, h) = ((cols as usize * self.b) as i64, (rows as usize * self.b) as i64);
+        let (w, h) = (
+            (cols as usize * self.b) as i64,
+            (rows as usize * self.b) as i64,
+        );
         // The map is a stretched picture: most of a metro area sits near white.
         // A steep curve leaves the core bright and thins the suburbs out.
         let lin: [f32; 256] = std::array::from_fn(|v| NL_PEAK * (v as f32 / 255.0).powf(NL_CURVE));
@@ -889,9 +1127,17 @@ impl NightLights {
             let (bx, by) = ((x as usize / self.b) as u32, (y as usize / self.b) as u32);
             let key = first + by * cols + bx;
             if key != last.0 {
-                last = (key, local.entry(key).or_insert_with_key(|i| self.block(*i)).clone());
+                last = (
+                    key,
+                    local
+                        .entry(key)
+                        .or_insert_with_key(|i| self.block(*i))
+                        .clone(),
+                );
             }
-            last.1.as_ref().map_or(0.0, |p| lin[p[(y as usize % self.b) * self.b + x as usize % self.b] as usize])
+            last.1.as_ref().map_or(0.0, |p| {
+                lin[p[(y as usize % self.b) * self.b + x as usize % self.b] as usize]
+            })
         }
     }
 
@@ -933,7 +1179,9 @@ impl NightLights {
         // The finest level whose pixels are no smaller than about 2/3 of the tile's.
         let tile_deg = 360.0 / (1u64 << id.z) as f64;
         let px_of = |l: usize| self.b as f64 / self.levels[l].2 as f64 * tile_deg / MASK as f64;
-        let lv = (0..self.levels.len()).find(|&l| px_of(l) <= 1.5).unwrap_or(self.levels.len() - 1);
+        let lv = (0..self.levels.len())
+            .find(|&l| px_of(l) <= 1.5)
+            .unwrap_or(self.levels.len() - 1);
         let deg = self.levels[lv].2;
         let ppd = self.b as f64 / deg as f64;
         let taps = (px_of(lv).ceil() as usize).clamp(1, 4);
@@ -942,8 +1190,22 @@ impl NightLights {
         // column / row: first texel and the weight of the next.
         let n = MASK * taps;
         let split = |g: f64| (g.floor() as i64, (g - g.floor()) as f32);
-        let xs: Vec<(i64, f32)> = (0..n).map(|k| split((id.lat_lon((k as f64 + 0.5) / n as f64, 0.5).1.to_degrees() + 180.0) * ppd - 0.5)).collect();
-        let ys: Vec<(i64, f32)> = (0..n).map(|k| split((90.0 - id.lat_lon(0.5, (k as f64 + 0.5) / n as f64).0.to_degrees()) * ppd - 0.5)).collect();
+        let xs: Vec<(i64, f32)> = (0..n)
+            .map(|k| {
+                split(
+                    (id.lat_lon((k as f64 + 0.5) / n as f64, 0.5).1.to_degrees() + 180.0) * ppd
+                        - 0.5,
+                )
+            })
+            .collect();
+        let ys: Vec<(i64, f32)> = (0..n)
+            .map(|k| {
+                split(
+                    (90.0 - id.lat_lon(0.5, (k as f64 + 0.5) / n as f64).0.to_degrees()) * ppd
+                        - 0.5,
+                )
+            })
+            .collect();
         let mut out = vec![0u8; MASK * MASK];
         for py in 0..MASK {
             for px in 0..MASK {
@@ -984,16 +1246,25 @@ fn ground_mask(vt: &VecTile, ox: f64, oy: f64, scale: f64, tile_m: f64) -> Vec<u
     }
     let k = MASK as f64 / scale / vt.extent as f64;
     let (ox, oy) = (ox * vt.extent as f64, oy * vt.extent as f64);
-    let to_px = |p: &[f32; 2]| [((p[0] as f64 - ox) * k) as f32, ((p[1] as f64 - oy) * k) as f32];
+    let to_px = |p: &[f32; 2]| {
+        [
+            ((p[0] as f64 - ox) * k) as f32,
+            ((p[1] as f64 - oy) * k) as f32,
+        ]
+    };
     let mut scratch = vec![0u8; MASK * MASK];
     let mut stamp = |out: &mut [u8], rings: &[Vec<[f32; 2]>], class: u8| {
-        let px: Vec<Vec<[f32; 2]>> = rings.iter().map(|r| r.iter().map(to_px).collect()).collect();
+        let px: Vec<Vec<[f32; 2]>> = rings
+            .iter()
+            .map(|r| r.iter().map(to_px).collect())
+            .collect();
         let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
         for p in px.iter().flatten() {
             lo = [lo[0].min(p[0]), lo[1].min(p[1])];
             hi = [hi[0].max(p[0]), hi[1].max(p[1])];
         }
-        if px.is_empty() || hi[0] < 0.0 || hi[1] < 0.0 || lo[0] > MASK as f32 || lo[1] > MASK as f32 {
+        if px.is_empty() || hi[0] < 0.0 || hi[1] < 0.0 || lo[0] > MASK as f32 || lo[1] > MASK as f32
+        {
             return;
         }
         // Longest side of the outer ring.
@@ -1009,11 +1280,16 @@ fn ground_mask(vt: &VecTile, ox: f64, oy: f64, scale: f64, tile_m: f64) -> Vec<u
             }
         }
         let first = rings[0][0];
-        let seed = ((first[0].to_bits().wrapping_mul(0x9e37_79b9) ^ first[1].to_bits().wrapping_mul(0x85eb_ca6b)) >> 28) as u8;
+        let seed = ((first[0].to_bits().wrapping_mul(0x9e37_79b9)
+            ^ first[1].to_bits().wrapping_mul(0x85eb_ca6b))
+            >> 28) as u8;
         let a = ((ang / std::f32::consts::PI * 256.0) as u32).min(255) as u8;
         mvt::fill_rings(&mut scratch, MASK, MASK, &px, 1);
         let (x0, y0) = (lo[0].max(0.0) as usize, lo[1].max(0.0) as usize);
-        let (x1, y1) = ((hi[0].ceil().max(0.0) as usize + 1).min(MASK), (hi[1].ceil().max(0.0) as usize + 1).min(MASK));
+        let (x1, y1) = (
+            (hi[0].ceil().max(0.0) as usize + 1).min(MASK),
+            (hi[1].ceil().max(0.0) as usize + 1).min(MASK),
+        );
         for y in y0..y1 {
             for x in x0..x1 {
                 let i = y * MASK + x;
@@ -1026,7 +1302,9 @@ fn ground_mask(vt: &VecTile, ox: f64, oy: f64, scale: f64, tile_m: f64) -> Vec<u
         }
     };
     // Later kinds win where polygons overlap (as for tree placement).
-    for want in [LC_GRASS, LC_FARM, LC_WET, LC_SCRUB, LC_WOOD, LC_BARE, LC_ROCK] {
+    for want in [
+        LC_GRASS, LC_FARM, LC_WET, LC_SCRUB, LC_WOOD, LC_BARE, LC_ROCK,
+    ] {
         for (_, rings) in vt.landcover.iter().filter(|l| l.0 == want) {
             stamp(&mut out, rings, want);
         }
@@ -1041,8 +1319,14 @@ fn ground_mask(vt: &VecTile, ox: f64, oy: f64, scale: f64, tile_m: f64) -> Vec<u
     }
     for l in &vt.aero_lines {
         let class = if l.paved { GC_PAVED } else { GC_PITCH };
-        let px: Vec<[f32; 2]> = l.pts.iter().map(|p| [p[0] - ox as f32, p[1] - oy as f32]).collect();
-        thick_line(&px, k as f32, (l.width * 0.5 + 1.0) / px_m, MASK, |i| out[i * 4 + 2] = class);
+        let px: Vec<[f32; 2]> = l
+            .pts
+            .iter()
+            .map(|p| [p[0] - ox as f32, p[1] - oy as f32])
+            .collect();
+        thick_line(&px, k as f32, (l.width * 0.5 + 1.0) / px_m, MASK, |i| {
+            out[i * 4 + 2] = class
+        });
     }
     // Road surface: no grass, crops or rock relief under the road ribbons.
     for r in &vt.roads {
@@ -1064,8 +1348,14 @@ fn ground_mask(vt: &VecTile, ox: f64, oy: f64, scale: f64, tile_m: f64) -> Vec<u
         let hw = (w_m * 0.5 + 0.5) / px_m;
         for s in r.pts.windows(2) {
             let (a, b) = (to_px(&s[0]), to_px(&s[1]));
-            let (x0, x1) = ((a[0].min(b[0]) - hw).floor().max(0.0) as i64, (a[0].max(b[0]) + hw).ceil().min(MASK as f32) as i64);
-            let (y0, y1) = ((a[1].min(b[1]) - hw).floor().max(0.0) as i64, (a[1].max(b[1]) + hw).ceil().min(MASK as f32) as i64);
+            let (x0, x1) = (
+                (a[0].min(b[0]) - hw).floor().max(0.0) as i64,
+                (a[0].max(b[0]) + hw).ceil().min(MASK as f32) as i64,
+            );
+            let (y0, y1) = (
+                (a[1].min(b[1]) - hw).floor().max(0.0) as i64,
+                (a[1].max(b[1]) + hw).ceil().min(MASK as f32) as i64,
+            );
             let d = [b[0] - a[0], b[1] - a[1]];
             let dd = (d[0] * d[0] + d[1] * d[1]).max(1e-6);
             for y in y0..y1 {
@@ -1099,7 +1389,13 @@ pub fn build_tile(src: &Sources, id: TileId) -> Result<TileData> {
     let (clat0, clon0) = id.lat_lon(0.5, 0.5);
     let fine_elev = (12..DATA_ZOOM).contains(&id.z) && {
         let db = crate::airports::Db::get();
-        db.near(clat0.to_degrees(), clon0.to_degrees(), id.width_m() * 0.75 + 5000.0).iter().any(|(i, _)| db.apts[*i as usize].any_paved())
+        db.near(
+            clat0.to_degrees(),
+            clon0.to_degrees(),
+            id.width_m() * 0.75 + 5000.0,
+        )
+        .iter()
+        .any(|(i, _)| db.apts[*i as usize].any_paved())
     };
     let mut fine_cache: HashMap<TileId, Option<Arc<ElevTile>>> = HashMap::new();
     let mut height_at = |u: f64, v: f64| -> f32 {
@@ -1111,7 +1407,9 @@ pub fn build_tile(src: &Sources, id: TileId) -> Result<TileData> {
                 return e.sample(fu, fv);
             }
         }
-        elev.as_ref().map(|t| t.sample(ox + u * sc, oy + v * sc)).unwrap_or(0.0)
+        elev.as_ref()
+            .map(|t| t.sample(ox + u * sc, oy + v * sc))
+            .unwrap_or(0.0)
     };
     let mask = match src.vector(did) {
         Ok(vt) => ground_mask(&vt, ox, oy, sc, id.width_m()),
@@ -1121,7 +1419,10 @@ pub fn build_tile(src: &Sources, id: TileId) -> Result<TileData> {
             if let Some(e) = &elev {
                 for y in 0..MASK {
                     for x in 0..MASK {
-                        let (u, v) = ((x as f64 + 0.5) / MASK as f64, (y as f64 + 0.5) / MASK as f64);
+                        let (u, v) = (
+                            (x as f64 + 0.5) / MASK as f64,
+                            (y as f64 + 0.5) / MASK as f64,
+                        );
                         if e.sample(ox + u * sc, oy + v * sc) < -1.0 {
                             m[(y * MASK + x) * 4] = 255;
                             m[(y * MASK + x) * 4 + 1] = 80;
@@ -1142,10 +1443,16 @@ pub fn build_tile(src: &Sources, id: TileId) -> Result<TileData> {
     let mut hs = vec![(0f32, 0f32, false); e * e]; // surface height, raw elevation, water
     for j in 0..e {
         for i in 0..e {
-            let (u, v) = ((i as f64 - 1.0) / GRID as f64, (j as f64 - 1.0) / GRID as f64);
+            let (u, v) = (
+                (i as f64 - 1.0) / GRID as f64,
+                (j as f64 - 1.0) / GRID as f64,
+            );
             let (uc, vc) = (u.clamp(0.0, 1.0), v.clamp(0.0, 1.0));
             let raw = height_at(uc, vc);
-            let (mx, my) = (((uc * MASK as f64) as usize).min(MASK - 1), ((vc * MASK as f64) as usize).min(MASK - 1));
+            let (mx, my) = (
+                ((uc * MASK as f64) as usize).min(MASK - 1),
+                ((vc * MASK as f64) as usize).min(MASK - 1),
+            );
             let water = mask[(my * MASK + mx) * 4] > 127;
             let h = if water { raw.max(0.0) } else { raw };
             let (lat, lon) = id.lat_lon(u, v);
@@ -1161,8 +1468,14 @@ pub fn build_tile(src: &Sources, id: TileId) -> Result<TileData> {
         let (x, y) = (u * n as f64 - 0.5, v * n as f64 - 0.5);
         let (x0, y0) = (x.floor(), y.floor());
         let (fx, fy) = ((x - x0) as f32, (y - y0) as f32);
-        let at = |i: f64, j: f64| m[((j.clamp(0.0, n as f64 - 1.0) as usize) * n + i.clamp(0.0, n as f64 - 1.0) as usize) * 4 + ch] as f32 / 255.0;
-        (at(x0, y0) * (1.0 - fx) + at(x0 + 1.0, y0) * fx) * (1.0 - fy) + (at(x0, y0 + 1.0) * (1.0 - fx) + at(x0 + 1.0, y0 + 1.0) * fx) * fy
+        let at = |i: f64, j: f64| {
+            m[((j.clamp(0.0, n as f64 - 1.0) as usize) * n + i.clamp(0.0, n as f64 - 1.0) as usize)
+                * 4
+                + ch] as f32
+                / 255.0
+        };
+        (at(x0, y0) * (1.0 - fx) + at(x0 + 1.0, y0) * fx) * (1.0 - fy)
+            + (at(x0, y0 + 1.0) * (1.0 - fx) + at(x0 + 1.0, y0 + 1.0) * fx) * fy
     };
     let mut verts = Vec::with_capacity(GV * GV + 4 * GV);
     let (mut heights, mut water) = (Vec::with_capacity(GV * GV), Vec::with_capacity(GV * GV));
@@ -1172,7 +1485,8 @@ pub fn build_tile(src: &Sources, id: TileId) -> Result<TileData> {
         for i in 1..=GV {
             let p = pts[j * e + i];
             let up = (p + center).normalize();
-            let mut n = (pts[j * e + i + 1] - pts[j * e + i - 1]).cross(pts[(j - 1) * e + i] - pts[(j + 1) * e + i]);
+            let mut n = (pts[j * e + i + 1] - pts[j * e + i - 1])
+                .cross(pts[(j - 1) * e + i] - pts[(j + 1) * e + i]);
             if n.length_squared() < 1e-9 || n.dot(up) <= 0.0 {
                 n = up;
             }
@@ -1186,7 +1500,11 @@ pub fn build_tile(src: &Sources, id: TileId) -> Result<TileData> {
                 let shore = mask_at(3, u, v, 0);
                 let shore = ((shore - 0.5) / 0.5).clamp(0.0, 1.0);
                 let shore = shore * shore * (3.0 - 2.0 * shore);
-                crate::ocean::sea_weight(mask_at(1, u, v, 1) * 255.0 / 80.0, id.lat_lon(u, v).0.sin() as f32, shore)
+                crate::ocean::sea_weight(
+                    mask_at(1, u, v, 1) * 255.0 / 80.0,
+                    id.lat_lon(u, v).0.sin() as f32,
+                    shore,
+                )
             } else {
                 0.0
             });
@@ -1204,7 +1522,9 @@ pub fn build_tile(src: &Sources, id: TileId) -> Result<TileData> {
     let mut skirt = |i: usize, j: usize| {
         let mut v = verts[j * GV + i];
         let up = (DVec3::from(glam::Vec3::from(v.pos).as_dvec3()) + center).normalize();
-        v.pos = (glam::Vec3::from(v.pos).as_dvec3() - up * drop).as_vec3().into();
+        v.pos = (glam::Vec3::from(v.pos).as_dvec3() - up * drop)
+            .as_vec3()
+            .into();
         v.skirt = 1.0;
         verts.push(v);
     };
@@ -1241,7 +1561,12 @@ pub fn tile_indices() -> Vec<u16> {
     let mut ix = Vec::new();
     for j in 0..GRID {
         for i in 0..GRID {
-            let (a, b, c, d) = (j * GV + i, j * GV + i + 1, (j + 1) * GV + i, (j + 1) * GV + i + 1);
+            let (a, b, c, d) = (
+                j * GV + i,
+                j * GV + i + 1,
+                (j + 1) * GV + i,
+                (j + 1) * GV + i + 1,
+            );
             ix.extend([a, c, b, b, c, d].map(|v| v as u16));
         }
     }
@@ -1256,7 +1581,11 @@ pub fn tile_indices() -> Vec<u16> {
     for (edge, s, flip) in edges.iter() {
         for k in 0..GRID {
             let (a, b, c, d) = (edge(k), edge(k + 1), s + k, s + k + 1);
-            let t = if *flip { [a, c, b, b, c, d] } else { [a, b, c, b, d, c] };
+            let t = if *flip {
+                [a, c, b, b, c, d]
+            } else {
+                [a, b, c, b, d, c]
+            };
             ix.extend(t.map(|v| v as u16));
         }
     }
@@ -1273,7 +1602,10 @@ pub enum Job {
 pub enum JobResult {
     Terrain(TileId, Result<TileData>),
     Buildings(TileId, Result<crate::buildings::BuildingData>),
-    Airfield(u32, Result<(Arc<crate::airports::Geo>, crate::airfield::FieldMesh)>),
+    Airfield(
+        u32,
+        Result<(Arc<crate::airports::Geo>, crate::airfield::FieldMesh)>,
+    ),
 }
 
 pub struct Loader {
@@ -1288,25 +1620,37 @@ impl Loader {
         let (tx, rx) = crossbeam_channel::unbounded();
         for _ in 0..threads {
             let (queue, tx, src) = (queue.clone(), tx.clone(), src.clone());
-            std::thread::spawn(move || loop {
-                let job = {
-                    let mut q = queue.0.lock();
-                    while q.is_empty() {
-                        queue.1.wait(&mut q);
+            std::thread::spawn(move || {
+                loop {
+                    let job = {
+                        let mut q = queue.0.lock();
+                        while q.is_empty() {
+                            queue.1.wait(&mut q);
+                        }
+                        let best = q
+                            .iter()
+                            .enumerate()
+                            .min_by(|a, b| a.1.0.total_cmp(&b.1.0))
+                            .map(|(i, _)| i)
+                            .unwrap();
+                        q.swap_remove(best).1
+                    };
+                    let res = match job {
+                        Job::Terrain(id) => JobResult::Terrain(id, build_tile(&src, id)),
+                        Job::Buildings(id) => {
+                            JobResult::Buildings(id, crate::buildings::build(&src, id))
+                        }
+                        Job::Airfield(i) => JobResult::Airfield(
+                            i,
+                            crate::airports::geo_for(&src, i).map(|g| {
+                                let m = crate::airfield::build(&g);
+                                (g, m)
+                            }),
+                        ),
+                    };
+                    if tx.send(res).is_err() {
+                        break;
                     }
-                    let best = q.iter().enumerate().min_by(|a, b| a.1 .0.total_cmp(&b.1 .0)).map(|(i, _)| i).unwrap();
-                    q.swap_remove(best).1
-                };
-                let res = match job {
-                    Job::Terrain(id) => JobResult::Terrain(id, build_tile(&src, id)),
-                    Job::Buildings(id) => JobResult::Buildings(id, crate::buildings::build(&src, id)),
-                    Job::Airfield(i) => JobResult::Airfield(i, crate::airports::geo_for(&src, i).map(|g| {
-                        let m = crate::airfield::build(&g);
-                        (g, m)
-                    })),
-                };
-                if tx.send(res).is_err() {
-                    break;
                 }
             });
         }
@@ -1326,12 +1670,22 @@ mod night_lights_tests {
     fn tile_mask_speed_and_values() {
         let nl = NightLights::get();
         let ground = vec![0u8; MASK * MASK * 4];
-        for (lat, lon, z) in [(40.75f64, -73.99f64, 14u8), (40.75, -73.99, 10), (40.75, -73.99, 6), (40.0, -90.0, 3), (40.0, -90.0, 1)] {
+        for (lat, lon, z) in [
+            (40.75f64, -73.99f64, 14u8),
+            (40.75, -73.99, 10),
+            (40.75, -73.99, 6),
+            (40.0, -90.0, 3),
+            (40.0, -90.0, 1),
+        ] {
             let id = TileId::at(lat.to_radians(), lon.to_radians(), z);
             let t = std::time::Instant::now();
             let m = nl.tile_mask(id, &ground);
             let mean = m.iter().map(|v| *v as f64).sum::<f64>() / m.len() as f64;
-            eprintln!("z{z}: {:.1} ms, mean {mean:.1}, max {}", t.elapsed().as_secs_f64() * 1e3, m.iter().max().unwrap());
+            eprintln!(
+                "z{z}: {:.1} ms, mean {mean:.1}, max {}",
+                t.elapsed().as_secs_f64() * 1e3,
+                m.iter().max().unwrap()
+            );
         }
     }
 }

@@ -12,10 +12,10 @@
 //! Google bills those per root tileset request (`3dtiles/root.json`), which
 //! opens a session of about three hours for the tiles under it, so roots are
 //! counted on their own as well.
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use parking_lot::Mutex;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const API: &str = "https://tile.googleapis.com";
@@ -68,7 +68,9 @@ impl Detail {
     }
 
     pub fn parse(s: &str) -> Option<Detail> {
-        Self::ALL.into_iter().find(|d| d.name().eq_ignore_ascii_case(s.trim()))
+        Self::ALL
+            .into_iter()
+            .find(|d| d.name().eq_ignore_ascii_case(s.trim()))
     }
 }
 
@@ -103,7 +105,10 @@ pub struct Google {
 }
 
 fn now_s() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// "YYYY-MM" (UTC) for unix seconds.
@@ -135,8 +140,19 @@ impl Google {
         Self::with(None, String::new(), false, false, Usage::default())
     }
 
-    fn with(path: Option<PathBuf>, key: String, enabled: bool, photoreal: bool, usage: Usage) -> Self {
-        let agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(20))).user_agent("fablegame-flightsim/0.1").http_status_as_error(false).build().into();
+    fn with(
+        path: Option<PathBuf>,
+        key: String,
+        enabled: bool,
+        photoreal: bool,
+        usage: Usage,
+    ) -> Self {
+        let agent = ureq::Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(20)))
+            .user_agent("fablegame-flightsim/0.1")
+            .http_status_as_error(false)
+            .build()
+            .into();
         Self {
             enabled: AtomicBool::new(enabled && !key.is_empty()),
             photoreal: AtomicBool::new(photoreal && !key.is_empty()),
@@ -160,15 +176,36 @@ impl Google {
     /// environment) replaces the saved key when given.
     pub fn load(key: Option<String>) -> Self {
         let path = dirs::config_dir().map(|d| d.join("fablegame").join("google_maps.json"));
-        let j: serde_json::Value = path.as_ref().and_then(|p| std::fs::read(p).ok()).and_then(|d| serde_json::from_slice(&d).ok()).unwrap_or_default();
+        let j: serde_json::Value = path
+            .as_ref()
+            .and_then(|p| std::fs::read(p).ok())
+            .and_then(|d| serde_json::from_slice(&d).ok())
+            .unwrap_or_default();
         let n = |k: &str| j[k].as_u64().unwrap_or(0);
-        let mut u = Usage { month: j["month"].as_str().unwrap_or("").to_string(), month_requests: n("month_requests"), month_bytes: n("month_bytes"), total_requests: n("total_requests"), total_bytes: n("total_bytes"), month_roots: n("month_roots"), total_roots: n("total_roots"), ..Default::default() };
+        let mut u = Usage {
+            month: j["month"].as_str().unwrap_or("").to_string(),
+            month_requests: n("month_requests"),
+            month_bytes: n("month_bytes"),
+            total_requests: n("total_requests"),
+            total_bytes: n("total_bytes"),
+            month_roots: n("month_roots"),
+            total_roots: n("total_roots"),
+            ..Default::default()
+        };
         let m = month_of(now_s());
         if u.month != m {
             (u.month, u.month_requests, u.month_bytes, u.month_roots) = (m, 0, 0, 0);
         }
-        let key = key.filter(|k| !k.trim().is_empty()).unwrap_or_else(|| j["key"].as_str().unwrap_or("").to_string());
-        let mut g = Self::with(path, key.trim().to_string(), j["enabled"].as_bool().unwrap_or(false), j["photoreal"].as_bool().unwrap_or(false), u);
+        let key = key
+            .filter(|k| !k.trim().is_empty())
+            .unwrap_or_else(|| j["key"].as_str().unwrap_or("").to_string());
+        let mut g = Self::with(
+            path,
+            key.trim().to_string(),
+            j["enabled"].as_bool().unwrap_or(false),
+            j["photoreal"].as_bool().unwrap_or(false),
+            u,
+        );
         if let Some(d) = j["photoreal_detail"].as_str().and_then(Detail::parse) {
             g.detail = AtomicU8::new(d as u8);
         }
@@ -276,7 +313,16 @@ impl Google {
 
     pub fn reset_session_counts(&self) {
         let mut u = self.usage.lock();
-        (u.session_requests, u.session_bytes, u.session_tiles, u.session_cached, u.session_errors, u.session_roots, u.session_3d, u.session_3d_cached) = (0, 0, 0, 0, 0, 0, 0, 0);
+        (
+            u.session_requests,
+            u.session_bytes,
+            u.session_tiles,
+            u.session_cached,
+            u.session_errors,
+            u.session_roots,
+            u.session_3d,
+            u.session_3d_cached,
+        ) = (0, 0, 0, 0, 0, 0, 0, 0);
     }
 
     fn count(&self, n: usize, ok: bool) {
@@ -302,13 +348,19 @@ impl Google {
     }
 
     /// One counted call to the API. Errors carry Google's own message.
-    fn call(&self, send: impl FnOnce() -> Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<(u16, Vec<u8>)> {
+    fn call(
+        &self,
+        send: impl FnOnce() -> Result<ureq::http::Response<ureq::Body>, ureq::Error>,
+    ) -> Result<(u16, Vec<u8>)> {
         self.call_aged(send).map(|(c, d, _)| (c, d))
     }
 
     /// `call`, plus the reply's `Cache-Control: max-age` in seconds (0 when it
     /// has none, or says no-store / no-cache / private).
-    fn call_aged(&self, send: impl FnOnce() -> Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<(u16, Vec<u8>, u64)> {
+    fn call_aged(
+        &self,
+        send: impl FnOnce() -> Result<ureq::http::Response<ureq::Body>, ureq::Error>,
+    ) -> Result<(u16, Vec<u8>, u64)> {
         let mut res = match send() {
             Ok(r) => r,
             Err(e) => {
@@ -317,14 +369,26 @@ impl Google {
             }
         };
         let code = res.status().as_u16();
-        let age = res.headers().get("cache-control").and_then(|v| v.to_str().ok()).map_or(0, max_age);
-        let data = res.body_mut().with_config().limit(16 << 20).read_to_vec().unwrap_or_default();
+        let age = res
+            .headers()
+            .get("cache-control")
+            .and_then(|v| v.to_str().ok())
+            .map_or(0, max_age);
+        let data = res
+            .body_mut()
+            .with_config()
+            .limit(16 << 20)
+            .read_to_vec()
+            .unwrap_or_default();
         self.count(data.len(), code == 200);
         Ok((code, data, age))
     }
 
     fn fail(&self, code: u16, data: &[u8]) -> anyhow::Error {
-        let msg = serde_json::from_slice::<serde_json::Value>(data).ok().and_then(|j| j["error"]["message"].as_str().map(String::from)).unwrap_or_else(|| String::from_utf8_lossy(&data[..data.len().min(200)]).into_owned());
+        let msg = serde_json::from_slice::<serde_json::Value>(data)
+            .ok()
+            .and_then(|j| j["error"]["message"].as_str().map(String::from))
+            .unwrap_or_else(|| String::from_utf8_lossy(&data[..data.len().min(200)]).into_owned());
         let msg = format!("HTTP {code}: {}", msg.trim());
         // A missing tile (no imagery there) is no reason to worry the player.
         if code != 404 {
@@ -343,8 +407,16 @@ impl Google {
             return Err(anyhow!("google imagery off"));
         }
         let key = self.key();
-        let body = serde_json::to_vec(&serde_json::json!({ "mapType": "satellite", "language": "en-US", "region": "US" }))?;
-        let (code, data) = self.call(|| self.agent.post(format!("{API}/v1/createSession")).query("key", &key).header("Content-Type", "application/json").send(&body[..]))?;
+        let body = serde_json::to_vec(
+            &serde_json::json!({ "mapType": "satellite", "language": "en-US", "region": "US" }),
+        )?;
+        let (code, data) = self.call(|| {
+            self.agent
+                .post(format!("{API}/v1/createSession"))
+                .query("key", &key)
+                .header("Content-Type", "application/json")
+                .send(&body[..])
+        })?;
         if code != 200 {
             // Bad key or the API not enabled: no point asking again for every tile.
             if code == 400 || code == 403 {
@@ -354,9 +426,19 @@ impl Google {
             return Err(self.fail(code, &data));
         }
         let j: serde_json::Value = serde_json::from_slice(&data)?;
-        let token = j["session"].as_str().ok_or_else(|| anyhow!("no session in reply"))?.to_string();
-        let expiry = j["expiry"].as_str().and_then(|e| e.parse().ok()).or(j["expiry"].as_u64()).unwrap_or(now_s() + 86400);
-        *s = Some(Session { token: token.clone(), expiry });
+        let token = j["session"]
+            .as_str()
+            .ok_or_else(|| anyhow!("no session in reply"))?
+            .to_string();
+        let expiry = j["expiry"]
+            .as_str()
+            .and_then(|e| e.parse().ok())
+            .or(j["expiry"].as_u64())
+            .unwrap_or(now_s() + 86400);
+        *s = Some(Session {
+            token: token.clone(),
+            expiry,
+        });
         self.status.lock().clear();
         Ok(token)
     }
@@ -376,13 +458,21 @@ impl Google {
         let mut retried = false;
         loop {
             let token = self.token()?;
-            let (code, data) = self.call(|| self.agent.get(format!("{API}/v1/2dtiles/{z}/{x}/{y}")).query("session", &token).query("key", self.key()).call())?;
+            let (code, data) = self.call(|| {
+                self.agent
+                    .get(format!("{API}/v1/2dtiles/{z}/{x}/{y}"))
+                    .query("session", &token)
+                    .query("key", self.key())
+                    .call()
+            })?;
             match code {
                 200 if !data.is_empty() => {
                     if let Some(dir) = path.parent() {
                         let _ = std::fs::create_dir_all(dir);
                     }
-                    let tmp = path.with_extension(format!("tmp{:?}", std::thread::current().id()).replace(['(', ')'], ""));
+                    let tmp = path.with_extension(
+                        format!("tmp{:?}", std::thread::current().id()).replace(['(', ')'], ""),
+                    );
                     if std::fs::write(&tmp, &data).is_ok() {
                         let _ = std::fs::rename(&tmp, &path);
                     }
@@ -418,7 +508,8 @@ impl Google {
             return Ok(d);
         }
         let url = format!("{API}{path}");
-        let (code, data, age) = self.call_aged(|| self.agent.get(&url).query("key", self.key()).call())?;
+        let (code, data, age) =
+            self.call_aged(|| self.agent.get(&url).query("key", self.key()).call())?;
         if let (Some(f), true) = (&file, code == 200 && !data.is_empty() && age > 0) {
             write_cache3d(f, now + age, &data);
         }
@@ -456,7 +547,10 @@ impl Google {
         {
             let mut at = self.attr_at.lock();
             if let Some((la, lo, z)) = *at {
-                if (la - lat).abs() < span * 0.5 && (lo - lon).abs() < span * 0.5 && z.abs_diff(zoom) < 2 {
+                if (la - lat).abs() < span * 0.5
+                    && (lo - lon).abs() < span * 0.5
+                    && z.abs_diff(zoom) < 2
+                {
                     return;
                 }
             }
@@ -469,13 +563,13 @@ impl Google {
                 let token = g.token()?;
                 let (code, data) = g.call(|| {
                     g.agent
-                    .get(format!("{API}/tile/v1/viewport"))
-                    .query("session", &token)
-                    .query("key", g.key())
-                    .query("zoom", zoom.to_string())
-                    .query("north", format!("{:.5}", (lat + span).min(85.0)))
-                    .query("south", format!("{:.5}", (lat - span).max(-85.0)))
-                    .query("east", format!("{:.5}", (lon + span).min(180.0)))
+                        .get(format!("{API}/tile/v1/viewport"))
+                        .query("session", &token)
+                        .query("key", g.key())
+                        .query("zoom", zoom.to_string())
+                        .query("north", format!("{:.5}", (lat + span).min(85.0)))
+                        .query("south", format!("{:.5}", (lat - span).max(-85.0)))
+                        .query("east", format!("{:.5}", (lon + span).min(180.0)))
                         .query("west", format!("{:.5}", (lon - span).max(-180.0)))
                         .call()
                 })?;
@@ -519,7 +613,9 @@ fn cache3d_file(dir: &std::path::Path, path: &str) -> Option<PathBuf> {
     if !p.ends_with(".glb") {
         return None;
     }
-    let h = p.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3));
+    let h = p.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
+        (h ^ b as u64).wrapping_mul(0x100_0000_01b3)
+    });
     Some(dir.join(format!("{:02x}/{h:016x}.glb", h >> 56)))
 }
 
@@ -527,7 +623,9 @@ fn cache3d_file(dir: &std::path::Path, path: &str) -> Option<PathBuf> {
 /// body. Expired or damaged files are removed and count as missing.
 fn read_cache3d(f: &std::path::Path, now: u64) -> Option<Vec<u8>> {
     let mut d = std::fs::read(f).ok()?;
-    let exp = d.get(..8).map(|b| u64::from_le_bytes(b.try_into().unwrap()));
+    let exp = d
+        .get(..8)
+        .map(|b| u64::from_le_bytes(b.try_into().unwrap()));
     if exp.is_none_or(|e| e <= now) || d.len() <= 8 {
         let _ = std::fs::remove_file(f);
         return None;
@@ -543,7 +641,8 @@ fn write_cache3d(f: &std::path::Path, expiry: u64, data: &[u8]) {
     let mut buf = Vec::with_capacity(data.len() + 8);
     buf.extend_from_slice(&expiry.to_le_bytes());
     buf.extend_from_slice(data);
-    let tmp = f.with_extension(format!("tmp{:?}", std::thread::current().id()).replace(['(', ')'], ""));
+    let tmp =
+        f.with_extension(format!("tmp{:?}", std::thread::current().id()).replace(['(', ')'], ""));
     if std::fs::write(&tmp, &buf).is_ok() {
         let _ = std::fs::rename(&tmp, f);
     }
@@ -555,10 +654,21 @@ fn prune_cache3d(dir: &std::path::Path, now: u64, max: u64) {
     use std::io::Read;
     let mut live = Vec::new();
     for sub in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-        for e in std::fs::read_dir(sub.path()).into_iter().flatten().flatten() {
+        for e in std::fs::read_dir(sub.path())
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
             let p = e.path();
             let mut b = [0u8; 8];
-            let exp = (p.extension().is_some_and(|x| x == "glb")).then(|| std::fs::File::open(&p).and_then(|mut f| f.read_exact(&mut b)).ok()).flatten().map(|_| u64::from_le_bytes(b));
+            let exp = (p.extension().is_some_and(|x| x == "glb"))
+                .then(|| {
+                    std::fs::File::open(&p)
+                        .and_then(|mut f| f.read_exact(&mut b))
+                        .ok()
+                })
+                .flatten()
+                .map(|_| u64::from_le_bytes(b));
             match exp {
                 Some(e) if e > now => live.push((e, e_len(&p), p)),
                 _ => {
@@ -608,7 +718,10 @@ mod tests {
     fn cache_control() {
         assert_eq!(max_age("public, max-age=14400"), 14400);
         assert_eq!(max_age("max-age=0"), 0);
-        assert_eq!(max_age("private, max-age=14400, must-revalidate, no-transform"), 14400);
+        assert_eq!(
+            max_age("private, max-age=14400, must-revalidate, no-transform"),
+            14400
+        );
         assert_eq!(max_age("private, max-age=0, must-revalidate"), 0);
         assert_eq!(max_age("no-store"), 0);
         assert_eq!(max_age(""), 0);
@@ -618,7 +731,10 @@ mod tests {
     fn cache3d_roundtrip() {
         let dir = std::env::temp_dir().join(format!("fable-g3d-test-{}", std::process::id()));
         let a = cache3d_file(&dir, "/v1/3dtiles/datasets/A/files/B.glb?session=S1").unwrap();
-        assert_eq!(Some(a.clone()), cache3d_file(&dir, "/v1/3dtiles/datasets/A/files/B.glb?session=S2"));
+        assert_eq!(
+            Some(a.clone()),
+            cache3d_file(&dir, "/v1/3dtiles/datasets/A/files/B.glb?session=S2")
+        );
         assert!(cache3d_file(&dir, "/v1/3dtiles/datasets/A/files/B.json?session=S1").is_none());
         assert!(cache3d_file(&dir, "/v1/3dtiles/root.json").is_none());
         write_cache3d(&a, 1000, b"mesh");

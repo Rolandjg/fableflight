@@ -58,7 +58,13 @@ pub struct LiveWx {
 
 impl LiveWx {
     pub fn new() -> Self {
-        Self { shared: Arc::default(), thread: false, last_got: None, target: None, settled: false }
+        Self {
+            shared: Arc::default(),
+            thread: false,
+            last_got: None,
+            target: None,
+            settled: false,
+        }
     }
 
     pub fn error(&self) -> String {
@@ -77,7 +83,10 @@ impl LiveWx {
         let got = {
             let mut s = self.shared.lock();
             s.want = at;
-            s.got.as_ref().filter(|(t, _)| Some(*t) != self.last_got).cloned()
+            s.got
+                .as_ref()
+                .filter(|(t, _)| Some(*t) != self.last_got)
+                .cloned()
         };
         if !self.thread && at.is_some() {
             self.thread = true;
@@ -97,7 +106,11 @@ impl LiveWx {
             return;
         };
         // About half way in 10 s; at once on the globe or the first time.
-        let k = if dt <= 0.0 || !self.settled { 1.0 } else { 1.0 - (-dt / 14.0).exp() };
+        let k = if dt <= 0.0 || !self.settled {
+            1.0
+        } else {
+            1.0 - (-dt / 14.0).exp()
+        };
         self.settled = true;
         let mix = |a: f32, b: f32| a + (b - a) * k as f32;
         wx.clouds = mix(wx.clouds, t.clouds);
@@ -148,7 +161,8 @@ fn spawn(src: Arc<Sources>, shared: Arc<Mutex<Shared>>) {
                             }
                             s.error = e;
                             // try again in a minute, not every second
-                            last = Some((Instant::now() - Duration::from_secs_f64(REFRESH - 60.0), p));
+                            last =
+                                Some((Instant::now() - Duration::from_secs_f64(REFRESH - 60.0), p));
                         }
                     }
                 }
@@ -172,13 +186,24 @@ fn get_json(src: &Sources, url: &str) -> Result<serde_json::Value, String> {
 fn metar(src: &Sources, (lat, lon): (f64, f64)) -> Result<Target, String> {
     let dlat = STATION_KM / 111.0;
     let dlon = dlat / lat.to_radians().cos().max(0.2);
-    let url = format!("https://aviationweather.gov/api/data/metar?bbox={:.3},{:.3},{:.3},{:.3}&format=json", lat - dlat, lon - dlon, lat + dlat, lon + dlon);
+    let url = format!(
+        "https://aviationweather.gov/api/data/metar?bbox={:.3},{:.3},{:.3},{:.3}&format=json",
+        lat - dlat,
+        lon - dlon,
+        lat + dlat,
+        lon + dlon
+    );
     let j = get_json(src, &url)?;
     let near = j
         .as_array()
         .into_iter()
         .flatten()
-        .filter_map(|m| Some((dist_km((lat, lon), (m["lat"].as_f64()?, m["lon"].as_f64()?)), m)))
+        .filter_map(|m| {
+            Some((
+                dist_km((lat, lon), (m["lat"].as_f64()?, m["lon"].as_f64()?)),
+                m,
+            ))
+        })
         .filter(|(d, _)| *d < STATION_KM)
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .map(|(_, m)| m)
@@ -226,16 +251,34 @@ fn from_metar(m: &serde_json::Value) -> Option<Target> {
     layers.sort_by(|a, b| a.1.total_cmp(&b.1));
     let cb = tokens.iter().any(|t| t.ends_with("CB"));
     let tcu = tokens.iter().any(|t| t.ends_with("TCU"));
-    let storms = if wx.contains("TS") { 0.75 } else if cb { 0.45 } else if tcu { 0.2 } else { 0.0 };
+    let storms = if wx.contains("TS") {
+        0.75
+    } else if cb {
+        0.45
+    } else if tcu {
+        0.2
+    } else {
+        0.0
+    };
     let (clouds, base_m, alto) = match layers.first() {
         None => (0.03, None, 0.0),
         Some(&(_, base)) => {
-            let low = layers.iter().filter(|l| l.1 < base + 1000.0).map(|l| l.0).fold(0.0f32, f32::max);
-            let high = layers.iter().filter(|l| l.1 >= base + 1000.0).map(|l| l.0).fold(0.0f32, f32::max);
+            let low = layers
+                .iter()
+                .filter(|l| l.1 < base + 1000.0)
+                .map(|l| l.0)
+                .fold(0.0f32, f32::max);
+            let high = layers
+                .iter()
+                .filter(|l| l.1 >= base + 1000.0)
+                .map(|l| l.0)
+                .fold(0.0f32, f32::max);
             (low, Some(base.clamp(300.0, 4000.0)), high)
         }
     };
-    let foggy = ["FG", "BR", "HZ", "FU", "DU", "SA"].iter().any(|w| wx.contains(w));
+    let foggy = ["FG", "BR", "HZ", "FU", "DU", "SA"]
+        .iter()
+        .any(|w| wx.contains(w));
     Some(Target {
         clouds,
         base_m,
@@ -245,7 +288,9 @@ fn from_metar(m: &serde_json::Value) -> Option<Target> {
         haze: haze(if cavok { None } else { vis_km }, foggy),
         wind,
         wind_from,
-        gusts: gust.map(|g| ((g - wind) / 8.0).clamp(0.0, 1.0)).unwrap_or(0.1),
+        gusts: gust
+            .map(|g| ((g - wind) / 8.0).clamp(0.0, 1.0))
+            .unwrap_or(0.1),
         qnh: m["altim"].as_f64().filter(|q| (850.0..1100.0).contains(q)),
         station,
         raw,
@@ -255,15 +300,23 @@ fn from_metar(m: &serde_json::Value) -> Option<Target> {
 /// "6+", "1/2", "1 1/2" statute miles.
 fn sm(s: &str) -> Option<f64> {
     let s = s.trim().trim_end_matches('+');
-    s.split_whitespace().map(|p| match p.split_once('/') {
-        Some((a, b)) => Some(a.parse::<f64>().ok()? / b.parse::<f64>().ok()?),
-        None => p.parse().ok(),
-    }).sum()
+    s.split_whitespace()
+        .map(|p| match p.split_once('/') {
+            Some((a, b)) => Some(a.parse::<f64>().ok()? / b.parse::<f64>().ok()?),
+            None => p.parse().ok(),
+        })
+        .sum()
 }
 
 /// Cloud layer thickness: towering with storms, a deck when overcast.
 fn depth(clouds: f32, storms: f32) -> f32 {
-    if storms > 0.3 { 6000.0 } else if clouds >= 0.75 { 2500.0 } else { 1800.0 }
+    if storms > 0.3 {
+        6000.0
+    } else if clouds >= 0.75 {
+        2500.0
+    } else {
+        1800.0
+    }
 }
 
 /// The haze slider for a visibility (km). The sky model's clear air already
@@ -272,7 +325,9 @@ fn depth(clouds: f32, storms: f32) -> f32 {
 fn haze(vis_km: Option<f64>, foggy: bool) -> f32 {
     match vis_km {
         None => 1.0,
-        Some(v) if v >= 9.5 && !foggy => 1.0 + (2.5 * (1.0 - (v - 9.5) / 15.0)).clamp(0.0, 2.5) as f32,
+        Some(v) if v >= 9.5 && !foggy => {
+            1.0 + (2.5 * (1.0 - (v - 9.5) / 15.0)).clamp(0.0, 2.5) as f32
+        }
         Some(v) => {
             let h = (3.912 / (v.max(0.1) * 1000.0) - 13.558e-6) / 8.396e-6;
             h.clamp(6.0, 40.0) as f32
@@ -317,7 +372,9 @@ fn from_open_meteo(j: &serde_json::Value) -> Option<Target> {
         haze: haze(f("visibility").map(|v| v / 1000.0), matches!(code, 45 | 48)),
         wind,
         wind_from: f("wind_direction_10m"),
-        gusts: f("wind_gusts_10m").map(|g| ((g - wind) / 8.0).clamp(0.0, 1.0)).unwrap_or(0.1),
+        gusts: f("wind_gusts_10m")
+            .map(|g| ((g - wind) / 8.0).clamp(0.0, 1.0))
+            .unwrap_or(0.1),
         qnh: f("pressure_msl").filter(|q| (850.0..1100.0).contains(q)),
         station: "Open-Meteo".into(),
         raw: String::new(),
@@ -345,7 +402,10 @@ mod tests {
 
         let cavok = serde_json::json!({"icaoId":"EBBR","rawOb":"METAR EBBR 151720Z 19010KT CAVOK 10/09 Q0999","elev":56,"wdir":190,"wspd":10,"visib":"6+","clouds":[]});
         let t = from_metar(&cavok).unwrap();
-        assert_eq!((t.clouds, t.base_m, t.storms, t.haze), (0.03, None, 0.0, 1.0));
+        assert_eq!(
+            (t.clouds, t.base_m, t.storms, t.haze),
+            (0.03, None, 0.0, 1.0)
+        );
 
         let fog = serde_json::json!({"icaoId":"LFPG","rawOb":"METAR LFPG 150600Z VRB02KT 0300 FG VV001 05/05 Q1020","wdir":"VRB","wspd":2,"visib":0.25,"wxString":"FG","clouds":[{"cover":"OVX","base":100}]});
         let t = from_metar(&fog).unwrap();

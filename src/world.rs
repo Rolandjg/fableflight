@@ -3,10 +3,15 @@
 use crate::buildings::{self, Footprint, Parked, TreeChunk};
 use crate::cars::{self, Car};
 use crate::geo::{self, TileId};
-use crate::render::{BuildGpu, DetailDraw, Inst, NearDraw, Renderer, TileGpu, TreeDraw, TreeInst, MAX_NEAR};
+use crate::render::{
+    BuildGpu, DetailDraw, Inst, MAX_NEAR, NearDraw, Renderer, TileGpu, TreeDraw, TreeInst,
+};
 use crate::roads::RoadNet;
-use crate::trees::{lod_span, tree_jit, NearCell, TreeDim, Under, CARDS, CARD_RANGE, IMP_DIST, LODS, LOD_DIST, LOD_JITTER, TREE_SPECIES, VARIANTS};
-use crate::sources::{Job, JobResult, Loader, DATA_ZOOM, GRID, GV};
+use crate::sources::{DATA_ZOOM, GRID, GV, Job, JobResult, Loader};
+use crate::trees::{
+    CARD_RANGE, CARDS, IMP_DIST, LOD_DIST, LOD_JITTER, LODS, NearCell, TREE_SPECIES, TreeDim,
+    Under, VARIANTS, lod_span, tree_jit,
+};
 use glam::{DMat4, DVec3, DVec4, Vec3};
 use std::collections::{HashMap, VecDeque};
 
@@ -147,7 +152,12 @@ fn tess_block(id: TileId, lat: f64, lon: f64, agl: f64, cell: f64) -> [f32; 4] {
     let rh = (r * r - agl.max(0.0).powi(2)).sqrt() / cell;
     let (u, v) = id.frac(lat, lon);
     let (cx, cy) = (u * GRID as f64, v * GRID as f64);
-    let span = |c: f64| ((c - rh).floor().clamp(0.0, GRID as f64), (c + rh).ceil().clamp(0.0, GRID as f64));
+    let span = |c: f64| {
+        (
+            (c - rh).floor().clamp(0.0, GRID as f64),
+            (c + rh).ceil().clamp(0.0, GRID as f64),
+        )
+    };
     let ((x0, x1), (y0, y1)) = (span(cx), span(cy));
     if x1 <= x0 || y1 <= y0 {
         return [0.0; 4];
@@ -158,7 +168,11 @@ fn tess_block(id: TileId, lat: f64, lon: f64, agl: f64, cell: f64) -> [f32; 4] {
 pub fn crater_profile(d: f64) -> f64 {
     let k = (d - 1.1) / 0.24;
     let rim = 0.22 * (-k * k).exp();
-    if d < 1.0 { rim - (1.0 - d * d).powi(2) } else { rim }
+    if d < 1.0 {
+        rim - (1.0 - d * d).powi(2)
+    } else {
+        rim
+    }
 }
 
 /// Distance (beyond a tile's bounding sphere) within which its middle and
@@ -223,7 +237,12 @@ impl Frustum {
     pub fn new(vp: DMat4) -> Self {
         let r = |i: usize| DVec4::new(vp.x_axis[i], vp.y_axis[i], vp.z_axis[i], vp.w_axis[i]);
         let norm = |p: DVec4| p / p.truncate().length();
-        Self([norm(r(3) + r(0)), norm(r(3) - r(0)), norm(r(3) + r(1)), norm(r(3) - r(1))])
+        Self([
+            norm(r(3) + r(0)),
+            norm(r(3) - r(0)),
+            norm(r(3) + r(1)),
+            norm(r(3) - r(1)),
+        ])
     }
     pub fn sphere(&self, c: DVec3, r: f64) -> bool {
         self.0.iter().all(|p| p.truncate().dot(c) + p.w > -r)
@@ -232,8 +251,41 @@ impl Frustum {
 
 impl World {
     pub fn new(loader: Loader, max_zoom: u8) -> Self {
-        let photo = Some(Box::new(crate::tiles3d::Photo::new(loader.src.google.clone(), Some(loader.src.clone()))));
-        Self { photo, flat: None, loader, tiles: HashMap::new(), builds: HashMap::new(), frame: 0, in_flight: 0, max_zoom, lod_k: 0.62, reach_k: 1.0, city_k: 1.0, tree_far: 3200.0, tree_imp_k: 1.0, cars: (1.0, 2200.0, 1100.0), buildings_on: true, draw: Vec::new(), draw_shore: Vec::new(), draw_b: Vec::new(), wanted: Vec::new(), in_view: Vec::new(), frustum: None, craters: Vec::new(), tree_dims: Vec::new(), tick: 0, stats: (0, 0, 0), last_update: None, uploads: VecDeque::new(), fields: HashMap::new(), ocean: crate::ocean::Ocean::new() }
+        let photo = Some(Box::new(crate::tiles3d::Photo::new(
+            loader.src.google.clone(),
+            Some(loader.src.clone()),
+        )));
+        Self {
+            photo,
+            flat: None,
+            loader,
+            tiles: HashMap::new(),
+            builds: HashMap::new(),
+            frame: 0,
+            in_flight: 0,
+            max_zoom,
+            lod_k: 0.62,
+            reach_k: 1.0,
+            city_k: 1.0,
+            tree_far: 3200.0,
+            tree_imp_k: 1.0,
+            cars: (1.0, 2200.0, 1100.0),
+            buildings_on: true,
+            draw: Vec::new(),
+            draw_shore: Vec::new(),
+            draw_b: Vec::new(),
+            wanted: Vec::new(),
+            in_view: Vec::new(),
+            frustum: None,
+            craters: Vec::new(),
+            tree_dims: Vec::new(),
+            tick: 0,
+            stats: (0, 0, 0),
+            last_update: None,
+            uploads: VecDeque::new(),
+            fields: HashMap::new(),
+            ocean: crate::ocean::Ocean::new(),
+        }
     }
 
     /// Height of the ground (or water surface) at a lat/lon: the top of the
@@ -241,7 +293,11 @@ impl World {
     /// terrain everywhere else.
     pub fn ground(&self, lat: f64, lon: f64) -> Option<Ground> {
         let g = self.terrain_ground(lat, lon);
-        if let Some(mut h) = self.photo.as_deref().and_then(|p| p.ground(lat, lon, g.as_ref().map(|g| g.h))) {
+        if let Some(mut h) = self
+            .photo
+            .as_deref()
+            .and_then(|p| p.ground(lat, lon, g.as_ref().map(|g| g.h)))
+        {
             // Our water (the mesh's is a still photograph): ditching floats on it.
             let water = g.as_ref().is_some_and(|g| g.water && h < g.h + 1.5);
             if water {
@@ -265,7 +321,18 @@ impl World {
     /// photographed city has traffic after dark. `streets`: the mesh's tiles
     /// round `b`, gathered when a car first needs them.
     #[allow(clippy::too_many_arguments)]
-    fn photo_car_light<'a>(&self, photo: &'a crate::tiles3d::Photo, streets: &mut Option<Option<crate::tiles3d::Streets<'a>>>, b: &BTile, i: usize, c: &Car, pos: DVec3, dir: Vec3, cam: DVec3, out: &mut Vec<crate::airfield::Light>) {
+    fn photo_car_light<'a>(
+        &self,
+        photo: &'a crate::tiles3d::Photo,
+        streets: &mut Option<Option<crate::tiles3d::Streets<'a>>>,
+        b: &BTile,
+        i: usize,
+        c: &Car,
+        pos: DVec3,
+        dir: Vec3,
+        cam: DVec3,
+        out: &mut Vec<crate::airfield::Light>,
+    ) {
         use crate::airfield::Light;
         // Cars are drawn out to `cars.1` (2.2 km at High); their lights fade
         // out before that, so the traffic has no edge.
@@ -273,7 +340,13 @@ impl World {
         let fade = (car_far * 0.27).max(1.0);
         let d = (pos - cam).length();
         // Room left for the aircraft and the obstruction lights.
-        if out.len() + 4 > crate::render::MAX_DYN_LIGHTS - 1024 || !self.frustum.as_ref().map(|f| f.sphere(pos - cam, 8.0)).unwrap_or(true) {
+        if out.len() + 4 > crate::render::MAX_DYN_LIGHTS - 1024
+            || !self
+                .frustum
+                .as_ref()
+                .map(|f| f.sphere(pos - cam, 8.0))
+                .unwrap_or(true)
+        {
             return;
         }
         let road = pos.length() - geo::R;
@@ -281,16 +354,21 @@ impl World {
         // frame (the cars in turn), or when the car comes into view.
         let frame = self.frame as u32;
         let (dh, at) = c.street.get();
-        let street = if at != u32::MAX && frame.wrapping_sub(at) < 8 && (frame as usize + i) % 8 != 0 {
-            road + dh as f64
-        } else {
-            let Some(st) = streets.get_or_insert_with(|| photo.streets(b.center, b.radius + 20.0)).as_ref().and_then(|s| s.at(pos, road)) else {
-                c.street.set((0.0, u32::MAX));
-                return;
+        let street =
+            if at != u32::MAX && frame.wrapping_sub(at) < 8 && (frame as usize + i) % 8 != 0 {
+                road + dh as f64
+            } else {
+                let Some(st) = streets
+                    .get_or_insert_with(|| photo.streets(b.center, b.radius + 20.0))
+                    .as_ref()
+                    .and_then(|s| s.at(pos, road))
+                else {
+                    c.street.set((0.0, u32::MAX));
+                    return;
+                };
+                c.street.set(((st - road) as f32, frame));
+                st
             };
-            c.street.set(((st - road) as f32, frame));
-            st
-        };
         let k = ((car_far - d) / fade).clamp(0.0, 1.0) as f32;
         let n = pos.normalize();
         let base = (n * (geo::R + street) - cam).as_vec3();
@@ -345,10 +423,12 @@ impl World {
         let p = geo::lla_to_pos(lat, lon, g.h);
         let (e, n, _) = geo::enu(p);
         let b = std::iter::once((0.0, 0.0))
-            .chain([1.5f64, 3.0, 5.0].iter().flat_map(|&r| (0..8).map(move |k| {
-                let a = k as f64 * std::f64::consts::FRAC_PI_4;
-                (r * a.cos(), r * a.sin())
-            })))
+            .chain([1.5f64, 3.0, 5.0].iter().flat_map(|&r| {
+                (0..8).map(move |k| {
+                    let a = k as f64 * std::f64::consts::FRAC_PI_4;
+                    (r * a.cos(), r * a.sin())
+                })
+            }))
             .find_map(|(x, y)| {
                 let (la, lo, _) = geo::pos_to_lla(p + e * x + n * y);
                 self.footprint_at(la, lo).filter(|b| !b.bridge)
@@ -373,7 +453,11 @@ impl World {
                 }
                 let c = w.ring.iter().fold(DVec3::ZERO, |a, p| a + *p) / n as f64;
                 let (e, nn, _) = geo::enu(c);
-                let r2: Vec<glam::DVec2> = w.ring.iter().map(|p| glam::DVec2::new((*p - c).dot(e), (*p - c).dot(nn))).collect();
+                let r2: Vec<glam::DVec2> = w
+                    .ring
+                    .iter()
+                    .map(|p| glam::DVec2::new((*p - c).dot(e), (*p - c).dot(nn)))
+                    .collect();
                 let area: f64 = (0..n).map(|i| r2[i].perp_dot(r2[(i + 1) % n])).sum::<f64>();
                 let sign = area.signum();
                 (0..n)
@@ -384,10 +468,21 @@ impl World {
                         let (n0, n1) = (-e0.perp() * sign, -e1.perp() * sign);
                         let m = n0 + n1;
                         let k = m.length_squared();
-                        let off = if k > 0.15 { m * (2.0 / k) } else { (n0 + n1).normalize_or_zero() };
-                        let off = if off.length() > 2.5 { off.normalize() * 2.5 } else { off };
+                        let off = if k > 0.15 {
+                            m * (2.0 / k)
+                        } else {
+                            (n0 + n1).normalize_or_zero()
+                        };
+                        let off = if off.length() > 2.5 {
+                            off.normalize() * 2.5
+                        } else {
+                            off
+                        };
                         let at = |d: f64| c + e * (v.x + off.x * d) + nn * (v.y + off.y * d);
-                        let d = [grow, grow * 0.6, grow * 0.3].into_iter().find(|&d| free(at(d)) && free(at(d * 0.5))).unwrap_or(0.15);
+                        let d = [grow, grow * 0.6, grow * 0.3]
+                            .into_iter()
+                            .find(|&d| free(at(d)) && free(at(d * 0.5)))
+                            .unwrap_or(0.15);
                         at(d)
                     })
                     .collect()
@@ -403,12 +498,29 @@ impl World {
 
     /// Streams the 3D tiles for this frame (see tiles3d.rs for the arguments).
     #[allow(clippy::too_many_arguments)]
-    pub fn update_photo(&mut self, r: &Renderer, cam: DVec3, focus: DVec3, fr: &Frustum, px: f64, day: f64, dt: f64) {
+    pub fn update_photo(
+        &mut self,
+        r: &Renderer,
+        cam: DVec3,
+        focus: DVec3,
+        fr: &Frustum,
+        px: f64,
+        day: f64,
+        dt: f64,
+    ) {
         let mut p = self.photo.take().expect("photo tiles");
         let fine = 13.min(self.max_zoom);
         // (a sample is only good for the datum on fine terrain, and not on a
         // building's roof: downtown most of the mesh is roofs and walls)
-        p.update(r, cam, focus, fr, px, day, dt, &|la, lo| self.terrain_ground(la, lo).map(|g| (g.h, self.ground_zoom(la, lo).is_some_and(|z| z >= fine) && self.footprint_at(la, lo).is_none())));
+        p.update(r, cam, focus, fr, px, day, dt, &|la, lo| {
+            self.terrain_ground(la, lo).map(|g| {
+                (
+                    g.h,
+                    self.ground_zoom(la, lo).is_some_and(|z| z >= fine)
+                        && self.footprint_at(la, lo).is_none(),
+                )
+            })
+        });
         self.photo = Some(p);
     }
 
@@ -429,16 +541,21 @@ impl World {
             let id = TileId::at(lat, lon, z);
             if let Some(Slot::Ready(t)) = self.tiles.get(&id) {
                 let (u, v) = id.frac(lat, lon);
-                let (x, y) = ((u * GRID as f64).clamp(0.0, GRID as f64 - 1e-6), (v * GRID as f64).clamp(0.0, GRID as f64 - 1e-6));
+                let (x, y) = (
+                    (u * GRID as f64).clamp(0.0, GRID as f64 - 1e-6),
+                    (v * GRID as f64).clamp(0.0, GRID as f64 - 1e-6),
+                );
                 let (x0, y0) = (x as usize, y as usize);
                 let (fx, fy) = ((x - x0 as f64) as f32, (y - y0 as f64) as f32);
                 let g = |i: usize, j: usize| t.heights[j * GV + i];
-                let h = (g(x0, y0) * (1.0 - fx) + g(x0 + 1, y0) * fx) * (1.0 - fy) + (g(x0, y0 + 1) * (1.0 - fx) + g(x0 + 1, y0 + 1) * fx) * fy;
+                let h = (g(x0, y0) * (1.0 - fx) + g(x0 + 1, y0) * fx) * (1.0 - fy)
+                    + (g(x0, y0 + 1) * (1.0 - fx) + g(x0 + 1, y0 + 1) * fx) * fy;
                 let w = t.water[(y + 0.5) as usize * GV + (x + 0.5) as usize];
                 let mut h = h as f64;
                 // Water rides the ocean's long waves, as much as it shows them.
                 let s = |i: usize, j: usize| t.sea[j * GV + i];
-                let sea = (s(x0, y0) * (1.0 - fx) + s(x0 + 1, y0) * fx) * (1.0 - fy) + (s(x0, y0 + 1) * (1.0 - fx) + s(x0 + 1, y0 + 1) * fx) * fy;
+                let sea = (s(x0, y0) * (1.0 - fx) + s(x0 + 1, y0) * fx) * (1.0 - fy)
+                    + (s(x0, y0 + 1) * (1.0 - fx) + s(x0 + 1, y0 + 1) * fx) * fy;
                 if w && sea > 0.0 {
                     h += sea as f64 * self.ocean.height(geo::lla_to_pos(lat, lon, h));
                 }
@@ -476,8 +593,21 @@ impl World {
             let (u, v) = id.frac(lat, lon);
             let p = [u as f32, v as f32];
             for (i, f) in b.footprints.iter().enumerate() {
-                if f.alive && p[0] >= f.min[0] && p[0] <= f.max[0] && p[1] >= f.min[1] && p[1] <= f.max[1] && buildings::point_in_ring(p, &f.ring) {
-                    return Some(BHit { base: f.base as f64, top: f.top as f64, bridge: f.kind == 1, tile: id, idx: i, area: f.area });
+                if f.alive
+                    && p[0] >= f.min[0]
+                    && p[0] <= f.max[0]
+                    && p[1] >= f.min[1]
+                    && p[1] <= f.max[1]
+                    && buildings::point_in_ring(p, &f.ring)
+                {
+                    return Some(BHit {
+                        base: f.base as f64,
+                        top: f.top as f64,
+                        bridge: f.kind == 1,
+                        tile: id,
+                        idx: i,
+                        area: f.area,
+                    });
                 }
             }
         }
@@ -500,7 +630,9 @@ impl World {
                     continue;
                 }
                 let id = TileId::new(DATA_ZOOM, x as u32, y as u32);
-                let Some(BSlot::Ready(b)) = self.builds.get(&id) else { continue };
+                let Some(BSlot::Ready(b)) = self.builds.get(&id) else {
+                    continue;
+                };
                 let lp = (p - b.center).as_vec3();
                 for ch in &b.chunks {
                     if (ch.center - lp).length() > ch.radius + r as f32 + 40.0 {
@@ -518,9 +650,23 @@ impl World {
                             if horiz.length_squared() > r * r {
                                 continue;
                             }
-                            let dim = self.tree_dims.get(b.tree_var[i] as usize).copied().unwrap_or_default();
+                            let dim = self
+                                .tree_dims
+                                .get(b.tree_var[i] as usize)
+                                .copied()
+                                .unwrap_or_default();
                             let (hs, ws) = (t.a[3] as f64, (t.a[3] * t.b[3]) as f64);
-                            out.push(TreeRef { tile: id, idx: i, pos: b.center + glam::Vec3::new(t.a[0], t.a[1], t.a[2]).as_dvec3(), height: dim.height as f64 * hs, crown_r: dim.crown_r as f64 * ws, crown_base: dim.crown_base as f64 * hs, trunk_r: dim.trunk_r as f64 * ws, variant: b.tree_var[i], inst: *t });
+                            out.push(TreeRef {
+                                tile: id,
+                                idx: i,
+                                pos: b.center + glam::Vec3::new(t.a[0], t.a[1], t.a[2]).as_dvec3(),
+                                height: dim.height as f64 * hs,
+                                crown_r: dim.crown_r as f64 * ws,
+                                crown_base: dim.crown_base as f64 * hs,
+                                trunk_r: dim.trunk_r as f64 * ws,
+                                variant: b.tree_var[i],
+                                inst: *t,
+                            });
                         }
                     }
                 }
@@ -541,8 +687,15 @@ impl World {
     }
 
     /// Remove a building from the world and hand back what is needed to wreck it.
-    pub fn destroy_building(&mut self, queue: &wgpu::Queue, tile: TileId, idx: usize) -> Option<Wreck> {
-        let Some(BSlot::Ready(b)) = self.builds.get_mut(&tile) else { return None };
+    pub fn destroy_building(
+        &mut self,
+        queue: &wgpu::Queue,
+        tile: TileId,
+        idx: usize,
+    ) -> Option<Wreck> {
+        let Some(BSlot::Ready(b)) = self.builds.get_mut(&tile) else {
+            return None;
+        };
         let f = b.footprints.get_mut(idx)?;
         if !f.alive || f.kind != 0 {
             return None;
@@ -555,11 +708,25 @@ impl World {
                 }
             }
         }
-        let ring = f.ring.iter().map(|p| {
-            let (lat, lon) = tile.lat_lon(p[0] as f64, p[1] as f64);
-            geo::lla_to_pos(lat, lon, f.base as f64)
-        }).collect();
-        Some(Wreck { ring, base: f.base as f64, top: f.top as f64, col: f.col, tile, sty: f.sty, gref: f.gref as f64, roof_col: f.roof_col, tiers: f.tiers.clone() })
+        let ring = f
+            .ring
+            .iter()
+            .map(|p| {
+                let (lat, lon) = tile.lat_lon(p[0] as f64, p[1] as f64);
+                geo::lla_to_pos(lat, lon, f.base as f64)
+            })
+            .collect();
+        Some(Wreck {
+            ring,
+            base: f.base as f64,
+            top: f.top as f64,
+            col: f.col,
+            tile,
+            sty: f.sty,
+            gref: f.gref as f64,
+            roof_col: f.roof_col,
+            tiers: f.tiers.clone(),
+        })
     }
 
     /// The rest of the building a footprint belongs to, which comes down with
@@ -567,8 +734,12 @@ impl World {
     /// and, for a tall building, the parts beside it that rise about as high
     /// (towers are often mapped as several full-height pieces side by side).
     pub fn structure_of(&self, tile: TileId, idx: usize) -> Vec<(TileId, usize)> {
-        let Some(BSlot::Ready(b0)) = self.builds.get(&tile) else { return Vec::new() };
-        let Some(f0) = b0.footprints.get(idx) else { return Vec::new() };
+        let Some(BSlot::Ready(b0)) = self.builds.get(&tile) else {
+            return Vec::new();
+        };
+        let Some(f0) = b0.footprints.get(idx) else {
+            return Vec::new();
+        };
         let org = b0.center + f0.center.as_dvec3();
         let (e, n, _) = geo::enu(org);
         let hit_h = f0.top - f0.base;
@@ -598,15 +769,24 @@ impl World {
                     continue;
                 }
                 let id = TileId::new(DATA_ZOOM, x as u32, y as u32);
-                let Some(BSlot::Ready(b)) = self.builds.get(&id) else { continue };
+                let Some(BSlot::Ready(b)) = self.builds.get(&id) else {
+                    continue;
+                };
                 for (i, f) in b.footprints.iter().enumerate() {
                     if !f.alive || f.kind != 0 || f.ring.len() < 3 {
                         continue;
                     }
-                    if (b.center + f.center.as_dvec3() - org).length() > 250.0 + f.area.sqrt() as f64 {
+                    if (b.center + f.center.as_dvec3() - org).length()
+                        > 250.0 + f.area.sqrt() as f64
+                    {
                         continue;
                     }
-                    cands.push(Cand { id: (id, i), ring: f.ring.iter().map(|p| to_local(id, *p)).collect(), base: f.base, top: f.top });
+                    cands.push(Cand {
+                        id: (id, i),
+                        ring: f.ring.iter().map(|p| to_local(id, *p)).collect(),
+                        base: f.base,
+                        top: f.top,
+                    });
                 }
             }
         }
@@ -615,7 +795,9 @@ impl World {
             let mut j = r.len() - 1;
             for i in 0..r.len() {
                 let (p0, p1) = (r[i], r[j]);
-                if (p0.y > p.y) != (p1.y > p.y) && p.x < (p1.x - p0.x) * (p.y - p0.y) / (p1.y - p0.y) + p0.x {
+                if (p0.y > p.y) != (p1.y > p.y)
+                    && p.x < (p1.x - p0.x) * (p.y - p0.y) / (p1.y - p0.y) + p0.x
+                {
                     c = !c;
                 }
                 j = i;
@@ -637,7 +819,9 @@ impl World {
             };
             a.iter().any(|p| near(*p, b)) || b.iter().any(|p| near(*p, a))
         };
-        let Some(start) = cands.iter().position(|c| c.id == (tile, idx)) else { return Vec::new() };
+        let Some(start) = cands.iter().position(|c| c.id == (tile, idx)) else {
+            return Vec::new();
+        };
         let mut taken = vec![false; cands.len()];
         taken[start] = true;
         let mut todo = vec![start];
@@ -668,8 +852,13 @@ impl World {
     /// (Under the 3D tiles too: they are cut out of the mesh when they come down.)
     /// A standing building's base, top and footprint area.
     pub fn footprint(&self, tile: TileId, idx: usize) -> Option<(f64, f64, f32)> {
-        let Some(BSlot::Ready(b)) = self.builds.get(&tile) else { return None };
-        b.footprints.get(idx).filter(|f| f.alive).map(|f| (f.base as f64, f.top as f64, f.area))
+        let Some(BSlot::Ready(b)) = self.builds.get(&tile) else {
+            return None;
+        };
+        b.footprints
+            .get(idx)
+            .filter(|f| f.alive)
+            .map(|f| (f.base as f64, f.top as f64, f.area))
     }
 
     pub fn buildings_near(&self, p: DVec3, r: f64, max_area: f32) -> Vec<(TileId, usize)> {
@@ -679,7 +868,11 @@ impl World {
         if let Some(BSlot::Ready(b)) = self.builds.get(&id) {
             let lp = (p - b.center).as_vec3();
             for (i, f) in b.footprints.iter().enumerate() {
-                if f.alive && f.kind == 0 && f.area < max_area && (f.center - lp).length() < r as f32 {
+                if f.alive
+                    && f.kind == 0
+                    && f.area < max_area
+                    && (f.center - lp).length() < r as f32
+                {
                     out.push((id, i));
                 }
             }
@@ -704,16 +897,22 @@ impl World {
                     continue;
                 }
                 let id = TileId::new(DATA_ZOOM, x as u32, y as u32);
-                let Some(BSlot::Ready(b)) = self.builds.get(&id) else { continue };
+                let Some(BSlot::Ready(b)) = self.builds.get(&id) else {
+                    continue;
+                };
                 let lp = (p - b.center).as_vec3();
                 for f in &b.footprints {
                     if !f.alive || (f.center - lp).length() > r as f32 + f.area.sqrt() {
                         continue;
                     }
-                    let ring = f.ring.iter().map(|q| {
-                        let (la, lo) = id.lat_lon(q[0] as f64, q[1] as f64);
-                        geo::lla_to_pos(la, lo, f.base as f64)
-                    }).collect();
+                    let ring = f
+                        .ring
+                        .iter()
+                        .map(|q| {
+                            let (la, lo) = id.lat_lon(q[0] as f64, q[1] as f64);
+                            geo::lla_to_pos(la, lo, f.base as f64)
+                        })
+                        .collect();
                     out.push((ring, f.base as f64, f.top as f64, f.kind == 1));
                 }
             }
@@ -754,7 +953,11 @@ impl World {
                 3 => (0, -1),
                 _ => (0, 1),
             };
-            let nid = TileId::new(DATA_ZOOM, (from.x as i64 + dx).rem_euclid(size) as u32, (from.y as i64 + dy).clamp(0, size - 1) as u32);
+            let nid = TileId::new(
+                DATA_ZOOM,
+                (from.x as i64 + dx).rem_euclid(size) as u32,
+                (from.y as i64 + dy).clamp(0, size - 1) as u32,
+            );
             let from_center = match self.builds.get(&from) {
                 Some(BSlot::Ready(b)) => b.center,
                 _ => continue,
@@ -779,14 +982,37 @@ impl World {
     /// Instances for every visible moving and parked car; and, at night
     /// (`sun`: sine of the sun's elevation at the camera), the lights of the
     /// moving ones that the 3D tiles hide (`photo_car_light`).
-    pub fn car_instances(&self, cam: DVec3, activity: f32, sun: f64, out: &mut Vec<(u32, Inst)>, lights: &mut Vec<crate::airfield::Light>) {
+    pub fn car_instances(
+        &self,
+        cam: DVec3,
+        activity: f32,
+        sun: f64,
+        out: &mut Vec<(u32, Inst)>,
+        lights: &mut Vec<crate::airfield::Light>,
+    ) {
         let fr = self.frustum.as_ref();
-        let mut push = |pos: DVec3, fwd: glam::Vec3, up: glam::Vec3, model: u8, col: [f32; 3], out: &mut Vec<(u32, Inst)>| {
+        let mut push = |pos: DVec3,
+                        fwd: glam::Vec3,
+                        up: glam::Vec3,
+                        model: u8,
+                        col: [f32; 3],
+                        out: &mut Vec<(u32, Inst)>| {
             let o = (pos - cam).as_vec3();
             if fr.map(|f| f.sphere(pos - cam, 8.0)).unwrap_or(true) {
                 let right = fwd.cross(up).normalize_or_zero();
                 let upv = right.cross(fwd);
-                out.push((model as u32, Inst { m: [[right.x, upv.x, -fwd.x, o.x], [right.y, upv.y, -fwd.y, o.y], [right.z, upv.z, -fwd.z, o.z]], tint: [col[0], col[1], col[2], 0.0], ext: [0.0, 0.0, 0.0, 1.0] }));
+                out.push((
+                    model as u32,
+                    Inst {
+                        m: [
+                            [right.x, upv.x, -fwd.x, o.x],
+                            [right.y, upv.y, -fwd.y, o.y],
+                            [right.z, upv.z, -fwd.z, o.z],
+                        ],
+                        tint: [col[0], col[1], col[2], 0.0],
+                        ext: [0.0, 0.0, 0.0, 1.0],
+                    },
+                ));
             }
         };
         let photo = self.photo.as_deref().filter(|_| sun < 0.15);
@@ -797,7 +1023,9 @@ impl World {
         // Each car has its own rank: the settings keep the lower share of them.
         let activity = activity * share;
         for id in &self.draw_b {
-            let Some(BSlot::Ready(b)) = self.builds.get(id) else { continue };
+            let Some(BSlot::Ready(b)) = self.builds.get(id) else {
+                continue;
+            };
             let d = (b.center - cam).length() - b.radius;
             if d > car_far {
                 continue;
@@ -812,7 +1040,11 @@ impl World {
                 let (p, dir) = cars::pose(&b.net, c, up);
                 let pos = b.center + (p + c.shift).as_dvec3();
                 if (pos - cam).length_squared() < car_far * car_far {
-                    let fwd = if c.dir == glam::Vec3::ZERO { dir } else { c.dir };
+                    let fwd = if c.dir == glam::Vec3::ZERO {
+                        dir
+                    } else {
+                        c.dir
+                    };
                     push(pos, fwd, up, c.model, c.col, out);
                     if let Some(photo) = lit {
                         self.photo_car_light(photo, &mut streets, b, i, c, pos, fwd, cam, lights);
@@ -833,7 +1065,10 @@ impl World {
     pub fn update(&mut self, r: &Renderer, cam: DVec3, fr: &Frustum) {
         self.frame += 1;
         let now = std::time::Instant::now();
-        let real_dt = self.last_update.map(|t| (now - t).as_secs_f32().min(0.25)).unwrap_or(0.0);
+        let real_dt = self
+            .last_update
+            .map(|t| (now - t).as_secs_f32().min(0.25))
+            .unwrap_or(0.0);
         self.last_update = Some(now);
         // Take finished tiles off the worker pool, capping the GPU uploads per
         // frame both in count and in bytes (see UPLOAD_BUDGET). Terrain goes
@@ -848,13 +1083,24 @@ impl World {
                     let slot = match res {
                         Ok(td) => {
                             bytes += crate::render::tile_bytes(&td);
-                            Slot::Ready(Box::new(Tile { center: td.center, radius: td.radius, gpu: r.upload_tile(&td), heights: td.heights, water: td.water, sea: td.sea, last_used: self.frame, generation: td.imagery_gen, refreshing: false }))
+                            Slot::Ready(Box::new(Tile {
+                                center: td.center,
+                                radius: td.radius,
+                                gpu: r.upload_tile(&td),
+                                heights: td.heights,
+                                water: td.water,
+                                sea: td.sea,
+                                last_used: self.frame,
+                                generation: td.imagery_gen,
+                                refreshing: false,
+                            }))
                         }
                         Err(e) => {
                             log::debug!("tile {id:?} failed: {e}");
                             // A refresh that failed keeps the tile it was replacing.
                             if let Some(Slot::Ready(t)) = self.tiles.get_mut(&id) {
-                                (t.generation, t.refreshing) = (self.loader.src.google.generation(), false);
+                                (t.generation, t.refreshing) =
+                                    (self.loader.src.google.generation(), false);
                                 continue;
                             }
                             Slot::Failed
@@ -870,7 +1116,13 @@ impl World {
                             // The slot stays Loading until the geometry is all on the GPU.
                             bytes += bd.atlas.iter().map(|m| m.len()).sum::<usize>();
                             let gpu = r.upload_buildings(&bd);
-                            self.uploads.push_back(Upload { id, data: Box::new(bd), gpu, part: 0, off: 0 });
+                            self.uploads.push_back(Upload {
+                                id,
+                                data: Box::new(bd),
+                                gpu,
+                                part: 0,
+                                off: 0,
+                            });
                         }
                         Err(_) => {
                             self.builds.remove(&id);
@@ -884,9 +1136,28 @@ impl World {
                         Ok((geo, mesh)) => {
                             bytes += Renderer::field_bytes(&mesh);
                             let gpu = r.upload_field(&mesh);
-                            let traffic = crate::traffic::Traffic::new(&geo, i.wrapping_mul(2654435761) ^ 0x5bd1e995);
-                            log::info!("airfield {} ready: {} runways, {} stands, {} lights", geo.apt().ident, geo.runways.len(), geo.stands.len(), mesh.lights.len());
-                            self.fields.insert(i, FSlot::Ready(Box::new(Field { geo, gpu, props: mesh.props, socks: mesh.socks, traffic, last_used: self.frame })));
+                            let traffic = crate::traffic::Traffic::new(
+                                &geo,
+                                i.wrapping_mul(2654435761) ^ 0x5bd1e995,
+                            );
+                            log::info!(
+                                "airfield {} ready: {} runways, {} stands, {} lights",
+                                geo.apt().ident,
+                                geo.runways.len(),
+                                geo.stands.len(),
+                                mesh.lights.len()
+                            );
+                            self.fields.insert(
+                                i,
+                                FSlot::Ready(Box::new(Field {
+                                    geo,
+                                    gpu,
+                                    props: mesh.props,
+                                    socks: mesh.socks,
+                                    traffic,
+                                    last_used: self.frame,
+                                })),
+                            );
                         }
                         Err(e) => {
                             log::debug!("airfield {i} failed: {e}");
@@ -906,7 +1177,12 @@ impl World {
         self.wanted.clear();
         for y in 0..4 {
             for x in 0..4 {
-                self.select(TileId::new(2, x, y), cam, (clat, clon, calt.max(1.0), gh), fr);
+                self.select(
+                    TileId::new(2, x, y),
+                    cam,
+                    (clat, clon, calt.max(1.0), gh),
+                    fr,
+                );
             }
         }
 
@@ -941,16 +1217,33 @@ impl World {
                             let dist = ((b.center - cam).length() - b.radius) as f32;
                             b.shown += real_dt;
                             // Towers carry their detail farther (buildings::HCLASS).
-                            let (mid, fine) = (LOD_MID * b.tall * self.city_k, LOD_FINE * b.tall * self.city_k);
-                            b.mid_t = if dist < mid { b.mid_t + real_dt } else if dist > mid * 1.1 { 0.0 } else { b.mid_t };
-                            b.fine_t = if dist < fine { b.fine_t + real_dt } else if dist > fine * 1.2 { 0.0 } else { b.fine_t };
+                            let (mid, fine) = (
+                                LOD_MID * b.tall * self.city_k,
+                                LOD_FINE * b.tall * self.city_k,
+                            );
+                            b.mid_t = if dist < mid {
+                                b.mid_t + real_dt
+                            } else if dist > mid * 1.1 {
+                                0.0
+                            } else {
+                                b.mid_t
+                            };
+                            b.fine_t = if dist < fine {
+                                b.fine_t + real_dt
+                            } else if dist > fine * 1.2 {
+                                0.0
+                            } else {
+                                b.fine_t
+                            };
                             if b.gpu.is_some() {
                                 self.draw_b.push(id);
                                 self.in_view.push(fr.sphere(b.center - cam, b.radius));
                             }
                         }
                         Some(BSlot::Loading) => {}
-                        None => self.wanted.push((0.8 + (d / w) as f32 * 0.6, id.with_tag())),
+                        None => self
+                            .wanted
+                            .push((0.8 + (d / w) as f32 * 0.6, id.with_tag())),
                     }
                 }
             }
@@ -962,7 +1255,8 @@ impl World {
             let mut n = 0;
             for (i, d) in db.near(clat.to_degrees(), clon.to_degrees(), 35_000.0) {
                 let a = &db.apts[i as usize];
-                let reach = [9000.0, 22_000.0, 35_000.0][a.kind as usize] * if a.any_paved() { 1.0 } else { 0.5 };
+                let reach = [9000.0, 22_000.0, 35_000.0][a.kind as usize]
+                    * if a.any_paved() { 1.0 } else { 0.5 };
                 if d > reach || n >= 6 {
                     continue;
                 }
@@ -973,7 +1267,8 @@ impl World {
                     None if self.in_flight < 28 => {
                         self.fields.insert(i, FSlot::Loading);
                         self.in_flight += 1;
-                        self.loader.submit(1.0 + (d / 9000.0) as f32, Job::Airfield(i));
+                        self.loader
+                            .submit(1.0 + (d / 9000.0) as f32, Job::Airfield(i));
                     }
                     None => {}
                 }
@@ -1011,10 +1306,14 @@ impl World {
         if self.frame % 120 == 0 {
             let f = self.frame;
             if self.tiles.len() > 700 {
-                self.tiles.retain(|id, s| id.z <= 3 || !matches!(s, Slot::Ready(t) if f - t.last_used > 600));
+                self.tiles.retain(|id, s| {
+                    id.z <= 3 || !matches!(s, Slot::Ready(t) if f - t.last_used > 600)
+                });
             }
-            self.tiles.retain(|_, s| !matches!(s, Slot::Failed) || f % 3600 != 0);
-            self.builds.retain(|_, s| !matches!(s, BSlot::Ready(b) if f - b.last_used > 900));
+            self.tiles
+                .retain(|_, s| !matches!(s, Slot::Failed) || f % 3600 != 0);
+            self.builds
+                .retain(|_, s| !matches!(s, BSlot::Ready(b) if f - b.last_used > 900));
             self.fields.retain(|_, s| match s {
                 FSlot::Ready(fl) => f - fl.last_used < 1200,
                 FSlot::Failed => f % 3600 != 0,
@@ -1028,7 +1327,9 @@ impl World {
     /// this frame) reaches the budget; finished tiles become drawable.
     fn pump_uploads(&mut self, r: &Renderer, mut bytes: usize) -> usize {
         while bytes < UPLOAD_BUDGET {
-            let Some(u) = self.uploads.front_mut() else { break };
+            let Some(u) = self.uploads.front_mut() else {
+                break;
+            };
             let payload = crate::render::building_payload(&u.data);
             let targets = u.gpu.targets();
             while u.part < payload.len() && bytes < UPLOAD_BUDGET {
@@ -1041,7 +1342,10 @@ impl World {
                     continue;
                 }
                 // Chunks stay multiples of 4 (all the vertex types are).
-                let n = (data.len() - u.off).min(UPLOAD_CHUNK).min((UPLOAD_BUDGET - bytes).max(1 << 20)) & !3;
+                let n = (data.len() - u.off)
+                    .min(UPLOAD_CHUNK)
+                    .min((UPLOAD_BUDGET - bytes).max(1 << 20))
+                    & !3;
                 let n = if n == 0 { data.len() - u.off } else { n };
                 r.fill_buffer(buf, u.off as u64, &data[u.off..u.off + n]);
                 u.off += n;
@@ -1053,21 +1357,69 @@ impl World {
             let Upload { id, data, gpu, .. } = self.uploads.pop_front().unwrap();
             let bd = *data;
             let main = bd.cls[0];
-            let tall = (0..buildings::HCLASS.len()).find(|&c| main[c] > if c == 0 { 0 } else { main[c - 1] }).map_or(1.0, |c| buildings::HCLASS[c].1);
-            let cars = cars::spawn(&bd.net, id.x.wrapping_mul(2246822519) ^ id.y.wrapping_mul(3266489917));
-            self.builds.insert(id, BSlot::Ready(Box::new(BTile { center: bd.center, radius: bd.radius, gpu: Some(gpu), footprints: bd.footprints, last_used: self.frame, net: bd.net, cars, parked: bd.parked, trees: bd.trees, tree_var: bd.tree_var, chunks: bd.chunks, under: bd.under, cells: bd.cells, near_idx: bd.near_idx, ax: bd.ax, ay: bd.ay, shown: 0.0, mid_t: 0.0, fine_t: 0.0, tall })));
+            let tall = (0..buildings::HCLASS.len())
+                .find(|&c| main[c] > if c == 0 { 0 } else { main[c - 1] })
+                .map_or(1.0, |c| buildings::HCLASS[c].1);
+            let cars = cars::spawn(
+                &bd.net,
+                id.x.wrapping_mul(2246822519) ^ id.y.wrapping_mul(3266489917),
+            );
+            self.builds.insert(
+                id,
+                BSlot::Ready(Box::new(BTile {
+                    center: bd.center,
+                    radius: bd.radius,
+                    gpu: Some(gpu),
+                    footprints: bd.footprints,
+                    last_used: self.frame,
+                    net: bd.net,
+                    cars,
+                    parked: bd.parked,
+                    trees: bd.trees,
+                    tree_var: bd.tree_var,
+                    chunks: bd.chunks,
+                    under: bd.under,
+                    cells: bd.cells,
+                    near_idx: bd.near_idx,
+                    ax: bd.ax,
+                    ay: bd.ay,
+                    shown: 0.0,
+                    mid_t: 0.0,
+                    fine_t: 0.0,
+                    tall,
+                })),
+            );
         }
         bytes
     }
 
     /// Zoom of the most detailed terrain tile loaded at a spot.
     pub fn ground_zoom(&self, lat: f64, lon: f64) -> Option<u8> {
-        (2..=self.max_zoom).rev().find(|z| matches!(self.tiles.get(&TileId::at(lat, lon, *z)), Some(Slot::Ready(_))))
+        (2..=self.max_zoom).rev().find(|z| {
+            matches!(
+                self.tiles.get(&TileId::at(lat, lon, *z)),
+                Some(Slot::Ready(_))
+            )
+        })
     }
 
     /// The nearest airfield that is loaded, within `r` metres.
     pub fn airfield_near(&self, p: DVec3, r: f64) -> Option<&Field> {
-        self.fields.values().filter_map(|s| if let FSlot::Ready(f) = s { Some(f.as_ref()) } else { None }).filter(|f| (f.geo.center - p).length() < r + f.geo.radius as f64).min_by(|a, b| (a.geo.center - p).length().total_cmp(&(b.geo.center - p).length()))
+        self.fields
+            .values()
+            .filter_map(|s| {
+                if let FSlot::Ready(f) = s {
+                    Some(f.as_ref())
+                } else {
+                    None
+                }
+            })
+            .filter(|f| (f.geo.center - p).length() < r + f.geo.radius as f64)
+            .min_by(|a, b| {
+                (a.geo.center - p)
+                    .length()
+                    .total_cmp(&(b.geo.center - p).length())
+            })
     }
     pub fn airfield(&self, idx: u32) -> Option<&Field> {
         match self.fields.get(&idx) {
@@ -1077,7 +1429,15 @@ impl World {
     }
 
     /// Move the airport traffic on. `player`: the player's aircraft position.
-    pub fn update_airports(&mut self, dt: f32, wind_from: f32, wind_kt: f32, activity: f32, player: Option<DVec3>, focus: DVec3) {
+    pub fn update_airports(
+        &mut self,
+        dt: f32,
+        wind_from: f32,
+        wind_kt: f32,
+        activity: f32,
+        player: Option<DVec3>,
+        focus: DVec3,
+    ) {
         for s in self.fields.values_mut() {
             let FSlot::Ready(f) = s else { continue };
             if (f.geo.center - focus).length() > 40_000.0 {
@@ -1098,17 +1458,34 @@ impl World {
             let FSlot::Ready(f) = s else { continue };
             let o = f.geo.center - cam;
             let d = o.length();
-            if d > 60_000.0 || !self.frustum.as_ref().map(|fr| fr.sphere(o, f.geo.radius as f64 + 600.0)).unwrap_or(true) {
+            if d > 60_000.0
+                || !self
+                    .frustum
+                    .as_ref()
+                    .map(|fr| fr.sphere(o, f.geo.radius as f64 + 600.0))
+                    .unwrap_or(true)
+            {
                 continue;
             }
             out.push((d, &f.gpu, o.as_vec3().into()));
         }
         out.sort_by(|a, b| a.0.total_cmp(&b.0));
-        out.into_iter().take(crate::render::MAX_FIELDS).map(|x| (x.1, x.2)).collect()
+        out.into_iter()
+            .take(crate::render::MAX_FIELDS)
+            .map(|x| (x.1, x.2))
+            .collect()
     }
 
     /// Fixed airport objects, parked and moving aircraft and their lights.
-    pub fn airport_instances(&self, cam: DVec3, wind_from: f32, wind_kt: f32, t: f64, out: &mut Vec<(u32, Inst)>, lights: &mut Vec<crate::airfield::Light>) {
+    pub fn airport_instances(
+        &self,
+        cam: DVec3,
+        wind_from: f32,
+        wind_kt: f32,
+        t: f64,
+        out: &mut Vec<(u32, Inst)>,
+        lights: &mut Vec<crate::airfield::Light>,
+    ) {
         let fr = self.frustum.as_ref();
         for s in self.fields.values() {
             let FSlot::Ready(f) = s else { continue };
@@ -1124,7 +1501,18 @@ impl World {
                     continue;
                 }
                 let o = o.as_vec3();
-                out.push((p.mesh, Inst { m: [[p.x.x, p.y.x, p.z.x, o.x], [p.x.y, p.y.y, p.z.y, o.y], [p.x.z, p.y.z, p.z.z, o.z]], tint: [p.tint[0], p.tint[1], p.tint[2], 0.0], ext: [0.0; 4] }));
+                out.push((
+                    p.mesh,
+                    Inst {
+                        m: [
+                            [p.x.x, p.y.x, p.z.x, o.x],
+                            [p.x.y, p.y.y, p.z.y, o.y],
+                            [p.x.z, p.y.z, p.z.z, o.z],
+                        ],
+                        tint: [p.tint[0], p.tint[1], p.tint[2], 0.0],
+                        ext: [0.0; 4],
+                    },
+                ));
             }
             // Windsocks stream downwind, and droop in a light breeze.
             let b = (wind_from + 180.0).to_radians();
@@ -1135,7 +1523,8 @@ impl World {
                 if o.length() > 5000.0 {
                     continue;
                 }
-                let wob = (t as f32 * (2.3 + k as f32 * 0.4)).sin() * 0.05 * (wind_kt / 10.0).min(1.5);
+                let wob =
+                    (t as f32 * (2.3 + k as f32 * 0.4)).sin() * 0.05 * (wind_kt / 10.0).min(1.5);
                 let droop = (1.0 - (wind_kt / 15.0).clamp(0.0, 1.0)) * 1.25 + wob;
                 let fwd = hd * droop.cos() - up * droop.sin();
                 let fwd = (fwd + hd.cross(up) * wob).normalize();
@@ -1143,7 +1532,18 @@ impl World {
                 let x = fwd.cross(upv);
                 let z = -fwd;
                 let o = o.as_vec3();
-                out.push((crate::airmodels::M_SOCK, Inst { m: [[x.x, upv.x, z.x, o.x], [x.y, upv.y, z.y, o.y], [x.z, upv.z, z.z, o.z]], tint: [1.0, 1.0, 1.0, 0.0], ext: [0.0; 4] }));
+                out.push((
+                    crate::airmodels::M_SOCK,
+                    Inst {
+                        m: [
+                            [x.x, upv.x, z.x, o.x],
+                            [x.y, upv.y, z.y, o.y],
+                            [x.z, upv.z, z.z, o.z],
+                        ],
+                        tint: [1.0, 1.0, 1.0, 0.0],
+                        ext: [0.0; 4],
+                    },
+                ));
             }
             f.traffic.draw(g, cam, t, out, lights);
         }
@@ -1163,7 +1563,9 @@ impl World {
         }
         let near = geo::lla_to_pos(clat.clamp(lat_s, lat_n), dl.clamp(lon_w, lon_e), gh);
         let hidden = id.z > 2 && {
-            let ang = (near.normalize().dot(cam.normalize())).clamp(-1.0, 1.0).acos();
+            let ang = (near.normalize().dot(cam.normalize()))
+                .clamp(-1.0, 1.0)
+                .acos();
             let horizon = (geo::R / (geo::R + calt)).acos() + (geo::R / (geo::R + 9000.0)).acos();
             ang > horizon
         };
@@ -1182,7 +1584,8 @@ impl World {
                 t.last_used = self.frame;
                 // made with the imagery source switched away from: again, after what is missing
                 if !t.refreshing && t.generation != self.loader.src.google.generation() {
-                    self.wanted.push((2.0 + (dist / id.width_m()) as f32, id.with_refresh()));
+                    self.wanted
+                        .push((2.0 + (dist / id.width_m()) as f32, id.with_refresh()));
                 }
                 (t.center, t.radius)
             }
@@ -1239,7 +1642,23 @@ impl World {
                     continue;
                 }
                 let o = o.as_vec3();
-                out.push((&t.gpu, [o.x, o.y, o.z, (id.width_m() / GRID as f64) as f32, id.z as f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]));
+                out.push((
+                    &t.gpu,
+                    [
+                        o.x,
+                        o.y,
+                        o.z,
+                        (id.width_m() / GRID as f64) as f32,
+                        id.z as f32,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                    ],
+                ));
             }
         }
         out
@@ -1261,7 +1680,11 @@ impl World {
     fn cover_info(id: TileId, base: (i64, i64)) -> [f32; 3] {
         let s = 2f64.powi(DATA_ZOOM as i32 - id.z as i32);
         let packed = (base.0.clamp(0, 16383) as u32) | ((base.1.clamp(0, 16383) as u32) << 14);
-        [(id.x as f64 * s - base.0 as f64) as f32, (id.y as f64 * s - base.1 as f64) as f32, f32::from_bits(packed)]
+        [
+            (id.x as f64 * s - base.0 as f64) as f32,
+            (id.y as f64 * s - base.1 as f64) as f32,
+            f32::from_bits(packed),
+        ]
     }
 
     /// Building tiles over which the night glow on the terrain hands over to
@@ -1304,7 +1727,11 @@ impl World {
                 for dy in -r..=r {
                     for dx in -r..=r {
                         let (u, w) = (x + dx, y + dy);
-                        let c = if (0..n as i64).contains(&u) && (0..n as i64).contains(&w) { shown[w as usize * n + u as usize] } else { 0.0 };
+                        let c = if (0..n as i64).contains(&u) && (0..n as i64).contains(&w) {
+                            shown[w as usize * n + u as usize]
+                        } else {
+                            0.0
+                        };
                         if c < v {
                             v = v.min(c + ramp(dx * dx + dy * dy));
                         }
@@ -1318,7 +1745,16 @@ impl World {
 
     /// Terrain tiles and detail tiles to draw. `focus` and `casc` (radius of
     /// each shadow cascade) decide what has to be rendered into the shadow maps.
-    pub fn draw_lists(&self, cam: DVec3, focus: DVec3, casc: [f32; 3]) -> (Vec<(&TileGpu, [f32; 12])>, Vec<DetailDraw<'_>>, Vec<TreeInst>) {
+    pub fn draw_lists(
+        &self,
+        cam: DVec3,
+        focus: DVec3,
+        casc: [f32; 3],
+    ) -> (
+        Vec<(&TileGpu, [f32; 12])>,
+        Vec<DetailDraw<'_>>,
+        Vec<TreeInst>,
+    ) {
         let mut tiles = Vec::with_capacity(self.draw.len());
         let (clat, clon, calt) = geo::pos_to_lla(cam);
         let agl = calt - self.ground(clat, clon).map(|g| g.h).unwrap_or(0.0);
@@ -1329,14 +1765,32 @@ impl World {
                 let cell = id.width_m() / GRID as f64;
                 let tess = tess_block(*id, clat, clon, agl, cell);
                 let cv = Self::cover_info(*id, base);
-                tiles.push((&t.gpu, [o.x, o.y, o.z, cell as f32, id.z as f32, cv[0], cv[1], cv[2], tess[0], tess[1], tess[2], tess[3]]));
+                tiles.push((
+                    &t.gpu,
+                    [
+                        o.x,
+                        o.y,
+                        o.z,
+                        cell as f32,
+                        id.z as f32,
+                        cv[0],
+                        cv[1],
+                        cv[2],
+                        tess[0],
+                        tess[1],
+                        tess[2],
+                        tess[3],
+                    ],
+                ));
             }
         }
         let mut details = Vec::with_capacity(self.draw_b.len());
         let mut near_inst: Vec<TreeInst> = Vec::new();
         let mut tb = TreeBatcher::new();
         for (id, view) in self.draw_b.iter().zip(&self.in_view) {
-            let Some(BSlot::Ready(b)) = self.builds.get(id) else { continue };
+            let Some(BSlot::Ready(b)) = self.builds.get(id) else {
+                continue;
+            };
             let Some(g) = &b.gpu else { continue };
             let o = (b.center - cam).as_vec3();
             let dist = (o.length() as f64 - b.radius) as f32;
@@ -1356,7 +1810,11 @@ impl World {
                     if dc - ch.radius > self.tree_far {
                         continue;
                     }
-                    let seen = self.frustum.as_ref().map(|f| f.sphere(cp - cam, ch.radius as f64 + 25.0)).unwrap_or(true);
+                    let seen = self
+                        .frustum
+                        .as_ref()
+                        .map(|f| f.sphere(cp - cam, ch.radius as f64 + 25.0))
+                        .unwrap_or(true);
                     let fd = (cp - focus).length() as f32 - ch.radius;
                     // The nearest cascade gets each tree's own model; the next one,
                     // with texels most of a metre across, one simple model for the
@@ -1367,9 +1825,22 @@ impl World {
                         continue;
                     }
                     if in_c1 {
-                        let lod = LOD_DIST.iter().filter(|d| dc - ch.radius >= **d).count().clamp(C1_LOD, LODS - 2);
+                        let lod = LOD_DIST
+                            .iter()
+                            .filter(|d| dc - ch.radius >= **d)
+                            .count()
+                            .clamp(C1_LOD, LODS - 2);
                         for (variant, first, count) in &ch.runs {
-                            tb.push(TreeDraw { mesh: *variant as u32 * LODS as u32 + lod as u32, first: *first, count: *count, view: false, casc: 2, close: false, imp: false, fixed: true });
+                            tb.push(TreeDraw {
+                                mesh: *variant as u32 * LODS as u32 + lod as u32,
+                                first: *first,
+                                count: *count,
+                                view: false,
+                                casc: 2,
+                                close: false,
+                                imp: false,
+                                fixed: true,
+                            });
                         }
                     }
                     // Every model some tree in the chunk may use: the shader keeps
@@ -1387,13 +1858,31 @@ impl World {
                             continue;
                         }
                         for (variant, first, count) in &ch.runs {
-                            tb.push(TreeDraw { mesh: *variant as u32 * LODS as u32 + lod as u32, first: *first, count: *count, view, casc: cm, close: view, imp: false, fixed: false });
+                            tb.push(TreeDraw {
+                                mesh: *variant as u32 * LODS as u32 + lod as u32,
+                                first: *first,
+                                count: *count,
+                                view,
+                                casc: cm,
+                                close: view,
+                                imp: false,
+                                fixed: false,
+                            });
                         }
                     }
                     // Further off, the trees are impostors.
                     if seen && dc + ch.radius >= imp_dist * (1.0 - LOD_JITTER) {
                         for (variant, first, count) in &ch.runs {
-                            tb.push(TreeDraw { mesh: *variant as u32, first: *first, count: *count, view: true, casc: 0, close: false, imp: true, fixed: false });
+                            tb.push(TreeDraw {
+                                mesh: *variant as u32,
+                                first: *first,
+                                count: *count,
+                                view: true,
+                                casc: 0,
+                                close: false,
+                                imp: true,
+                                fixed: false,
+                            });
                         }
                     }
                 }
@@ -1402,9 +1891,24 @@ impl World {
             let mut near = Vec::new();
             if dist < CARD_RANGE && near_inst.len() < MAX_NEAR {
                 let lp = -o;
-                let seen = |c: Vec3, r: f32| self.frustum.as_ref().map(|f| f.sphere(c.as_dvec3(), r as f64)).unwrap_or(true);
+                let seen = |c: Vec3, r: f32| {
+                    self.frustum
+                        .as_ref()
+                        .map(|f| f.sphere(c.as_dvec3(), r as f64))
+                        .unwrap_or(true)
+                };
                 // Sorted into rings by distance so the nearest are drawn first and hide the rest.
-                let ring = |d2: f32| if d2 < 20.0 * 20.0 { 0u16 } else if d2 < 45.0 * 45.0 { 256 } else if d2 < 80.0 * 80.0 { 512 } else { 768 };
+                let ring = |d2: f32| {
+                    if d2 < 20.0 * 20.0 {
+                        0u16
+                    } else if d2 < 45.0 * 45.0 {
+                        256
+                    } else if d2 < 80.0 * 80.0 {
+                        512
+                    } else {
+                        768
+                    }
+                };
                 let mut found: Vec<(u16, TreeInst)> = Vec::new();
                 for c in &b.cells {
                     let co = c.center - lp;
@@ -1415,8 +1919,14 @@ impl World {
                         let t = &b.trees[*i as usize];
                         let to = Vec3::new(t.a[0], t.a[1], t.a[2]) - lp;
                         // Past IMP_DIST the tree is an impostor and has no cards.
-                        if t.a[3] > 0.0 && to.length() < imp_dist * 1.01 * tree_jit(t.a) && seen(to, 26.0 * t.a[3]) {
-                            found.push((ring(to.length_squared()) | b.tree_var[*i as usize] as u16, *t));
+                        if t.a[3] > 0.0
+                            && to.length() < imp_dist * 1.01 * tree_jit(t.a)
+                            && seen(to, 26.0 * t.a[3])
+                        {
+                            found.push((
+                                ring(to.length_squared()) | b.tree_var[*i as usize] as u16,
+                                *t,
+                            ));
                         }
                     }
                     for u in &b.under[c.under.0 as usize..(c.under.0 + c.under.1) as usize] {
@@ -1425,7 +1935,9 @@ impl World {
                             continue;
                         }
                         // Nothing grows in a fresh crater.
-                        if self.craters.iter().any(|(cp, r)| ((*cp - cam).as_vec3() - uo).length_squared() < r * r * 1.5) {
+                        if self.craters.iter().any(|(cp, r)| {
+                            ((*cp - cam).as_vec3() - uo).length_squared() < r * r * 1.5
+                        }) {
                             continue;
                         }
                         found.push((ring(uo.length_squared()) | u.var as u16, u.inst(c.center)));
@@ -1444,13 +1956,27 @@ impl World {
                     let (mesh, count) = (var as u32 * LODS as u32, near_inst.len() as u32 - first);
                     // Trees are already standing there as solids; undergrowth is not.
                     if var as usize / VARIANTS >= TREE_SPECIES {
-                        near.push(NearDraw { mesh, first, count, cards: false });
+                        near.push(NearDraw {
+                            mesh,
+                            first,
+                            count,
+                            cards: false,
+                        });
                     }
-                    near.push(NearDraw { mesh: mesh + CARDS, first, count, cards: true });
+                    near.push(NearDraw {
+                        mesh: mesh + CARDS,
+                        first,
+                        count,
+                        cards: true,
+                    });
                 }
             }
             let fade = |t: f32, secs: f32| (t / secs).clamp(0.0, 1.0);
-            let lod = [fade(b.mid_t - 0.3, 1.2), fade(b.fine_t - 0.6, 1.6), fade(b.shown, 1.0)];
+            let lod = [
+                fade(b.mid_t - 0.3, 1.2),
+                fade(b.fine_t - 0.6, 1.6),
+                fade(b.shown, 1.0),
+            ];
             // How many height classes, tallest first, are near enough for their
             // full geometry, their middle level and their finest level.
             let ck = self.city_k;
@@ -1459,15 +1985,46 @@ impl World {
             // dissolve, with those levels done fading in: nothing of them is
             // cut away this frame, so they can be drawn without a discard.
             let maxd = o.length() + b.radius as f32;
-            let inside = |r: f32| buildings::HCLASS.iter().take_while(|c| maxd < r * c.1 * ck).count() as u8;
-            let settled = [inside(buildings::BFAR[0]), if lod[0] >= 1.0 { inside(buildings::BFAR[0]) } else { 0 }, if lod[1] >= 1.0 { inside(buildings::FINE_FADE) } else { 0 }];
-            let reach = [buildings::BFAR[1], LOD_MID, LOD_FINE].map(|r| buildings::HCLASS.iter().take_while(|c| dist < r * c.1 * ck).count() as u8);
+            let inside = |r: f32| {
+                buildings::HCLASS
+                    .iter()
+                    .take_while(|c| maxd < r * c.1 * ck)
+                    .count() as u8
+            };
+            let settled = [
+                inside(buildings::BFAR[0]),
+                if lod[0] >= 1.0 {
+                    inside(buildings::BFAR[0])
+                } else {
+                    0
+                },
+                if lod[1] >= 1.0 {
+                    inside(buildings::FINE_FADE)
+                } else {
+                    0
+                },
+            ];
+            let reach = [buildings::BFAR[1], LOD_MID, LOD_FINE].map(|r| {
+                buildings::HCLASS
+                    .iter()
+                    .take_while(|c| dist < r * c.1 * ck)
+                    .count() as u8
+            });
             details.push(DetailDraw {
                 gpu: g,
-                u: [o.x, o.y, o.z, 0.0, b.ax[0], b.ax[1], b.ax[2], b.ax[3], b.ay[0], b.ay[1], b.ay[2], b.ay[3], lod[0], lod[1], lod[2], 0.0],
+                u: [
+                    o.x, o.y, o.z, 0.0, b.ax[0], b.ax[1], b.ax[2], b.ax[3], b.ay[0], b.ay[1],
+                    b.ay[2], b.ay[3], lod[0], lod[1], lod[2], 0.0,
+                ],
                 view: *view,
                 near: dist < 3000.0,
-                far: if o.length() + (b.radius as f32) < buildings::BFAR[0] * ck { 0 } else if reach[0] == 0 { 2 } else { 1 },
+                far: if o.length() + (b.radius as f32) < buildings::BFAR[0] * ck {
+                    0
+                } else if reach[0] == 0 {
+                    2
+                } else {
+                    1
+                },
                 reach,
                 settled,
                 radius: b.radius as f32,
@@ -1496,10 +2053,20 @@ struct TreeBatcher {
 }
 impl TreeBatcher {
     fn new() -> Self {
-        Self { open: vec![0; 64 * 512], touched: Vec::new(), out: Vec::new() }
+        Self {
+            open: vec![0; 64 * 512],
+            touched: Vec::new(),
+            out: Vec::new(),
+        }
     }
     fn push(&mut self, t: TreeDraw) {
-        let k = ((t.imp as usize) | (t.fixed as usize) << 1 | (t.view as usize) << 2 | (t.close as usize) << 3 | ((t.casc as usize) & 3) << 4) * 512 + (t.mesh as usize).min(511);
+        let k = ((t.imp as usize)
+            | (t.fixed as usize) << 1
+            | (t.view as usize) << 2
+            | (t.close as usize) << 3
+            | ((t.casc as usize) & 3) << 4)
+            * 512
+            + (t.mesh as usize).min(511);
         let o = self.open[k] as usize;
         if o > 0 {
             let p = &mut self.out[o - 1];

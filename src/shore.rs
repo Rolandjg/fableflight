@@ -78,7 +78,12 @@ impl Square {
         let r1 = (self.n / half, o.dot(self.n) / half);
         let r2 = (self.u / (2.0 * DEPTH), 0.5 + o.dot(self.u) / (2.0 * DEPTH));
         let col = |a: f64, b: f64, c: f64, d: f64| [a as f32, b as f32, c as f32, d as f32];
-        [col(r0.0.x, r1.0.x, r2.0.x, 0.0), col(r0.0.y, r1.0.y, r2.0.y, 0.0), col(r0.0.z, r1.0.z, r2.0.z, 0.0), col(r0.1, r1.1, r2.1, 1.0)]
+        [
+            col(r0.0.x, r1.0.x, r2.0.x, 0.0),
+            col(r0.0.y, r1.0.y, r2.0.y, 0.0),
+            col(r0.0.z, r1.0.z, r2.0.z, 0.0),
+            col(r0.1, r1.1, r2.1, 1.0),
+        ]
     }
 }
 
@@ -115,7 +120,9 @@ impl Shore {
         let a = self.axes.unwrap();
         let snap = TEXEL * 16.0;
         let o = cam - a.c;
-        let c = a.c + a.e * ((o.dot(a.e) / snap).round() * snap) + a.n * ((o.dot(a.n) / snap).round() * snap);
+        let c = a.c
+            + a.e * ((o.dot(a.e) / snap).round() * snap)
+            + a.n * ((o.dot(a.n) / snap).round() * snap);
         let target = Square { c, ..a };
         if self.building.is_none() {
             // Rebuild once the camera has moved on, or now and then for tiles
@@ -148,7 +155,14 @@ impl Shore {
             }
         }
         let shown = self.shown.unwrap_or(target);
-        ShoreFrame { step, build_vp: build.vp(cam, HALF), build_vp_wide: build.vp(cam, WIDE_HALF), build_c: build.c - cam, vp: shown.vp(cam, HALF), on: self.shown.is_some() }
+        ShoreFrame {
+            step,
+            build_vp: build.vp(cam, HALF),
+            build_vp_wide: build.vp(cam, WIDE_HALF),
+            build_c: build.c - cam,
+            vp: shown.vp(cam, HALF),
+            on: self.shown.is_some(),
+        }
     }
 }
 
@@ -179,13 +193,39 @@ pub struct ShoreGpu {
 
 impl ShoreGpu {
     pub fn new(d: &wgpu::Device, q: &wgpu::Queue, mask_fmt: wgpu::TextureFormat) -> Self {
-        let m = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("shore"), source: wgpu::ShaderSource::Wgsl(include_str!("shaders/shore.wgsl").into()) });
-        let pipe = |e: &str| d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: Some(e), layout: None, module: &m, entry_point: Some(e), compilation_options: Default::default(), cache: None });
-        let (p_seed, p_jump, p_resolve, p_mip, p_expose) = (pipe("seed"), pipe("jump"), pipe("resolve"), pipe("mip"), pipe("expose"));
-        let tex_n = |label: &str, n: u32, fmt: wgpu::TextureFormat, usage: wgpu::TextureUsages, mips: u32| {
+        let m = d.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("shore"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/shore.wgsl").into()),
+        });
+        let pipe = |e: &str| {
+            d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(e),
+                layout: None,
+                module: &m,
+                entry_point: Some(e),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        };
+        let (p_seed, p_jump, p_resolve, p_mip, p_expose) = (
+            pipe("seed"),
+            pipe("jump"),
+            pipe("resolve"),
+            pipe("mip"),
+            pipe("expose"),
+        );
+        let tex_n = |label: &str,
+                     n: u32,
+                     fmt: wgpu::TextureFormat,
+                     usage: wgpu::TextureUsages,
+                     mips: u32| {
             d.create_texture(&wgpu::TextureDescriptor {
                 label: Some(label),
-                size: wgpu::Extent3d { width: n, height: n, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width: n,
+                    height: n,
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: mips,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -196,18 +236,60 @@ impl ShoreGpu {
         };
         let tex = |label: &str, fmt, usage, mips| tex_n(label, N, fmt, usage, mips);
         let rt = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
-        let wide = tex_n("shore wide mask", WIDE_N, mask_fmt, rt, 1).create_view(&Default::default());
-        let expose = tex_n("shore exposure", EXPOSE_N, wgpu::TextureFormat::Rgba16Float, wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING, 1).create_view(&Default::default());
-        let sea = d.create_buffer(&wgpu::BufferDescriptor { label: Some("shore sea"), size: 32, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
-        let mask = tex("shore mask", mask_fmt, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING, 1).create_view(&Default::default());
-        let field = tex("shore field", wgpu::TextureFormat::Rgba16Float, wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING, MIPS);
+        let wide =
+            tex_n("shore wide mask", WIDE_N, mask_fmt, rt, 1).create_view(&Default::default());
+        let expose = tex_n(
+            "shore exposure",
+            EXPOSE_N,
+            wgpu::TextureFormat::Rgba16Float,
+            wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            1,
+        )
+        .create_view(&Default::default());
+        let sea = d.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("shore sea"),
+            size: 32,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mask = tex(
+            "shore mask",
+            mask_fmt,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            1,
+        )
+        .create_view(&Default::default());
+        let field = tex(
+            "shore field",
+            wgpu::TextureFormat::Rgba16Float,
+            wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            MIPS,
+        );
         let view = field.create_view(&Default::default());
-        let level = |m: u32| field.create_view(&wgpu::TextureViewDescriptor { base_mip_level: m, mip_level_count: Some(1), ..Default::default() });
-        let seeds = |l: &str| d.create_buffer(&wgpu::BufferDescriptor { label: Some(l), size: (N * N * 4) as u64, usage: wgpu::BufferUsages::STORAGE, mapped_at_creation: false });
+        let level = |m: u32| {
+            field.create_view(&wgpu::TextureViewDescriptor {
+                base_mip_level: m,
+                mip_level_count: Some(1),
+                ..Default::default()
+            })
+        };
+        let seeds = |l: &str| {
+            d.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(l),
+                size: (N * N * 4) as u64,
+                usage: wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: false,
+            })
+        };
         let bufs = [seeds("shore seeds a"), seeds("shore seeds b")];
         // shore.wgsl `U`: jump, size, metres per texel, farthest distance kept.
         let ubuf = |step: u32| {
-            let b = d.create_buffer(&wgpu::BufferDescriptor { label: Some("shore u"), size: 16, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+            let b = d.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("shore u"),
+                size: 16,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
             let mut bytes = [0u8; 16];
             bytes[0..4].copy_from_slice(&step.to_le_bytes());
             bytes[4..8].copy_from_slice(&N.to_le_bytes());
@@ -217,13 +299,20 @@ impl ShoreGpu {
             b
         };
         fn ent(b: u32, r: wgpu::BindingResource<'_>) -> wgpu::BindGroupEntry<'_> {
-            wgpu::BindGroupEntry { binding: b, resource: r }
+            wgpu::BindGroupEntry {
+                binding: b,
+                resource: r,
+            }
         }
         let u0 = ubuf(0);
         let bg_seed = d.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("shore seed"),
             layout: &p_seed.get_bind_group_layout(0),
-            entries: &[ent(0, u0.as_entire_binding()), ent(1, wgpu::BindingResource::TextureView(&mask)), ent(3, bufs[0].as_entire_binding())],
+            entries: &[
+                ent(0, u0.as_entire_binding()),
+                ent(1, wgpu::BindingResource::TextureView(&mask)),
+                ent(3, bufs[0].as_entire_binding()),
+            ],
         });
         let bg_jump = JUMPS
             .iter()
@@ -233,7 +322,11 @@ impl ShoreGpu {
                 d.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("shore jump"),
                     layout: &p_jump.get_bind_group_layout(0),
-                    entries: &[ent(0, u.as_entire_binding()), ent(2, bufs[i % 2].as_entire_binding()), ent(3, bufs[1 - i % 2].as_entire_binding())],
+                    entries: &[
+                        ent(0, u.as_entire_binding()),
+                        ent(2, bufs[i % 2].as_entire_binding()),
+                        ent(3, bufs[1 - i % 2].as_entire_binding()),
+                    ],
                 })
             })
             .collect();
@@ -269,22 +362,52 @@ impl ShoreGpu {
                 d.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("shore mip"),
                     layout: &p_mip.get_bind_group_layout(0),
-                    entries: &[ent(4, wgpu::BindingResource::TextureView(&level(m))), ent(5, wgpu::BindingResource::TextureView(&level(m - 1)))],
+                    entries: &[
+                        ent(4, wgpu::BindingResource::TextureView(&level(m))),
+                        ent(5, wgpu::BindingResource::TextureView(&level(m - 1))),
+                    ],
                 })
             })
             .collect();
-        Self { mask, wide, sea, view, p_seed, p_jump, p_resolve, p_mip, p_expose, bg_expose, bg_seed, bg_jump, bg_resolve, bg_mips }
+        Self {
+            mask,
+            wide,
+            sea,
+            view,
+            p_seed,
+            p_jump,
+            p_resolve,
+            p_mip,
+            p_expose,
+            bg_expose,
+            bg_seed,
+            bg_jump,
+            bg_resolve,
+            bg_mips,
+        }
     }
 
     /// This frame's compute part of `step` (after the masks are drawn, for
     /// `Raster`). `ocean`: Globals `ocean` rows 0 and 1 (wind direction;
     /// wind, significant wave height), taken when a rebuild starts.
-    pub fn compute(&self, q: &wgpu::Queue, enc: &mut wgpu::CommandEncoder, step: Step, ocean: [[f32; 4]; 2]) {
+    pub fn compute(
+        &self,
+        q: &wgpu::Queue,
+        enc: &mut wgpu::CommandEncoder,
+        step: Step,
+        ocean: [[f32; 4]; 2],
+    ) {
         if let Step::Raster = step {
             // Breakers on an open coast: swell always runs in, more with the sea.
             let hopen = (0.45 + 0.6 * ocean[1][1]).min(3.0);
             let mut b = [0u8; 32];
-            let f = [ocean[0][2], ocean[0][3], ocean[1][0], hopen, WIDE_TEXEL as f32];
+            let f = [
+                ocean[0][2],
+                ocean[0][3],
+                ocean[1][0],
+                hopen,
+                WIDE_TEXEL as f32,
+            ];
             for (i, v) in f.iter().enumerate() {
                 b[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
             }
@@ -293,7 +416,10 @@ impl ShoreGpu {
             b[28..32].copy_from_slice(&((REACH / WIDE_TEXEL) as f32).to_le_bytes());
             q.write_buffer(&self.sea, 0, &b);
         }
-        let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("shore"), timestamp_writes: None });
+        let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("shore"),
+            timestamp_writes: None,
+        });
         let (p, bg) = match step {
             Step::Raster => (&self.p_seed, &self.bg_seed),
             Step::Jump(i) => (&self.p_jump, &self.bg_jump[i]),
@@ -305,7 +431,11 @@ impl ShoreGpu {
         if let Step::Jump(i) = step {
             cp.set_pipeline(&self.p_expose);
             cp.set_bind_group(0, &self.bg_expose[i], &[]);
-            cp.dispatch_workgroups(EXPOSE_N.div_ceil(8), (EXPOSE_N / JUMPS.len() as u32).div_ceil(8), 1);
+            cp.dispatch_workgroups(
+                EXPOSE_N.div_ceil(8),
+                (EXPOSE_N / JUMPS.len() as u32).div_ceil(8),
+                1,
+            );
         }
         if let Step::Resolve = step {
             cp.set_pipeline(&self.p_mip);

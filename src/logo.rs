@@ -8,20 +8,38 @@ pub const TEXT: &str = "FABLE FLIGHT";
 
 /// A bold system sans for the title (the UI borrows the system's fonts too).
 pub fn find_font() -> Option<Vec<u8>> {
-    let fc = std::process::Command::new("fc-match").args(["-f", "%{file}", "sans:weight=bold"]).output().ok().and_then(|o| String::from_utf8(o.stdout).ok());
-    let fallbacks = ["/usr/share/fonts/google-noto/NotoSans-Bold.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans-Bold.ttf", "C:/Windows/Fonts/segoeuib.ttf"];
-    fc.iter().map(|s| s.trim().to_string()).chain(fallbacks.iter().map(|s| s.to_string())).filter(|p| p.ends_with(".ttf") || p.ends_with(".otf")).find_map(|p| std::fs::read(p).ok())
+    let fc = std::process::Command::new("fc-match")
+        .args(["-f", "%{file}", "sans:weight=bold"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok());
+    let fallbacks = [
+        "/usr/share/fonts/google-noto/NotoSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans-Bold.ttf",
+        "C:/Windows/Fonts/segoeuib.ttf",
+    ];
+    fc.iter()
+        .map(|s| s.trim().to_string())
+        .chain(fallbacks.iter().map(|s| s.to_string()))
+        .filter(|p| p.ends_with(".ttf") || p.ends_with(".otf"))
+        .find_map(|p| std::fs::read(p).ok())
 }
 
 /// The title's coverage (0..255) on a `w` x `h` screen with UI scale
 /// `scale`: centred, near the top, widely letter-spaced.
 pub fn mask(font: &[u8], w: u32, h: u32, scale: f32) -> Vec<u8> {
     let mut out = vec![0u8; (w * h) as usize];
-    let Ok(font) = FontRef::try_from_slice(font) else { return out };
+    let Ok(font) = FontRef::try_from_slice(font) else {
+        return out;
+    };
     let cap = 30.0 * scale;
     // Size the font so its capitals stand `cap` pixels tall.
     // (a PxScale is the font's ascent-to-descent height in pixels)
-    let cap_units = font.outline(font.glyph_id('H')).map(|o| (o.bounds.max.y - o.bounds.min.y).abs()).unwrap_or(0.7 * font.height_unscaled());
+    let cap_units = font
+        .outline(font.glyph_id('H'))
+        .map(|o| (o.bounds.max.y - o.bounds.min.y).abs())
+        .unwrap_or(0.7 * font.height_unscaled());
     let px = PxScale::from(cap * font.height_unscaled() / cap_units.max(1.0));
     let sf = font.as_scaled(px);
     let track = 0.32 * cap;

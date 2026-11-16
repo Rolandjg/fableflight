@@ -6,7 +6,7 @@
 
 use crate::geo;
 use glam::DVec3;
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::mpsc::{Receiver, channel};
 
 /// Cells across the map.
 pub const N: usize = 256;
@@ -63,11 +63,17 @@ impl SkyGlow {
     /// camera + half its side (0 = no map); its east axis + the ground's height
     /// under the camera; its north axis + how strongly the lights are on.
     pub fn globals(&self, cam: DVec3, ground: f64, on: f32) -> [[f32; 4]; 3] {
-        let Some(m) = &self.map else { return [[0.0; 4]; 3] };
+        let Some(m) = &self.map else {
+            return [[0.0; 4]; 3];
+        };
         let (e, n, _) = geo::enu(m.c);
         let c = m.c - cam;
         let v = |a: DVec3, w: f32| [a.x as f32, a.y as f32, a.z as f32, w];
-        [v(c, (N as f64 * CELL * 0.5) as f32), v(e, ground as f32), v(n, on)]
+        [
+            v(c, (N as f64 * CELL * 0.5) as f32),
+            v(e, ground as f32),
+            v(n, on),
+        ]
     }
 }
 
@@ -90,7 +96,9 @@ fn build(lat: f64, lon: f64) -> Vec<u16> {
 /// Separable Gaussian, zero outside.
 fn blur(src: &[f32], sigma: f32) -> Vec<f32> {
     let r = (sigma * 3.0).ceil() as i64;
-    let k: Vec<f32> = (-r..=r).map(|i| (-(i * i) as f32 / (2.0 * sigma * sigma)).exp()).collect();
+    let k: Vec<f32> = (-r..=r)
+        .map(|i| (-(i * i) as f32 / (2.0 * sigma * sigma)).exp())
+        .collect();
     let ks: f32 = k.iter().sum();
     let k: Vec<f32> = k.iter().map(|v| v / ks).collect();
     let n = N as i64;
@@ -140,7 +148,10 @@ mod tests {
         let t = std::time::Instant::now();
         let px = super::build(40.75, -73.99);
         let max = px.iter().step_by(4).map(|&h| h).max().unwrap();
-        eprintln!("skyglow map {:.0} ms, max half {max:#x}", t.elapsed().as_secs_f64() * 1e3);
+        eprintln!(
+            "skyglow map {:.0} ms, max half {max:#x}",
+            t.elapsed().as_secs_f64() * 1e3
+        );
         assert_eq!(super::f16(1.0), 0x3c00);
         assert_eq!(super::f16(0.5), 0x3800);
     }

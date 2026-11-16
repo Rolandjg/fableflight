@@ -14,7 +14,7 @@
 //! fitted surface (tree crowns, walls the map's outline strays onto, parked
 //! aircraft on aprons).
 use crate::geo::{self, TileId};
-use crate::sources::{Sources, AP_APRON, AP_HELIPAD, AP_RUNWAY, AP_TAXIWAY, RC_RAIL, RC_SERVICE};
+use crate::sources::{AP_APRON, AP_HELIPAD, AP_RUNWAY, AP_TAXIWAY, RC_RAIL, RC_SERVICE, Sources};
 use glam::{DVec3, Vec2, Vec3};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -42,9 +42,17 @@ struct Fit {
     band: [(f32, f32); 2],
 }
 /// Streets: short smoothing (they climb and turn), cars left out.
-const FIT_ROAD: Fit = Fit { cell: 2.0, sigma: [6.0, 4.5, 3.5], band: [(1.0, 0.8), (0.4, 0.4)] };
+const FIT_ROAD: Fit = Fit {
+    cell: 2.0,
+    sigma: [6.0, 4.5, 3.5],
+    band: [(1.0, 0.8), (0.4, 0.4)],
+};
 /// Runways, taxiways and aprons: long, gentle smoothing.
-const FIT_AERO: Fit = Fit { cell: 4.0, sigma: [20.0, 24.0, 28.0], band: [(1.0, 0.8), (0.4, 0.4)] };
+const FIT_AERO: Fit = Fit {
+    cell: 4.0,
+    sigma: [20.0, 24.0, 28.0],
+    band: [(1.0, 0.8), (0.4, 0.4)],
+};
 
 /// How far above (and below) the fitted surface a vertex may be and still be
 /// put on it, per raster kind (m).
@@ -76,7 +84,11 @@ fn hull(pts: &[Vec2]) -> Vec<Vec2> {
     let mut h: Vec<Vec2> = Vec::with_capacity(2 * p.len());
     for pass in 0..2 {
         let start = h.len();
-        let it: Box<dyn Iterator<Item = &Vec2>> = if pass == 0 { Box::new(p.iter()) } else { Box::new(p.iter().rev()) };
+        let it: Box<dyn Iterator<Item = &Vec2>> = if pass == 0 {
+            Box::new(p.iter())
+        } else {
+            Box::new(p.iter().rev())
+        };
         for &q in it {
             while h.len() >= start + 2 && cross(h[h.len() - 2], h[h.len() - 1], q) <= 0.0 {
                 h.pop();
@@ -122,7 +134,13 @@ impl Raster {
     pub fn new(lo: Vec2, hi: Vec2, cell: f32, margin: f32) -> Self {
         let w = ((hi.x - lo.x + 2.0 * margin) / cell).ceil() as usize + 1;
         let h = ((hi.y - lo.y + 2.0 * margin) / cell).ceil() as usize + 1;
-        Raster { min: lo - Vec2::splat(margin), cell, w, h, k: vec![0; w * h] }
+        Raster {
+            min: lo - Vec2::splat(margin),
+            cell,
+            w,
+            h,
+            k: vec![0; w * h],
+        }
     }
     fn put(&mut self, i: usize, kind: u8) {
         if self.k[i] < kind {
@@ -165,7 +183,10 @@ impl Raster {
             xs.clear();
             for r in rings {
                 for i in 0..r.len() {
-                    let (a, b) = ((r[i] - self.min) / self.cell, (r[(i + 1) % r.len()] - self.min) / self.cell);
+                    let (a, b) = (
+                        (r[i] - self.min) / self.cell,
+                        (r[(i + 1) % r.len()] - self.min) / self.cell,
+                    );
                     if (a.y > yc) != (b.y > yc) {
                         xs.push(a.x + (yc - a.y) / (b.y - a.y) * (b.x - a.x));
                     }
@@ -224,7 +245,14 @@ impl Surface {
         let min = lo - Vec2::splat(cell);
         let w = (((hi.x - min.x) / cell) as usize + 2).max(1);
         let h = (((hi.y - min.y) / cell) as usize + 2).max(1);
-        Self { min, cell, w, h, z: vec![0.0; w * h], wt: vec![0.0; w * h] }
+        Self {
+            min,
+            cell,
+            w,
+            h,
+            z: vec![0.0; w * h],
+            wt: vec![0.0; w * h],
+        }
     }
     fn index(&self, p: Vec2) -> usize {
         let q = (p - self.min) / self.cell;
@@ -238,7 +266,12 @@ impl Surface {
         let (x0, y0) = (q.x.floor(), q.y.floor());
         let (fx, fy) = (q.x - x0, q.y - y0);
         let (mut s, mut ws) = (0.0, 0.0);
-        for (dx, dy, k) in [(0, 0, (1.0 - fx) * (1.0 - fy)), (1, 0, fx * (1.0 - fy)), (0, 1, (1.0 - fx) * fy), (1, 1, fx * fy)] {
+        for (dx, dy, k) in [
+            (0, 0, (1.0 - fx) * (1.0 - fy)),
+            (1, 0, fx * (1.0 - fy)),
+            (0, 1, (1.0 - fx) * fy),
+            (1, 1, fx * fy),
+        ] {
             let (x, y) = (x0 as i64 + dx, y0 as i64 + dy);
             if x < 0 || y < 0 || x >= self.w as i64 || y >= self.h as i64 {
                 continue;
@@ -256,13 +289,21 @@ impl Surface {
     fn blur(&mut self, sigma: f32) {
         let s = sigma / self.cell;
         let r = (s * 2.5).ceil() as i64;
-        let k: Vec<f32> = (-r..=r).map(|i| (-(i * i) as f32 / (2.0 * s * s)).exp()).collect();
+        let k: Vec<f32> = (-r..=r)
+            .map(|i| (-(i * i) as f32 / (2.0 * s * s)).exp())
+            .collect();
         let (w, h) = (self.w as i64, self.h as i64);
         let mut zw: Vec<f32> = self.z.iter().zip(&self.wt).map(|(z, w)| z * w).collect();
         let mut wt = self.wt.clone();
         for pass in 0..2 {
             let (n, m) = if pass == 0 { (w, h) } else { (h, w) };
-            let at = |a: i64, b: i64| if pass == 0 { (b * w + a) as usize } else { (a * w + b) as usize };
+            let at = |a: i64, b: i64| {
+                if pass == 0 {
+                    (b * w + a) as usize
+                } else {
+                    (a * w + b) as usize
+                }
+            };
             let mut line_z = vec![0.0f32; n as usize];
             let mut line_w = vec![0.0f32; n as usize];
             for b in 0..m {
@@ -347,7 +388,12 @@ fn fit(pts: &[(Vec2, f32)], f: &Fit) -> Option<Surface> {
 /// vertices (latitude, longitude in `lla`), and a function taking a point of
 /// that vector tile to metres east and north of `origin` (on the ground).
 /// False, having called nothing, if that would take more than nine of them.
-pub(crate) fn vector_around(src: &Sources, origin: DVec3, lla: &[[f64; 3]], mut f: impl FnMut(&crate::sources::VecTile, &dyn Fn(&[f32; 2]) -> Vec2)) -> bool {
+pub(crate) fn vector_around(
+    src: &Sources,
+    origin: DVec3,
+    lla: &[[f64; 3]],
+    mut f: impl FnMut(&crate::sources::VecTile, &dyn Fn(&[f32; 2]) -> Vec2),
+) -> bool {
     let (e, n, u) = geo::enu(origin);
     let nt = (1u32 << Z) as f64;
     let (mut tx0, mut tx1, mut ty0, mut ty1) = (u32::MAX, 0, u32::MAX, 0);
@@ -362,10 +408,13 @@ pub(crate) fn vector_around(src: &Sources, origin: DVec3, lla: &[[f64; 3]], mut 
     let ground = u * geo::R;
     for ty in ty0..=ty1 {
         for tx in tx0..=tx1 {
-            let Ok(vt) = src.vector(TileId::new(Z, tx, ty)) else { continue };
+            let Ok(vt) = src.vector(TileId::new(Z, tx, ty)) else {
+                continue;
+            };
             let k = 1.0 / vt.extent as f64;
             let local = |p: &[f32; 2]| -> Vec2 {
-                let lon = (tx as f64 + p[0] as f64 * k) / nt * std::f64::consts::TAU - std::f64::consts::PI;
+                let lon = (tx as f64 + p[0] as f64 * k) / nt * std::f64::consts::TAU
+                    - std::f64::consts::PI;
                 let lat = geo::merc_y_to_lat((ty as f64 + p[1] as f64 * k) / nt);
                 let d = geo::lla_to_pos(lat, lon, 0.0) - ground;
                 Vec2::new(d.dot(e) as f32, d.dot(n) as f32)
@@ -385,7 +434,10 @@ pub fn flatten(src: &Sources, origin: DVec3, pos: &mut [Vec3], lla: &mut [[f64; 
     }
     let (e, n, u) = geo::enu(origin);
     let (e3, n3, u3) = (e.as_vec3(), n.as_vec3(), u.as_vec3());
-    let xy: Vec<Vec2> = pos.iter().map(|p| Vec2::new(p.dot(e3), p.dot(n3))).collect();
+    let xy: Vec<Vec2> = pos
+        .iter()
+        .map(|p| Vec2::new(p.dot(e3), p.dot(n3)))
+        .collect();
     let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
     for p in &xy {
         (lo, hi) = (lo.min(*p), hi.max(*p));
@@ -409,7 +461,15 @@ pub fn flatten(src: &Sources, origin: DVec3, pos: &mut [Vec3], lla: &mut [[f64; 
             };
             // A bridge's whole deck stays (rails included); a road a
             // little short of its kerbs.
-            let half = if kind == BRIDGE { if l.class == RC_RAIL { 4.0 } else { crate::roads::carriageway(l, urban) * 0.5 + 3.0 } } else { crate::roads::carriageway(l, urban) * 0.5 - 0.3 };
+            let half = if kind == BRIDGE {
+                if l.class == RC_RAIL {
+                    4.0
+                } else {
+                    crate::roads::carriageway(l, urban) * 0.5 + 3.0
+                }
+            } else {
+                crate::roads::carriageway(l, urban) * 0.5 - 0.3
+            };
             let pts: Vec<Vec2> = l.pts.iter().map(local).collect();
             r.line(&pts, half, kind);
             any = true;
@@ -425,7 +485,10 @@ pub fn flatten(src: &Sources, origin: DVec3, pos: &mut [Vec3], lla: &mut [[f64; 
                 AP_APRON => APRON,
                 _ => continue,
             };
-            let rings: Vec<Vec<Vec2>> = rings.iter().map(|r| r.iter().map(local).collect()).collect();
+            let rings: Vec<Vec<Vec2>> = rings
+                .iter()
+                .map(|r| r.iter().map(local).collect())
+                .collect();
             r.poly(&rings, kind);
             any = true;
         }
@@ -457,7 +520,12 @@ pub fn flatten(src: &Sources, origin: DVec3, pos: &mut [Vec3], lla: &mut [[f64; 
     let mut moved = 0;
     for (i, kind, w) in on {
         let i = i as usize;
-        let Some(s) = group(kind).and_then(|g| surf[g].as_ref()).and_then(|s| s.get(xy[i])) else { continue };
+        let Some(s) = group(kind)
+            .and_then(|g| surf[g].as_ref())
+            .and_then(|s| s.get(xy[i]))
+        else {
+            continue;
+        };
         let z = pos[i].dot(u3);
         let d = z - s;
         let (up, down) = reach(kind);
@@ -468,7 +536,12 @@ pub fn flatten(src: &Sources, origin: DVec3, pos: &mut [Vec3], lla: &mut [[f64; 
         // pavement is not cut off with a step)
         let fade = EDGE_FADE[group(kind).unwrap()];
         let e = (edge_dist(&edge, xy[i]) / fade).clamp(0.0, 1.0);
-        let k = w * ((up - d) / (up * 0.25)).clamp(0.0, 1.0) * ((d + down) / (down * 0.25)).clamp(0.0, 1.0) * e * e * (3.0 - 2.0 * e);
+        let k = w
+            * ((up - d) / (up * 0.25)).clamp(0.0, 1.0)
+            * ((d + down) / (down * 0.25)).clamp(0.0, 1.0)
+            * e
+            * e
+            * (3.0 - 2.0 * e);
         let dz = (s - z) * k;
         pos[i] += u3 * dz;
         lla[i][2] += dz as f64;
@@ -507,7 +580,12 @@ mod tests {
 
     #[test]
     fn tile_edge_distance() {
-        let mut pts = vec![Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0), Vec2::new(100.0, 50.0), Vec2::new(0.0, 50.0)];
+        let mut pts = vec![
+            Vec2::new(0.0, 0.0),
+            Vec2::new(100.0, 0.0),
+            Vec2::new(100.0, 50.0),
+            Vec2::new(0.0, 50.0),
+        ];
         pts.extend((0..200).map(|i| Vec2::new((i * 37 % 100) as f32, (i * 13 % 50) as f32)));
         let h = hull(&pts);
         assert_eq!(h.len(), 4);
@@ -518,8 +596,19 @@ mod tests {
 
     #[test]
     fn raster_fills_polygons_and_lines() {
-        let mut r = Raster { min: Vec2::ZERO, cell: 1.0, w: 50, h: 50, k: vec![0; 2500] };
-        let sq = vec![Vec2::new(10.0, 10.0), Vec2::new(30.0, 10.0), Vec2::new(30.0, 30.0), Vec2::new(10.0, 30.0)];
+        let mut r = Raster {
+            min: Vec2::ZERO,
+            cell: 1.0,
+            w: 50,
+            h: 50,
+            k: vec![0; 2500],
+        };
+        let sq = vec![
+            Vec2::new(10.0, 10.0),
+            Vec2::new(30.0, 10.0),
+            Vec2::new(30.0, 30.0),
+            Vec2::new(10.0, 30.0),
+        ];
         r.poly(&[sq], APRON);
         r.line(&[Vec2::new(0.0, 40.0), Vec2::new(50.0, 40.0)], 3.0, ROAD);
         assert_eq!(r.at(20, 20), APRON);

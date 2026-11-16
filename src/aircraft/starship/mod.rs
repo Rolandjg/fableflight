@@ -45,7 +45,13 @@ fn fuse(z: f32) -> (f32, f32, f32) {
 }
 /// (It has no wing; the ship's aft flap stands in where the game asks for one.)
 fn wing_sect(x: f32) -> Sect {
-    Sect { le: Vec3::new(x.max(0.0), 0.0, -36.0), c: 12.0, cdir: Vec3::Z, up: Vec3::Y, tf: 1.0 }
+    Sect {
+        le: Vec3::new(x.max(0.0), 0.0, -36.0),
+        c: 12.0,
+        cdir: Vec3::Z,
+        up: Vec3::Y,
+        tf: 1.0,
+    }
 }
 /// The camera a real one carries: high on the ship's steel side, looking up the nose.
 const EYE: Vec3 = Vec3::new(0.0, 5.2, -50.0);
@@ -88,27 +94,54 @@ fn anim(name: &str) -> Anim {
     } else if name.contains("grid fin") {
         Anim::hinge(Drive::new(Input::Roll, 0.35))
     } else if name.ends_with("forward flap") {
-        Anim::hinge2(Drive::new(Input::Pitch, -0.45).offset(0.5), Drive::new(Input::Aileron(s), -0.25))
+        Anim::hinge2(
+            Drive::new(Input::Pitch, -0.45).offset(0.5),
+            Drive::new(Input::Aileron(s), -0.25),
+        )
     } else if name.ends_with("aft flap") {
-        Anim::hinge2(Drive::new(Input::Pitch, 0.45).offset(0.5), Drive::new(Input::Aileron(s), -0.25))
+        Anim::hinge2(
+            Drive::new(Input::Pitch, 0.45).offset(0.5),
+            Drive::new(Input::Aileron(s), -0.25),
+        )
     } else {
         Anim::Fixed
     }
 }
 
 pub fn build() -> Model {
-    let objs = fa18::load(include_bytes!("../../../assets/starship.bin.gz"), "starship");
+    let objs = fa18::load(
+        include_bytes!("../../../assets/starship.bin.gz"),
+        "starship",
+    );
     let mut b = Builder::default();
     let mut at: HashMap<&str, usize> = HashMap::new();
     for &(name, group) in PIECES {
-        let o = objs.get(name).unwrap_or_else(|| panic!("starship model has no piece called {name:?}"));
-        let k = b.add(name, group, o.mesh.clone(), anim(name), o.pivot, o.axis, None);
+        let o = objs
+            .get(name)
+            .unwrap_or_else(|| panic!("starship model has no piece called {name:?}"));
+        let k = b.add(
+            name,
+            group,
+            o.mesh.clone(),
+            anim(name),
+            o.pivot,
+            o.axis,
+            None,
+        );
         if name.ends_with("plume") {
             b.pieces[k].glass = true;
         }
         at.insert(name, k);
     }
-    bake_ao(&mut b.pieces, &AoBake { vox: 0.3, reach: 12.0, rays: 20, open: &|_, _| false });
+    bake_ao(
+        &mut b.pieces,
+        &AoBake {
+            vox: 0.3,
+            reach: 12.0,
+            rays: 20,
+            open: &|_, _| false,
+        },
+    );
     Model::finish(b.pieces)
 }
 
@@ -164,7 +197,15 @@ pub static SPEC: Spec = Spec {
     still: include_bytes!("../../../assets/aircraft/starship.png"),
     paint: None,
     build,
-    groups: [("ship", 100_000.0), ("booster", 275_000.0), ("left flaps", 4_000.0), ("right flaps", 4_000.0), ("ship engines", 10_000.0), ("nose", 3_000.0), ("skirt", 2_000.0)],
+    groups: [
+        ("ship", 100_000.0),
+        ("booster", 275_000.0),
+        ("left flaps", 4_000.0),
+        ("right flaps", 4_000.0),
+        ("ship engines", 10_000.0),
+        ("nose", 3_000.0),
+        ("skirt", 2_000.0),
+    ],
     // (Everything a wing, a tail or wheels would be is a stand-in the rocket's own flight model never reads.)
     span: 9.0,
     wing_sect,
@@ -186,8 +227,19 @@ pub static SPEC: Spec = Spec {
     eye: EYE,
     eye2: None,
     sees_inside,
-    contacts: &[([0.0, 0.0, -72.95], Part::Nose), ([0.0, -4.5, -40.0], Part::Belly), ([0.0, 4.5, -40.0], Part::Roof), ([-4.5, 0.0, 0.0], Part::Side), ([4.5, 0.0, 0.0], Part::Side)],
-    tail_pts: &[[0.0, -4.5, 48.0], [0.0, 4.5, 48.0], [-4.5, 0.0, 48.0], [4.5, 0.0, 48.0]],
+    contacts: &[
+        ([0.0, 0.0, -72.95], Part::Nose),
+        ([0.0, -4.5, -40.0], Part::Belly),
+        ([0.0, 4.5, -40.0], Part::Roof),
+        ([-4.5, 0.0, 0.0], Part::Side),
+        ([4.5, 0.0, 0.0], Part::Side),
+    ],
+    tail_pts: &[
+        [0.0, -4.5, 48.0],
+        [0.0, 4.5, 48.0],
+        [-4.5, 0.0, 48.0],
+        [4.5, 0.0, 48.0],
+    ],
     wing_st: [0.5, 0.6, 0.7, 0.8, 0.9],
     hard: [
         DVec3::new(0.0, 0.0, -72.95),
@@ -199,8 +251,19 @@ pub static SPEC: Spec = Spec {
         DVec3::new(0.0, -4.5, 48.0),
     ],
     gear: &[],
-    hull: Hull { k: 5.0e7, c: 6.0e6, nf_max: 2.0e8, drag: 2.0e6 },
-    hole: Hole { fus: [4.5, 4.5, 0.0, 4.5], wing: [0.0, 0.0, 0.2, 0.2], stab: [0.0, 0.2, 9.0], fin: [0.0, 0.0, 0.0, 0.0], pods: [[0.0; 3]; 2] },
+    hull: Hull {
+        k: 5.0e7,
+        c: 6.0e6,
+        nf_max: 2.0e8,
+        drag: 2.0e6,
+    },
+    hole: Hole {
+        fus: [4.5, 4.5, 0.0, 4.5],
+        wing: [0.0, 0.0, 0.2, 0.2],
+        stab: [0.0, 0.2, 9.0],
+        fin: [0.0, 0.0, 0.0, 0.0],
+        pods: [[0.0; 3]; 2],
+    },
     // On the pad, full: 275 t and 100 t of steel, 3,400 t and 1,200 t of propellant (rocket.rs works out what it weighs as that burns).
     mass: 4_975_000.0,
     // The booster's propellant; all 33 engines at full thrust burn 22.9 t a second.
@@ -287,7 +350,14 @@ mod tests {
         let m = build();
         let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
         for p in m.pieces.iter().filter(|p| !p.glass) {
-            assert!(p.mesh.v.iter().all(|v| v.pos.iter().chain(v.nrm.iter()).all(|x| x.is_finite())), "{} has NaNs", p.name);
+            assert!(
+                p.mesh
+                    .v
+                    .iter()
+                    .all(|v| v.pos.iter().chain(v.nrm.iter()).all(|x| x.is_finite())),
+                "{} has NaNs",
+                p.name
+            );
             assert!(!p.mesh.i.is_empty(), "{} is empty", p.name);
             for v in &p.mesh.v {
                 lo = lo.min(Vec3::from(v.pos));
@@ -296,11 +366,22 @@ mod tests {
         }
         // 121 m from the engines' bells to the tip of the nose, 9 m across the barrel (18 m across the aft flaps).
         println!("{} pieces, {:?} .. {:?}", m.pieces.len(), lo, hi);
-        assert!((hi.z - BASE).abs() < 0.3 && (lo.z - NOSE).abs() < 0.3, "{lo:?} {hi:?}");
-        assert!((hi.x - 9.0).abs() < 0.3 && (lo.x + 9.0).abs() < 0.3, "{lo:?} {hi:?}");
+        assert!(
+            (hi.z - BASE).abs() < 0.3 && (lo.z - NOSE).abs() < 0.3,
+            "{lo:?} {hi:?}"
+        );
+        assert!(
+            (hi.x - 9.0).abs() < 0.3 && (lo.x + 9.0).abs() < 0.3,
+            "{lo:?} {hi:?}"
+        );
         // Staging drops the booster's pieces and none of the ship's.
         for p in &m.pieces {
-            assert_eq!(p.group == G_TAIL, p.name.starts_with("booster"), "{}", p.name);
+            assert_eq!(
+                p.group == G_TAIL,
+                p.name.starts_with("booster"),
+                "{}",
+                p.name
+            );
         }
     }
 }

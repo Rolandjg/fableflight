@@ -34,7 +34,15 @@ impl Level {
     }
 
     pub fn parse(s: &str) -> Option<Level> {
-        [Level::Off, Level::Low, Level::Medium, Level::High, Level::Ultra].into_iter().find(|l| l.name().eq_ignore_ascii_case(s.trim()))
+        [
+            Level::Off,
+            Level::Low,
+            Level::Medium,
+            Level::High,
+            Level::Ultra,
+        ]
+        .into_iter()
+        .find(|l| l.name().eq_ignore_ascii_case(s.trim()))
     }
 
     fn pick(self, low: f64, medium: f64, high: f64, ultra: f64) -> f64 {
@@ -83,7 +91,19 @@ pub const SCALE_MAX: f32 = 2.0;
 impl Graphics {
     /// One of the presets (taa and vsync on).
     pub fn preset(l: Level) -> Self {
-        let mut g = Graphics { scale: 1.0, shadows: Level::High, clouds: Level::High, terrain: Level::High, scenery: Level::High, city: Level::High, trees: Level::High, cars: Level::High, ao: true, taa: true, vsync: true };
+        let mut g = Graphics {
+            scale: 1.0,
+            shadows: Level::High,
+            clouds: Level::High,
+            terrain: Level::High,
+            scenery: Level::High,
+            city: Level::High,
+            trees: Level::High,
+            cars: Level::High,
+            ao: true,
+            taa: true,
+            vsync: true,
+        };
         g.apply(l);
         g
     }
@@ -178,22 +198,37 @@ impl Graphics {
 
     /// The saved settings, or High.
     pub fn load() -> Self {
-        let j: serde_json::Value = Self::path().and_then(|p| std::fs::read(p).ok()).and_then(|d| serde_json::from_slice(&d).ok()).unwrap_or_default();
+        let j: serde_json::Value = Self::path()
+            .and_then(|p| std::fs::read(p).ok())
+            .and_then(|d| serde_json::from_slice(&d).ok())
+            .unwrap_or_default();
         let mut g = Self::default();
         if let Some(l) = j["preset"].as_str().and_then(Level::parse) {
             g.apply(l);
         }
-        let lvl = |k: &str, d: Level| j[k].as_str().and_then(Level::parse).filter(|l| *l != Level::Off).unwrap_or(d);
+        let lvl = |k: &str, d: Level| {
+            j[k].as_str()
+                .and_then(Level::parse)
+                .filter(|l| *l != Level::Off)
+                .unwrap_or(d)
+        };
         if let Some(s) = j["scale"].as_f64() {
             g.scale = (s as f32).clamp(SCALE_MIN, SCALE_MAX);
         }
-        g.shadows = j["shadows"].as_str().and_then(Level::parse).unwrap_or(g.shadows);
+        g.shadows = j["shadows"]
+            .as_str()
+            .and_then(Level::parse)
+            .unwrap_or(g.shadows);
         g.clouds = lvl("clouds", g.clouds);
         g.terrain = lvl("terrain", g.terrain);
         g.scenery = lvl("scenery", g.scenery);
         g.city = lvl("city", g.city);
         g.trees = lvl("trees", g.trees);
-        g.cars = j["cars"].as_str().and_then(Level::parse).map(|l| if l == Level::Ultra { Level::High } else { l }).unwrap_or(g.cars);
+        g.cars = j["cars"]
+            .as_str()
+            .and_then(Level::parse)
+            .map(|l| if l == Level::Ultra { Level::High } else { l })
+            .unwrap_or(g.cars);
         g.ao = j["ao"].as_bool().unwrap_or(g.ao);
         g.taa = j["taa"].as_bool().unwrap_or(g.taa);
         g.vsync = j["vsync"].as_bool().unwrap_or(g.vsync);
@@ -347,7 +382,11 @@ mod tests {
         let mut g = Graphics::preset(Level::High);
         g.taa = false;
         g.vsync = false;
-        assert_eq!(g.matches(), Some(Level::High), "taa and vsync are not part of a preset");
+        assert_eq!(
+            g.matches(),
+            Some(Level::High),
+            "taa and vsync are not part of a preset"
+        );
         g.scale = 1.2;
         assert_eq!(g.matches(), None);
     }
@@ -355,7 +394,20 @@ mod tests {
     #[test]
     fn high_is_the_old_look() {
         let g = Graphics::default();
-        assert_eq!((g.scale, g.shadow_res(), g.cloud_step(), g.lod_k(), g.reach(), g.ao), (1.0, 4096, 1.0, 0.62, 1.0, true));
-        assert_eq!((g.city_k(), g.tree_far(), g.tree_imp_k(), g.car_density()), (1.0, 3200.0, 1.0, (1.0, 2200.0, 1100.0)));
+        assert_eq!(
+            (
+                g.scale,
+                g.shadow_res(),
+                g.cloud_step(),
+                g.lod_k(),
+                g.reach(),
+                g.ao
+            ),
+            (1.0, 4096, 1.0, 0.62, 1.0, true)
+        );
+        assert_eq!(
+            (g.city_k(), g.tree_far(), g.tree_imp_k(), g.car_density()),
+            (1.0, 3200.0, 1.0, (1.0, 2200.0, 1100.0))
+        );
     }
 }

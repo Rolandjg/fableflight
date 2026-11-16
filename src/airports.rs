@@ -8,8 +8,8 @@
 //! stands the traffic uses; `mesh` turns it into pavement, paint, lights and
 //! parked aircraft.
 use crate::geo::{self, TileId};
-use crate::sources::{Sources, DATA_ZOOM};
-use anyhow::{anyhow, Result};
+use crate::sources::{DATA_ZOOM, Sources};
+use anyhow::{Result, anyhow};
 use glam::{DVec3, Vec2, Vec3};
 use std::collections::HashMap;
 use std::io::Read;
@@ -50,7 +50,11 @@ pub struct Apt {
 impl Apt {
     /// "KSFO / SFO" or just the identifier.
     pub fn code(&self) -> String {
-        if self.iata.is_empty() || self.iata == self.ident { self.ident.clone() } else { format!("{} / {}", self.ident, self.iata) }
+        if self.iata.is_empty() || self.iata == self.ident {
+            self.ident.clone()
+        } else {
+            format!("{} / {}", self.ident, self.iata)
+        }
     }
     pub fn longest(&self) -> f32 {
         self.rwys.iter().map(|r| r.len).fold(0.0, f32::max)
@@ -61,8 +65,14 @@ impl Apt {
     /// How far its pavement may reach from the reference point (m).
     pub fn reach(&self) -> f64 {
         let p0 = geo::lla_to_pos(self.lat.to_radians(), self.lon.to_radians(), 0.0);
-        let far = self.rwys.iter().flat_map(|r| r.pos.iter().flatten()).map(|(la, lo)| (geo::lla_to_pos(la.to_radians(), lo.to_radians(), 0.0) - p0).length()).fold(0.0, f64::max);
-        let base = [1500.0f64, 2600.0, 4200.0][self.kind as usize].max(self.longest() as f64 * 0.75);
+        let far = self
+            .rwys
+            .iter()
+            .flat_map(|r| r.pos.iter().flatten())
+            .map(|(la, lo)| (geo::lla_to_pos(la.to_radians(), lo.to_radians(), 0.0) - p0).length())
+            .fold(0.0, f64::max);
+        let base =
+            [1500.0f64, 2600.0, 4200.0][self.kind as usize].max(self.longest() as f64 * 0.75);
         (far + 900.0).max(base).min(9000.0)
     }
 }
@@ -76,7 +86,11 @@ pub struct Db {
 pub fn norm_ident(s: &str) -> String {
     let s = s.trim().to_ascii_uppercase();
     let b = s.as_bytes();
-    if b.len() >= 2 && b[0] == b'0' && b[1].is_ascii_digit() { s[1..].to_string() } else { s }
+    if b.len() >= 2 && b[0] == b'0' && b[1].is_ascii_digit() {
+        s[1..].to_string()
+    } else {
+        s
+    }
 }
 
 /// The compass heading (degrees) a runway identifier stands for, if it is a number.
@@ -91,9 +105,16 @@ fn surface(s: &str, kind: u8, len: f32, lighted: bool) -> (bool, bool) {
     let has = |k: &[&str]| k.iter().any(|k| u.starts_with(k));
     if has(&["CON", "PEM", "PCC"]) {
         (true, true)
-    } else if has(&["ASP", "BIT", "TAR", "PAV", "MAC", "ASF", "SEAL", "HARD", "COM", "COP", "B"]) || u == "C" || u == "A" {
+    } else if has(&[
+        "ASP", "BIT", "TAR", "PAV", "MAC", "ASF", "SEAL", "HARD", "COM", "COP", "B",
+    ]) || u == "C"
+        || u == "A"
+    {
         (true, false)
-    } else if has(&["TURF", "GR", "GVL", "EARTH", "DIRT", "SAND", "SOIL", "CLAY", "SNOW", "ICE", "WATER", "CORAL", "LAT", "G", "S", "D", "T"]) {
+    } else if has(&[
+        "TURF", "GR", "GVL", "EARTH", "DIRT", "SAND", "SOIL", "CLAY", "SNOW", "ICE", "WATER",
+        "CORAL", "LAT", "G", "S", "D", "T",
+    ]) {
         (false, false)
     } else {
         // Unknown: big fields are paved, and so are lit or long strips.
@@ -106,18 +127,25 @@ impl Db {
         static DB: OnceLock<Db> = OnceLock::new();
         DB.get_or_init(|| {
             let mut text = String::new();
-            let _ = flate2::read::GzDecoder::new(&include_bytes!("../assets/airports.tsv.gz")[..]).read_to_string(&mut text);
+            let _ = flate2::read::GzDecoder::new(&include_bytes!("../assets/airports.tsv.gz")[..])
+                .read_to_string(&mut text);
             let mut apts: Vec<Apt> = Vec::with_capacity(30_000);
             for line in text.lines() {
                 let f: Vec<&str> = line.split('\t').collect();
                 let num = |i: usize| f.get(i).and_then(|s| s.parse::<f64>().ok());
                 match f.first() {
                     Some(&"A") if f.len() >= 11 => {
-                        let (Some(lat), Some(lon)) = (num(4), num(5)) else { continue };
+                        let (Some(lat), Some(lon)) = (num(4), num(5)) else {
+                            continue;
+                        };
                         apts.push(Apt {
                             ident: f[1].into(),
                             iata: f[2].into(),
-                            kind: match f[3] { "L" => 2, "M" => 1, _ => 0 },
+                            kind: match f[3] {
+                                "L" => 2,
+                                "M" => 1,
+                                _ => 0,
+                            },
                             lat,
                             lon,
                             elev: num(6).unwrap_or(0.0) as f32 * FT,
@@ -134,7 +162,9 @@ impl Db {
                         let mut len = num(1).unwrap_or(0.0) as f32 * FT;
                         let pos = [num(6).zip(num(7)), num(10).zip(num(11))];
                         if let [Some(p), Some(q)] = pos {
-                            let d = (geo::lla_to_pos(p.0.to_radians(), p.1.to_radians(), 0.0) - geo::lla_to_pos(q.0.to_radians(), q.1.to_radians(), 0.0)).length() as f32;
+                            let d = (geo::lla_to_pos(p.0.to_radians(), p.1.to_radians(), 0.0)
+                                - geo::lla_to_pos(q.0.to_radians(), q.1.to_radians(), 0.0))
+                            .length() as f32;
                             if len < 100.0 || (d > 200.0 && (d - len).abs() > 0.3 * len) {
                                 len = d;
                             }
@@ -154,14 +184,28 @@ impl Db {
                         } else {
                             18.0
                         };
-                        a.rwys.push(DbRunway { len, width, paved, concrete, lighted, ident: [f[5].to_ascii_uppercase(), f[9].to_ascii_uppercase()], pos, disp: [num(8).unwrap_or(0.0) as f32 * FT, num(12).unwrap_or(0.0) as f32 * FT] });
+                        a.rwys.push(DbRunway {
+                            len,
+                            width,
+                            paved,
+                            concrete,
+                            lighted,
+                            ident: [f[5].to_ascii_uppercase(), f[9].to_ascii_uppercase()],
+                            pos,
+                            disp: [
+                                num(8).unwrap_or(0.0) as f32 * FT,
+                                num(12).unwrap_or(0.0) as f32 * FT,
+                            ],
+                        });
                     }
                     _ => {}
                 }
             }
             let mut grid: HashMap<(i16, i16), Vec<u32>> = HashMap::new();
             for (i, a) in apts.iter().enumerate() {
-                grid.entry((a.lat.floor() as i16, a.lon.floor() as i16)).or_default().push(i as u32);
+                grid.entry((a.lat.floor() as i16, a.lon.floor() as i16))
+                    .or_default()
+                    .push(i as u32);
             }
             Db { apts, grid }
         })
@@ -171,14 +215,21 @@ impl Db {
     pub fn near(&self, lat: f64, lon: f64, radius: f64) -> Vec<(u32, f64)> {
         let p = geo::lla_to_pos(lat.to_radians(), lon.to_radians(), 0.0);
         let dlat = (radius / 111_000.0).ceil() as i32 + 1;
-        let dlon = (radius / (111_000.0 * lat.to_radians().cos().max(0.05))).ceil().min(180.0) as i32 + 1;
+        let dlon = (radius / (111_000.0 * lat.to_radians().cos().max(0.05)))
+            .ceil()
+            .min(180.0) as i32
+            + 1;
         let mut out = Vec::new();
         for y in -dlat..=dlat {
             for x in -dlon..=dlon {
-                let key = ((lat.floor() as i32 + y) as i16, (lon.floor() as i32 + x + 180).rem_euclid(360) as i16 - 180);
+                let key = (
+                    (lat.floor() as i32 + y) as i16,
+                    (lon.floor() as i32 + x + 180).rem_euclid(360) as i16 - 180,
+                );
                 for &i in self.grid.get(&key).map(|v| &v[..]).unwrap_or(&[]) {
                     let a = &self.apts[i as usize];
-                    let d = (geo::lla_to_pos(a.lat.to_radians(), a.lon.to_radians(), 0.0) - p).length();
+                    let d =
+                        (geo::lla_to_pos(a.lat.to_radians(), a.lon.to_radians(), 0.0) - p).length();
                     if d <= radius {
                         out.push((i, d));
                     }
@@ -195,7 +246,11 @@ impl Db {
         if c.is_empty() {
             return None;
         }
-        self.apts.iter().position(|a| a.ident == c).or_else(|| self.apts.iter().position(|a| a.iata == c)).map(|i| i as u32)
+        self.apts
+            .iter()
+            .position(|a| a.ident == c)
+            .or_else(|| self.apts.iter().position(|a| a.iata == c))
+            .map(|i| i as u32)
     }
 
     /// Airports matching what was typed: code first, then name and city; big ones first.
@@ -213,7 +268,9 @@ impl Db {
                 10
             } else if q.len() >= 3 && a.city.to_lowercase().starts_with(&q) {
                 20
-            } else if q.len() >= 3 && (a.name.to_lowercase().contains(&q) || a.city.to_lowercase().contains(&q)) {
+            } else if q.len() >= 3
+                && (a.name.to_lowercase().contains(&q) || a.city.to_lowercase().contains(&q))
+            {
                 30
             } else {
                 continue;
@@ -228,26 +285,42 @@ impl Db {
     /// Whose pavement is at this spot: the nearest airfield, bigger ones
     /// reaching further.
     pub fn owner(&self, lat: f64, lon: f64) -> Option<u32> {
-        self.near(lat, lon, 9000.0).into_iter().filter(|(i, d)| *d < self.apts[*i as usize].reach() + 400.0).min_by(|a, b| {
-            let k = |x: &(u32, f64)| x.1 / [1.0, 1.6, 2.6][self.apts[x.0 as usize].kind as usize];
-            k(a).total_cmp(&k(b))
-        }).map(|x| x.0)
+        self.near(lat, lon, 9000.0)
+            .into_iter()
+            .filter(|(i, d)| *d < self.apts[*i as usize].reach() + 400.0)
+            .min_by(|a, b| {
+                let k =
+                    |x: &(u32, f64)| x.1 / [1.0, 1.6, 2.6][self.apts[x.0 as usize].kind as usize];
+                k(a).total_cmp(&k(b))
+            })
+            .map(|x| x.0)
     }
 
     /// What the database knows about the runway drawn on the map at a spot
     /// (degrees) along a bearing (degrees), named `refs` there ("10L/28R").
     pub fn runway_meta(&self, lat: f64, lon: f64, bearing: f32, refs: &str) -> RwyMeta {
         let p = geo::lla_to_pos(lat.to_radians(), lon.to_radians(), 0.0);
-        let names: Vec<String> = refs.split(['/', '-', ' ']).map(norm_ident).filter(|s| !s.is_empty()).collect();
-        let fold = |a: f32| { let d = a.rem_euclid(180.0); d.min(180.0 - d) };
+        let names: Vec<String> = refs
+            .split(['/', '-', ' '])
+            .map(norm_ident)
+            .filter(|s| !s.is_empty())
+            .collect();
+        let fold = |a: f32| {
+            let d = a.rem_euclid(180.0);
+            d.min(180.0 - d)
+        };
         let mut best: Option<(f64, u32, usize)> = None;
         for (i, d) in self.near(lat, lon, 9000.0) {
             let a = &self.apts[i as usize];
             for (k, r) in a.rwys.iter().enumerate() {
-                let named = !names.is_empty() && r.ident.iter().all(|id| names.contains(&norm_ident(id)));
+                let named =
+                    !names.is_empty() && r.ident.iter().all(|id| names.contains(&norm_ident(id)));
                 let mut score = d / [1.0, 1.6, 2.6][a.kind as usize] + 4000.0;
                 if let [Some(q0), Some(q1)] = r.pos {
-                    let (a0, a1) = (geo::lla_to_pos(q0.0.to_radians(), q0.1.to_radians(), 0.0), geo::lla_to_pos(q1.0.to_radians(), q1.1.to_radians(), 0.0));
+                    let (a0, a1) = (
+                        geo::lla_to_pos(q0.0.to_radians(), q0.1.to_radians(), 0.0),
+                        geo::lla_to_pos(q1.0.to_radians(), q1.1.to_radians(), 0.0),
+                    );
                     let ab = a1 - a0;
                     let t = ((p - a0).dot(ab) / ab.length_squared().max(1.0)).clamp(0.0, 1.0);
                     let off = (a0 + ab * t - p).length();
@@ -272,11 +345,32 @@ impl Db {
         match best {
             Some((_, i, k)) => {
                 let r = &self.apts[i as usize].rwys[k];
-                RwyMeta { width: r.width, paved: r.paved, concrete: r.concrete, lighted: r.lighted, ident: r.ident.clone(), disp: r.disp, apt: Some(i), found: true }
+                RwyMeta {
+                    width: r.width,
+                    paved: r.paved,
+                    concrete: r.concrete,
+                    lighted: r.lighted,
+                    ident: r.ident.clone(),
+                    disp: r.disp,
+                    apt: Some(i),
+                    found: true,
+                }
             }
             None => {
-                let kind = self.owner(lat, lon).map(|i| self.apts[i as usize].kind).unwrap_or(0);
-                RwyMeta { width: [18.0, 30.0, 45.0][kind as usize], paved: true, concrete: false, lighted: kind > 0, ident: [String::new(), String::new()], disp: [0.0; 2], apt: None, found: false }
+                let kind = self
+                    .owner(lat, lon)
+                    .map(|i| self.apts[i as usize].kind)
+                    .unwrap_or(0);
+                RwyMeta {
+                    width: [18.0, 30.0, 45.0][kind as usize],
+                    paved: true,
+                    concrete: false,
+                    lighted: kind > 0,
+                    ident: [String::new(), String::new()],
+                    disp: [0.0; 2],
+                    apt: None,
+                    found: false,
+                }
             }
         }
     }
@@ -335,7 +429,11 @@ impl Runway {
     }
     /// Threshold and landing direction of one end.
     pub fn end(&self, e: usize) -> (Vec2, Vec2) {
-        if e == 0 { (self.a + self.dir * self.thr[0], self.dir) } else { (self.b - self.dir * self.thr[1], -self.dir) }
+        if e == 0 {
+            (self.a + self.dir * self.thr[0], self.dir)
+        } else {
+            (self.b - self.dir * self.thr[1], -self.dir)
+        }
     }
     pub fn name(&self) -> String {
         format!("{}/{}", self.ident[0], self.ident[1])
@@ -345,7 +443,9 @@ impl Runway {
         (self.width * 0.42).clamp(6.0, 18.0) / 18.0
     }
     pub fn has_letter(&self) -> bool {
-        self.ident.iter().any(|s| s.ends_with(['L', 'R', 'C']) && s.len() > 1)
+        self.ident
+            .iter()
+            .any(|s| s.ends_with(['L', 'R', 'C']) && s.len() > 1)
     }
 }
 
@@ -372,8 +472,18 @@ impl Graph {
     }
     pub fn nearest(&self, p: Vec2, taxi_only: bool) -> Option<u32> {
         (0..self.nodes.len() as u32)
-            .filter(|n| !taxi_only || self.nodes[*n as usize].edges.iter().any(|e| self.edges[*e as usize].rwy.is_none()))
-            .min_by(|a, b| (self.nodes[*a as usize].p - p).length_squared().total_cmp(&(self.nodes[*b as usize].p - p).length_squared()))
+            .filter(|n| {
+                !taxi_only
+                    || self.nodes[*n as usize]
+                        .edges
+                        .iter()
+                        .any(|e| self.edges[*e as usize].rwy.is_none())
+            })
+            .min_by(|a, b| {
+                (self.nodes[*a as usize].p - p)
+                    .length_squared()
+                    .total_cmp(&(self.nodes[*b as usize].p - p).length_squared())
+            })
     }
     /// Shortest way from one node to another, as the nodes passed. Rolling
     /// down a runway costs more than a taxiway, so traffic uses the taxiways
@@ -473,11 +583,15 @@ impl Geo {
     }
     /// Ground height (m above the sphere) at a local point.
     pub fn h(&self, p: Vec2) -> f32 {
-        let q = ((p - self.hx) / self.hstep).clamp(Vec2::ZERO, Vec2::new(self.hn.0 as f32 - 1.001, self.hn.1 as f32 - 1.001));
+        let q = ((p - self.hx) / self.hstep).clamp(
+            Vec2::ZERO,
+            Vec2::new(self.hn.0 as f32 - 1.001, self.hn.1 as f32 - 1.001),
+        );
         let (x0, y0) = (q.x as usize, q.y as usize);
         let (fx, fy) = (q.x - x0 as f32, q.y - y0 as f32);
         let g = |x: usize, y: usize| self.hgrid[y * self.hn.0 + x];
-        (g(x0, y0) * (1.0 - fx) + g(x0 + 1, y0) * fx) * (1.0 - fy) + (g(x0, y0 + 1) * (1.0 - fx) + g(x0 + 1, y0 + 1) * fx) * fy
+        (g(x0, y0) * (1.0 - fx) + g(x0 + 1, y0) * fx) * (1.0 - fy)
+            + (g(x0, y0 + 1) * (1.0 - fx) + g(x0 + 1, y0 + 1) * fx) * fy
     }
     /// Planet-frame position of a local point at a height above the sphere.
     pub fn world(&self, p: Vec2, h: f64) -> DVec3 {
@@ -512,7 +626,9 @@ impl Geo {
             let head = ((hd - wind_from).to_radians()).cos() * wind.max(0.5);
             r.len * if r.paved { 1.0 } else { 0.5 } + head * 600.0 + if e == 0 { 1.0 } else { 0.0 }
         };
-        (0..self.runways.len()).flat_map(|ri| [(ri, 0), (ri, 1)]).max_by(|a, b| score(a.0, a.1).total_cmp(&score(b.0, b.1)))
+        (0..self.runways.len())
+            .flat_map(|ri| [(ri, 0), (ri, 1)])
+            .max_by(|a, b| score(a.0, a.1).total_cmp(&score(b.0, b.1)))
     }
     /// Is a local point over a runway's pavement? Which one.
     pub fn on_runway(&self, p: Vec2, margin: f32) -> Option<usize> {
@@ -547,8 +663,19 @@ fn in_poly(p: Vec2, rings: &[Vec<Vec2>]) -> bool {
 /// Clip a ring to the square [0, ext]^2 (Sutherland-Hodgman).
 fn clip_ring(r: &[[f32; 2]], ext: f32) -> Vec<[f32; 2]> {
     let mut cur: Vec<[f32; 2]> = r.to_vec();
-    for (axis, lim, keep_less) in [(0, 0.0, false), (0, ext, true), (1, 0.0, false), (1, ext, true)] {
-        let inside = |p: &[f32; 2]| if keep_less { p[axis] <= lim } else { p[axis] >= lim };
+    for (axis, lim, keep_less) in [
+        (0, 0.0, false),
+        (0, ext, true),
+        (1, 0.0, false),
+        (1, ext, true),
+    ] {
+        let inside = |p: &[f32; 2]| {
+            if keep_less {
+                p[axis] <= lim
+            } else {
+                p[axis] >= lim
+            }
+        };
         let mut out = Vec::with_capacity(cur.len() + 4);
         for i in 0..cur.len() {
             let (a, b) = (cur[i], cur[(i + 1) % cur.len()]);
@@ -585,7 +712,10 @@ pub fn build_geo(src: &Sources, idx: u32) -> Result<Geo> {
     // Every tile the airfield may reach into.
     let dlat = reach / geo::R;
     let dlon = dlat / lat0.cos().max(0.05);
-    let (t0, t1) = (TileId::at(lat0 + dlat, lon0 - dlon, DATA_ZOOM), TileId::at(lat0 - dlat, lon0 + dlon, DATA_ZOOM));
+    let (t0, t1) = (
+        TileId::at(lat0 + dlat, lon0 - dlon, DATA_ZOOM),
+        TileId::at(lat0 - dlat, lon0 + dlon, DATA_ZOOM),
+    );
     let size = 1u32 << DATA_ZOOM;
     let mut tiles = Vec::new();
     let mut x = t0.x;
@@ -634,22 +764,44 @@ pub fn build_geo(src: &Sources, idx: u32) -> Result<Geo> {
                     continue;
                 }
                 if l.runway {
-                    rw_pieces.push(Piece { pts, name: l.name.clone() });
+                    rw_pieces.push(Piece {
+                        pts,
+                        name: l.name.clone(),
+                    });
                 } else {
                     taxiways.push((pts, tw));
                 }
             }
         }
         for (kind, rings) in &vt.aero_polys {
-            let rings: Vec<Vec<Vec2>> = rings.iter().map(|r| clip_ring(r, ext).into_iter().map(loc).collect::<Vec<Vec2>>()).filter(|r| r.len() >= 3).collect();
-            if rings.is_empty() || !mine(rings[0].iter().copied().sum::<Vec2>() / rings[0].len() as f32) {
+            let rings: Vec<Vec<Vec2>> = rings
+                .iter()
+                .map(|r| {
+                    clip_ring(r, ext)
+                        .into_iter()
+                        .map(loc)
+                        .collect::<Vec<Vec2>>()
+                })
+                .filter(|r| r.len() >= 3)
+                .collect();
+            if rings.is_empty()
+                || !mine(rings[0].iter().copied().sum::<Vec2>() / rings[0].len() as f32)
+            {
                 continue;
             }
             match *kind {
                 crate::sources::AP_HELIPAD => {
                     let c = rings[0].iter().copied().sum::<Vec2>() / rings[0].len() as f32;
-                    let r = rings[0].iter().map(|p| (*p - c).length()).fold(0.0, f32::max);
-                    if r > 4.0 && r < 40.0 && !helipads.iter().any(|h: &(Vec2, f32)| (h.0 - c).length() < 10.0) {
+                    let r = rings[0]
+                        .iter()
+                        .map(|p| (*p - c).length())
+                        .fold(0.0, f32::max);
+                    if r > 4.0
+                        && r < 40.0
+                        && !helipads
+                            .iter()
+                            .any(|h: &(Vec2, f32)| (h.0 - c).length() < 10.0)
+                    {
                         helipads.push((c, r));
                     }
                 }
@@ -661,17 +813,28 @@ pub fn build_geo(src: &Sources, idx: u32) -> Result<Geo> {
             if b.min_height > 2.0 {
                 continue;
             }
-            let ring: Vec<Vec2> = b.rings[0].iter().filter(|p| p[0] > -64.0 && p[1] > -64.0 && p[0] < ext + 64.0 && p[1] < ext + 64.0).map(|p| loc(*p)).collect();
+            let ring: Vec<Vec2> = b.rings[0]
+                .iter()
+                .filter(|p| p[0] > -64.0 && p[1] > -64.0 && p[0] < ext + 64.0 && p[1] < ext + 64.0)
+                .map(|p| loc(*p))
+                .collect();
             if ring.len() < 3 || ring[0].length() > reach as f32 + 800.0 {
                 continue;
             }
-            let (lo, hi) = ring.iter().fold((Vec2::splat(f32::MAX), Vec2::splat(f32::MIN)), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+            let (lo, hi) = ring.iter().fold(
+                (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN)),
+                |(lo, hi), p| (lo.min(*p), hi.max(*p)),
+            );
             blds.push((lo, hi, ring));
         }
         for (p, name) in &vt.gates {
             if p[0] >= 0.0 && p[1] >= 0.0 && p[0] < ext && p[1] < ext {
                 let q = loc(*p);
-                if mine(q) && !gates.iter().any(|g: &(Vec2, String)| (g.0 - q).length() < 6.0) {
+                if mine(q)
+                    && !gates
+                        .iter()
+                        .any(|g: &(Vec2, String)| (g.0 - q).length() < 6.0)
+                {
                     gates.push((q, name.clone()));
                 }
             }
@@ -716,8 +879,15 @@ pub fn build_geo(src: &Sources, idx: u32) -> Result<Geo> {
                     continue;
                 }
                 let along: Vec<f32> = q.pts.iter().map(|p| (*p - p0).dot(dir)).collect();
-                let across = q.pts.iter().map(|p| (*p - p0).dot(right_of(dir)).abs()).fold(0.0, f32::max);
-                let (a0, a1) = (along.iter().copied().fold(f32::MAX, f32::min), along.iter().copied().fold(f32::MIN, f32::max));
+                let across = q
+                    .pts
+                    .iter()
+                    .map(|p| (*p - p0).dot(right_of(dir)).abs())
+                    .fold(0.0, f32::max);
+                let (a0, a1) = (
+                    along.iter().copied().fold(f32::MAX, f32::min),
+                    along.iter().copied().fold(f32::MIN, f32::max),
+                );
                 if across > 14.0 || a0 > hi + 60.0 || a1 < lo - 60.0 {
                     continue;
                 }
@@ -747,13 +917,20 @@ pub fn build_geo(src: &Sources, idx: u32) -> Result<Geo> {
         };
         let meta = db.runway_meta(la, lo_, bearing(dir), &name);
         // Which end is which: a runway is named for the heading flown along it.
-        let mut ids: Vec<String> = name.split('/').map(|s| s.trim().to_ascii_uppercase()).filter(|s| !s.is_empty()).collect();
+        let mut ids: Vec<String> = name
+            .split('/')
+            .map(|s| s.trim().to_ascii_uppercase())
+            .filter(|s| !s.is_empty())
+            .collect();
         if ids.len() != 2 {
             ids = meta.ident.to_vec();
         }
         let mut disp = meta.disp;
         let brg = bearing(dir);
-        let turn = |h: f32| { let d = (h - brg).rem_euclid(360.0); d.min(360.0 - d) };
+        let turn = |h: f32| {
+            let d = (h - brg).rem_euclid(360.0);
+            d.min(360.0 - d)
+        };
         let (h0, h1) = (ident_heading(&ids[0]), ident_heading(&ids[1]));
         match (h0, h1) {
             (Some(h0), Some(h1)) => {
@@ -764,7 +941,10 @@ pub fn build_geo(src: &Sources, idx: u32) -> Result<Geo> {
             }
             _ => {
                 if ids.iter().any(|s| s.is_empty()) {
-                    let num = |b: f32| { let k = ((b / 10.0).round() as i32).rem_euclid(36); format!("{:02}", if k == 0 { 36 } else { k }) };
+                    let num = |b: f32| {
+                        let k = ((b / 10.0).round() as i32).rem_euclid(36);
+                        format!("{:02}", if k == 0 { 36 } else { k })
+                    };
                     ids = vec![num(brg), num(brg + 180.0)];
                 } else if dir.y < 0.0 {
                     // "N/S"-style names: keep the map's order along a line drawn west to east or south to north.
@@ -787,7 +967,19 @@ pub fn build_geo(src: &Sources, idx: u32) -> Result<Geo> {
             0
         };
         let thr = [disp[0].clamp(0.0, len * 0.3), disp[1].clamp(0.0, len * 0.3)];
-        runways.push(Runway { a, b, dir, len, width: meta.width, ident: [ids[0].clone(), ids[1].clone()], thr, paved: meta.paved, concrete: meta.concrete, lighted, class });
+        runways.push(Runway {
+            a,
+            b,
+            dir,
+            len,
+            width: meta.width,
+            ident: [ids[0].clone(), ids[1].clone()],
+            thr,
+            paved: meta.paved,
+            concrete: meta.concrete,
+            lighted,
+            class,
+        });
     }
     // The longest first: it is "the" runway where one is asked for.
     runways.sort_by(|a, b| (b.paved, b.len).partial_cmp(&(a.paved, a.len)).unwrap());
@@ -804,16 +996,28 @@ pub fn build_geo(src: &Sources, idx: u32) -> Result<Geo> {
         grow(r.a, 1100.0);
         grow(r.b, 1100.0);
     }
-    for p in taxiways.iter().flat_map(|t| t.0.iter()).chain(aprons.iter().flat_map(|a| a[0].iter())) {
+    for p in taxiways
+        .iter()
+        .flat_map(|t| t.0.iter())
+        .chain(aprons.iter().flat_map(|a| a[0].iter()))
+    {
         grow(*p, 80.0);
     }
     if lo.x > hi.x {
         (lo, hi) = (Vec2::splat(-300.0), Vec2::splat(300.0));
     }
-    let hstep = if (hi - lo).max_element() > 6000.0 { 12.0 } else { 8.0 };
-    let hn = (((hi.x - lo.x) / hstep).ceil() as usize + 2, ((hi.y - lo.y) / hstep).ceil() as usize + 2);
+    let hstep = if (hi - lo).max_element() > 6000.0 {
+        12.0
+    } else {
+        8.0
+    };
+    let hn = (
+        ((hi.x - lo.x) / hstep).ceil() as usize + 2,
+        ((hi.y - lo.y) / hstep).ceil() as usize + 2,
+    );
     let mut hgrid = vec![apt.elev; hn.0 * hn.1];
-    let mut etiles: HashMap<TileId, Option<std::sync::Arc<crate::sources::ElevTile>>> = HashMap::new();
+    let mut etiles: HashMap<TileId, Option<std::sync::Arc<crate::sources::ElevTile>>> =
+        HashMap::new();
     for j in 0..hn.1 {
         for i in 0..hn.0 {
             let p = lo + Vec2::new(i as f32, j as f32) * hstep;
@@ -847,7 +1051,15 @@ pub fn build_geo(src: &Sources, idx: u32) -> Result<Geo> {
         hn,
         hgrid,
     };
-    g.elev = if g.runways.is_empty() { g.h(Vec2::ZERO) } else { g.runways.iter().map(|r| g.h((r.a + r.b) * 0.5)).sum::<f32>() / g.runways.len() as f32 };
+    g.elev = if g.runways.is_empty() {
+        g.h(Vec2::ZERO)
+    } else {
+        g.runways
+            .iter()
+            .map(|r| g.h((r.a + r.b) * 0.5))
+            .sum::<f32>()
+            / g.runways.len() as f32
+    };
     g.center = g.world(Vec2::ZERO, g.elev as f64);
     build_graph(&mut g);
     find_holds(&mut g);
@@ -865,9 +1077,21 @@ fn build_graph(g: &mut Geo) {
         /// extra vertices: (segment, t)
         cuts: Vec<(usize, f32)>,
     }
-    let mut lines: Vec<Line> = g.taxiways.iter().map(|t| Line { pts: t.0.clone(), rwy: None, cuts: Vec::new() }).collect();
+    let mut lines: Vec<Line> = g
+        .taxiways
+        .iter()
+        .map(|t| Line {
+            pts: t.0.clone(),
+            rwy: None,
+            cuts: Vec::new(),
+        })
+        .collect();
     for (i, r) in g.runways.iter().enumerate() {
-        lines.push(Line { pts: vec![r.a, r.b], rwy: Some(i as u16), cuts: Vec::new() });
+        lines.push(Line {
+            pts: vec![r.a, r.b],
+            rwy: Some(i as u16),
+            cuts: Vec::new(),
+        });
     }
     // Segments by grid cell.
     const CELL: f32 = 80.0;
@@ -883,7 +1107,10 @@ fn build_graph(g: &mut Geo) {
                     let p = w[0] + (w[1] - w[0]) * (k as f32 / steps as f32);
                     for dy in -1..=1 {
                         for dx in -1..=1 {
-                            let c = ((p.x / CELL).floor() as i32 + dx, (p.y / CELL).floor() as i32 + dy);
+                            let c = (
+                                (p.x / CELL).floor() as i32 + dx,
+                                (p.y / CELL).floor() as i32 + dy,
+                            );
                             if seen.insert(c) {
                                 cells.entry(c).or_default().push((li as u32, si as u32));
                             }
@@ -893,7 +1120,10 @@ fn build_graph(g: &mut Geo) {
             } else {
                 for cy in (lo.y / CELL).floor() as i32..=(hi.y / CELL).floor() as i32 {
                     for cx in (lo.x / CELL).floor() as i32..=(hi.x / CELL).floor() as i32 {
-                        cells.entry((cx, cy)).or_default().push((li as u32, si as u32));
+                        cells
+                            .entry((cx, cy))
+                            .or_default()
+                            .push((li as u32, si as u32));
                     }
                 }
             }
@@ -907,8 +1137,14 @@ fn build_graph(g: &mut Geo) {
                 if la == lb {
                     continue;
                 }
-                let (a, r) = (lines[la as usize].pts[sa as usize], lines[la as usize].pts[sa as usize + 1] - lines[la as usize].pts[sa as usize]);
-                let (c, q) = (lines[lb as usize].pts[sb as usize], lines[lb as usize].pts[sb as usize + 1] - lines[lb as usize].pts[sb as usize]);
+                let (a, r) = (
+                    lines[la as usize].pts[sa as usize],
+                    lines[la as usize].pts[sa as usize + 1] - lines[la as usize].pts[sa as usize],
+                );
+                let (c, q) = (
+                    lines[lb as usize].pts[sb as usize],
+                    lines[lb as usize].pts[sb as usize + 1] - lines[lb as usize].pts[sb as usize],
+                );
                 let (lr, lq) = (r.length(), q.length());
                 let den = r.perp_dot(q);
                 if lr < 1e-3 || lq < 1e-3 || den.abs() < 0.03 * lr * lq {
@@ -934,19 +1170,29 @@ fn build_graph(g: &mut Geo) {
         let c = ((p.x / SNAP).floor() as i32, (p.y / SNAP).floor() as i32);
         for dy in -1..=1 {
             for dx in -1..=1 {
-                for &k in grid.get(&(c.0 + dx, c.1 + dy)).map(|v| &v[..]).unwrap_or(&[]) {
+                for &k in grid
+                    .get(&(c.0 + dx, c.1 + dy))
+                    .map(|v| &v[..])
+                    .unwrap_or(&[])
+                {
                     if (graph.nodes[k as usize].p - p).length() < SNAP {
                         return k;
                     }
                 }
             }
         }
-        graph.nodes.push(Node { p, edges: Vec::new() });
-        grid.entry(c).or_default().push(graph.nodes.len() as u32 - 1);
+        graph.nodes.push(Node {
+            p,
+            edges: Vec::new(),
+        });
+        grid.entry(c)
+            .or_default()
+            .push(graph.nodes.len() as u32 - 1);
         graph.nodes.len() as u32 - 1
     };
     for l in &mut lines {
-        l.cuts.sort_by(|a, b| (a.0, a.1).partial_cmp(&(b.0, b.1)).unwrap());
+        l.cuts
+            .sort_by(|a, b| (a.0, a.1).partial_cmp(&(b.0, b.1)).unwrap());
         let mut seq: Vec<Vec2> = Vec::new();
         let mut ci = 0;
         for si in 0..l.pts.len() - 1 {
@@ -962,9 +1208,17 @@ fn build_graph(g: &mut Geo) {
             let cur = node(&mut graph, *p);
             if cur != prev {
                 let len = (graph.nodes[cur as usize].p - graph.nodes[prev as usize].p).length();
-                let dup = graph.nodes[prev as usize].edges.iter().any(|e| graph.other(*e, prev) == cur);
+                let dup = graph.nodes[prev as usize]
+                    .edges
+                    .iter()
+                    .any(|e| graph.other(*e, prev) == cur);
                 if !dup {
-                    graph.edges.push(Edge { a: prev, b: cur, len, rwy: l.rwy });
+                    graph.edges.push(Edge {
+                        a: prev,
+                        b: cur,
+                        len,
+                        rwy: l.rwy,
+                    });
                     let ei = graph.edges.len() as u32 - 1;
                     graph.nodes[prev as usize].edges.push(ei);
                     graph.nodes[cur as usize].edges.push(ei);
@@ -991,10 +1245,18 @@ fn find_holds(g: &mut Geo) {
         let dh = hold_dist(r);
         let across = |p: Vec2| r.local(p).1.abs();
         for (ni, nd) in gr.nodes.iter().enumerate() {
-            if !nd.edges.iter().any(|e| gr.edges[*e as usize].rwy == Some(ri as u16)) {
+            if !nd
+                .edges
+                .iter()
+                .any(|e| gr.edges[*e as usize].rwy == Some(ri as u16))
+            {
                 continue;
             }
-            for &e0 in nd.edges.iter().filter(|e| gr.edges[**e as usize].rwy.is_none()) {
+            for &e0 in nd
+                .edges
+                .iter()
+                .filter(|e| gr.edges[**e as usize].rwy.is_none())
+            {
                 let (mut cur, mut edge) = (ni as u32, e0);
                 for _ in 0..14 {
                     let other = gr.other(edge, cur);
@@ -1004,7 +1266,12 @@ fn find_holds(g: &mut Geo) {
                     let toward = (p0 - p1) / seg;
                     let mut put = |p: Vec2| {
                         if !holds.iter().any(|h| (h.p - p).length() < 14.0) {
-                            holds.push(Hold { p, dir: toward, rwy: ri as u16, half: taxi_width(g.apt().kind) * 0.5 });
+                            holds.push(Hold {
+                                p,
+                                dir: toward,
+                                rwy: ri as u16,
+                                half: taxi_width(g.apt().kind) * 0.5,
+                            });
                         }
                     };
                     if d1 >= dh && d1 > d0 {
@@ -1019,7 +1286,11 @@ fn find_holds(g: &mut Geo) {
                         }
                         break;
                     }
-                    let next = gr.nodes[other as usize].edges.iter().copied().find(|e| *e != edge && gr.edges[*e as usize].rwy.is_none());
+                    let next = gr.nodes[other as usize]
+                        .edges
+                        .iter()
+                        .copied()
+                        .find(|e| *e != edge && gr.edges[*e as usize].rwy.is_none());
                     let Some(next) = next else { break };
                     cur = other;
                     edge = next;
@@ -1036,16 +1307,41 @@ pub const SIZE_SPAN: [f32; 5] = [11.0, 16.0, 27.0, 36.0, 62.0];
 fn find_stands(g: &mut Geo, blds: &[(Vec2, Vec2, Vec<Vec2>)]) {
     let apt = g.apt();
     let gr = &g.graph;
-    let near_apron = |p: Vec2, m: f32| g.aprons.iter().any(|a| in_poly(p, a) || (0..a[0].len()).any(|i| seg_dist(p, a[0][i], a[0][(i + 1) % a[0].len()]) < m));
-    let near_rwy = |p: Vec2, m: f32| g.runways.iter().any(|r| { let (s, x) = r.local(p); s > -m && s < r.len + m && x.abs() < r.width * 0.5 + m });
-    let top = if apt.kind == 2 { 4 } else if apt.kind == 1 { if apt.longest() >= 2400.0 { 4 } else { 3 } } else if apt.any_paved() && apt.longest() >= 1300.0 { 1 } else { 0 };
+    let near_apron = |p: Vec2, m: f32| {
+        g.aprons.iter().any(|a| {
+            in_poly(p, a)
+                || (0..a[0].len()).any(|i| seg_dist(p, a[0][i], a[0][(i + 1) % a[0].len()]) < m)
+        })
+    };
+    let near_rwy = |p: Vec2, m: f32| {
+        g.runways.iter().any(|r| {
+            let (s, x) = r.local(p);
+            s > -m && s < r.len + m && x.abs() < r.width * 0.5 + m
+        })
+    };
+    let top = if apt.kind == 2 {
+        4
+    } else if apt.kind == 1 {
+        if apt.longest() >= 2400.0 { 4 } else { 3 }
+    } else if apt.any_paved() && apt.longest() >= 1300.0 {
+        1
+    } else {
+        0
+    };
     let mut stands: Vec<Stand> = Vec::new();
     // Taxi lanes that end on an apron or at a gate end at a stand.
     for (ni, nd) in gr.nodes.iter().enumerate() {
-        if nd.edges.len() != 1 || gr.edges[nd.edges[0] as usize].rwy.is_some() || near_rwy(nd.p, 45.0) {
+        if nd.edges.len() != 1
+            || gr.edges[nd.edges[0] as usize].rwy.is_some()
+            || near_rwy(nd.p, 45.0)
+        {
             continue;
         }
-        let gate = g.gates.iter().filter(|gt| (gt.0 - nd.p).length() < 95.0).min_by(|a, b| (a.0 - nd.p).length().total_cmp(&(b.0 - nd.p).length()));
+        let gate = g
+            .gates
+            .iter()
+            .filter(|gt| (gt.0 - nd.p).length() < 95.0)
+            .min_by(|a, b| (a.0 - nd.p).length().total_cmp(&(b.0 - nd.p).length()));
         if gate.is_none() && !near_apron(nd.p, 20.0) && apt.kind == 2 {
             continue;
         }
@@ -1057,14 +1353,25 @@ fn find_stands(g: &mut Geo, blds: &[(Vec2, Vec2, Vec<Vec2>)]) {
             if (back - nd.p).length() > 14.0 || gr.nodes[o as usize].edges.len() != 2 {
                 break;
             }
-            edge = *gr.nodes[o as usize].edges.iter().find(|e| **e != edge).unwrap();
+            edge = *gr.nodes[o as usize]
+                .edges
+                .iter()
+                .find(|e| **e != edge)
+                .unwrap();
             cur = o;
         }
         let dir = (nd.p - back).normalize_or_zero();
         if dir == Vec2::ZERO {
             continue;
         }
-        stands.push(Stand { pos: nd.p, dir, size: top, gate: gate.map(|g| g.1.clone()).unwrap_or_default(), node: ni as u32, terminal: gate.is_some() });
+        stands.push(Stand {
+            pos: nd.p,
+            dir,
+            size: top,
+            gate: gate.map(|g| g.1.clone()).unwrap_or_default(),
+            node: ni as u32,
+            terminal: gate.is_some(),
+        });
     }
     // Gates no taxi lane was drawn to: the aircraft stands nose-in before them.
     if apt.kind >= 1 {
@@ -1072,21 +1379,42 @@ fn find_stands(g: &mut Geo, blds: &[(Vec2, Vec2, Vec<Vec2>)]) {
             if stands.iter().any(|s| (s.pos - *gp).length() < 70.0) {
                 continue;
             }
-            let Some(node) = gr.nearest(*gp, true) else { continue };
+            let Some(node) = gr.nearest(*gp, true) else {
+                continue;
+            };
             let q = gr.nodes[node as usize].p;
             let d = (q - *gp).length();
             if !(30.0..260.0).contains(&d) {
                 continue;
             }
             let out = (q - *gp) / d;
-            stands.push(Stand { pos: *gp + out * 14.0, dir: -out, size: top, gate: name.clone(), node, terminal: true });
+            stands.push(Stand {
+                pos: *gp + out * 14.0,
+                dir: -out,
+                size: top,
+                gate: name.clone(),
+                node,
+                terminal: true,
+            });
         }
     }
     // Light aircraft tie-downs in rows on the aprons, where nothing better is known.
-    let want = if apt.kind == 2 { 0 } else if apt.kind == 1 { 14 } else { 22 };
+    let want = if apt.kind == 2 {
+        0
+    } else if apt.kind == 1 {
+        14
+    } else {
+        22
+    };
     let mut ties = 0;
     let mut aprons: Vec<&Vec<Vec<Vec2>>> = g.aprons.iter().collect();
-    let area = |a: &Vec<Vec<Vec2>>| (0..a[0].len()).map(|i| a[0][i].perp_dot(a[0][(i + 1) % a[0].len()])).sum::<f32>().abs() * 0.5;
+    let area = |a: &Vec<Vec<Vec2>>| {
+        (0..a[0].len())
+            .map(|i| a[0][i].perp_dot(a[0][(i + 1) % a[0].len()]))
+            .sum::<f32>()
+            .abs()
+            * 0.5
+    };
     aprons.sort_by(|a, b| area(b).total_cmp(&area(a)));
     for a in aprons {
         if ties >= want || area(a) < 900.0 {
@@ -1109,12 +1437,36 @@ fn find_stands(g: &mut Geo, blds: &[(Vec2, Vec2, Vec<Vec2>)]) {
             for col in -(ext / 13.5) as i32..=(ext / 13.5) as i32 {
                 let p = c + side * (row as f32 * 26.0) + axis * (col as f32 * 13.5);
                 let facing = if row.rem_euclid(2) == 0 { side } else { -side };
-                let fits = [Vec2::ZERO, axis * 6.0, axis * -6.0, facing * 3.0, facing * -8.0].iter().all(|o| in_poly(p + *o, a));
-                if !fits || g.taxiways.iter().any(|t| t.0.windows(2).any(|w| seg_dist(p, w[0], w[1]) < t.1 * 0.5 + 9.0)) || near_rwy(p, 40.0) || stands.iter().any(|s| (s.pos - p).length() < 13.0) {
+                let fits = [
+                    Vec2::ZERO,
+                    axis * 6.0,
+                    axis * -6.0,
+                    facing * 3.0,
+                    facing * -8.0,
+                ]
+                .iter()
+                .all(|o| in_poly(p + *o, a));
+                if !fits
+                    || g.taxiways.iter().any(|t| {
+                        t.0.windows(2)
+                            .any(|w| seg_dist(p, w[0], w[1]) < t.1 * 0.5 + 9.0)
+                    })
+                    || near_rwy(p, 40.0)
+                    || stands.iter().any(|s| (s.pos - p).length() < 13.0)
+                {
                     continue;
                 }
-                let Some(node) = gr.nearest(p, true).or_else(|| gr.nearest(p, false)) else { break 'rows };
-                stands.push(Stand { pos: p, dir: facing, size: 0, gate: String::new(), node, terminal: false });
+                let Some(node) = gr.nearest(p, true).or_else(|| gr.nearest(p, false)) else {
+                    break 'rows;
+                };
+                stands.push(Stand {
+                    pos: p,
+                    dir: facing,
+                    size: 0,
+                    gate: String::new(),
+                    node,
+                    terminal: false,
+                });
                 ties += 1;
                 if ties >= want {
                     break 'rows;
@@ -1123,20 +1475,44 @@ fn find_stands(g: &mut Geo, blds: &[(Vec2, Vec2, Vec<Vec2>)]) {
         }
     }
     // Nothing parks inside a building or off the airside pavement.
-    let in_bld = |p: Vec2| blds.iter().any(|(lo, hi, r)| p.cmpge(*lo).all() && p.cmple(*hi).all() && in_poly(p, std::slice::from_ref(r)));
-    let on_pavement = |p: Vec2| near_apron(p, 25.0) || g.taxiways.iter().any(|t| t.0.windows(2).any(|w| seg_dist(p, w[0], w[1]) < t.1 * 0.5 + 25.0));
+    let in_bld = |p: Vec2| {
+        blds.iter().any(|(lo, hi, r)| {
+            p.cmpge(*lo).all() && p.cmple(*hi).all() && in_poly(p, std::slice::from_ref(r))
+        })
+    };
+    let on_pavement = |p: Vec2| {
+        near_apron(p, 25.0)
+            || g.taxiways.iter().any(|t| {
+                t.0.windows(2)
+                    .any(|w| seg_dist(p, w[0], w[1]) < t.1 * 0.5 + 25.0)
+            })
+    };
     stands.retain(|s| {
         let ty = &crate::airmodels::TYPES[s.size as usize];
         let o = s.pos - s.dir * ty.nose;
         let side = right_of(s.dir) * ty.span * 0.45;
-        let body = [s.pos - s.dir * 6.0, o, o - s.dir * (ty.len - ty.nose) * 0.9, o + side, o - side];
+        let body = [
+            s.pos - s.dir * 6.0,
+            o,
+            o - s.dir * (ty.len - ty.nose) * 0.9,
+            o + side,
+            o - side,
+        ];
         on_pavement(o) && !body.iter().any(|p| in_bld(*p))
     });
     // What fits where: by the room to the next stand, and by what the airport takes.
     let pts: Vec<Vec2> = stands.iter().map(|s| s.pos).collect();
     for (i, s) in stands.iter_mut().enumerate() {
-        let room = pts.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, p)| (*p - s.pos).length()).fold(120.0, f32::min);
-        let fit = (0..5).rev().find(|k| SIZE_SPAN[*k] + 5.0 <= room).unwrap_or(0) as u8;
+        let room = pts
+            .iter()
+            .enumerate()
+            .filter(|(j, _)| *j != i)
+            .map(|(_, p)| (*p - s.pos).length())
+            .fold(120.0, f32::min);
+        let fit = (0..5)
+            .rev()
+            .find(|k| SIZE_SPAN[*k] + 5.0 <= room)
+            .unwrap_or(0) as u8;
         s.size = s.size.min(fit);
         if !s.terminal && apt.kind < 2 {
             s.size = s.size.min(2);
@@ -1186,10 +1562,38 @@ mod tests {
             let t0 = std::time::Instant::now();
             let g = build_geo(&src, idx).unwrap();
             let a = g.apt();
-            println!("{} {} kind {} elev {:.0} m: {} runways, {} taxiways, {} aprons, {} gates, {} nodes, {} edges, {} stands, {} holds, {:.0} ms", a.ident, a.name, a.kind, g.elev, g.runways.len(), g.taxiways.len(), g.aprons.len(), g.gates.len(), g.graph.nodes.len(), g.graph.edges.len(), g.stands.len(), g.holds.len(), t0.elapsed().as_secs_f64() * 1000.0);
+            println!(
+                "{} {} kind {} elev {:.0} m: {} runways, {} taxiways, {} aprons, {} gates, {} nodes, {} edges, {} stands, {} holds, {:.0} ms",
+                a.ident,
+                a.name,
+                a.kind,
+                g.elev,
+                g.runways.len(),
+                g.taxiways.len(),
+                g.aprons.len(),
+                g.gates.len(),
+                g.graph.nodes.len(),
+                g.graph.edges.len(),
+                g.stands.len(),
+                g.holds.len(),
+                t0.elapsed().as_secs_f64() * 1000.0
+            );
             for r in &g.runways {
-                let hs: Vec<String> = (0..=10).map(|k| format!("{:.1}", g.h(r.a + (r.b - r.a) * (k as f32 / 10.0)))).collect();
-                println!("  {} {:.0} x {:.0} m  brg {:.0}  class {} paved {} lit {} thr {:?}  h {}", r.name(), r.len, r.width, bearing(r.dir), r.class, r.paved, r.lighted, r.thr, hs.join(" "));
+                let hs: Vec<String> = (0..=10)
+                    .map(|k| format!("{:.1}", g.h(r.a + (r.b - r.a) * (k as f32 / 10.0))))
+                    .collect();
+                println!(
+                    "  {} {:.0} x {:.0} m  brg {:.0}  class {} paved {} lit {} thr {:?}  h {}",
+                    r.name(),
+                    r.len,
+                    r.width,
+                    bearing(r.dir),
+                    r.class,
+                    r.paved,
+                    r.lighted,
+                    r.thr,
+                    hs.join(" ")
+                );
             }
             if std::env::var("PROFILE").is_ok() {
                 for r in &g.runways {
@@ -1213,9 +1617,23 @@ mod tests {
                 let q = Vec2::new(v[0], v[1]);
                 let (la, lo) = g.lla(q);
                 println!("  probe at {:.6}, {:.6}", la.to_degrees(), lo.to_degrees());
-                for (i, st) in g.stands.iter().enumerate().filter(|(_, st)| (st.pos - q).length() < 150.0) {
+                for (i, st) in g
+                    .stands
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, st)| (st.pos - q).length() < 150.0)
+                {
                     let nd = g.graph.nodes[st.node as usize].p;
-                    println!("  stand {i} pos {:.0?} dir {:.2?} size {} gate '{}' terminal {} node {:.0?} deg {}", st.pos, st.dir, st.size, st.gate, st.terminal, nd, g.graph.nodes[st.node as usize].edges.len());
+                    println!(
+                        "  stand {i} pos {:.0?} dir {:.2?} size {} gate '{}' terminal {} node {:.0?} deg {}",
+                        st.pos,
+                        st.dir,
+                        st.size,
+                        st.gate,
+                        st.terminal,
+                        nd,
+                        g.graph.nodes[st.node as usize].edges.len()
+                    );
                 }
                 for gt in g.gates.iter().filter(|gt| (gt.0 - q).length() < 150.0) {
                     println!("  gate {} at {:.0?}", gt.1, gt.0);
@@ -1225,45 +1643,109 @@ mod tests {
             for s in &g.stands {
                 sizes[s.size as usize] += 1;
             }
-            println!("  stands by size {sizes:?}, terminal {}", g.stands.iter().filter(|s| s.terminal).count());
+            println!(
+                "  stands by size {sizes:?}, terminal {}",
+                g.stands.iter().filter(|s| s.terminal).count()
+            );
             if let Ok(path) = std::env::var("AIRPORT_SVG") {
                 let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
-                for p in g.runways.iter().flat_map(|r| [r.a, r.b]).chain(g.taxiways.iter().flat_map(|t| t.0.iter().copied())) {
+                for p in g
+                    .runways
+                    .iter()
+                    .flat_map(|r| [r.a, r.b])
+                    .chain(g.taxiways.iter().flat_map(|t| t.0.iter().copied()))
+                {
                     lo = lo.min(p - 100.0);
                     hi = hi.max(p + 100.0);
                 }
                 let k = 1600.0 / (hi - lo).max_element();
                 let t = |p: Vec2| format!("{:.1},{:.1}", (p.x - lo.x) * k, (hi.y - p.y) * k);
-                let mut s = format!("<svg xmlns='http://www.w3.org/2000/svg' width='{:.0}' height='{:.0}' style='background:#263'>", (hi.x - lo.x) * k, (hi.y - lo.y) * k);
+                let mut s = format!(
+                    "<svg xmlns='http://www.w3.org/2000/svg' width='{:.0}' height='{:.0}' style='background:#263'>",
+                    (hi.x - lo.x) * k,
+                    (hi.y - lo.y) * k
+                );
                 for a in &g.aprons {
-                    let d: Vec<String> = a.iter().map(|r| format!("M{}Z", r.iter().map(|p| t(*p)).collect::<Vec<_>>().join(" L"))).collect();
-                    s += &format!("<path d='{}' fill='#999' fill-rule='evenodd'/>", d.join(" "));
+                    let d: Vec<String> = a
+                        .iter()
+                        .map(|r| {
+                            format!(
+                                "M{}Z",
+                                r.iter().map(|p| t(*p)).collect::<Vec<_>>().join(" L")
+                            )
+                        })
+                        .collect();
+                    s += &format!(
+                        "<path d='{}' fill='#999' fill-rule='evenodd'/>",
+                        d.join(" ")
+                    );
                 }
                 for (pts, w) in &g.taxiways {
-                    s += &format!("<polyline points='{}' fill='none' stroke='#777' stroke-width='{:.1}'/>", pts.iter().map(|p| t(*p)).collect::<Vec<_>>().join(" "), w * k);
+                    s += &format!(
+                        "<polyline points='{}' fill='none' stroke='#777' stroke-width='{:.1}'/>",
+                        pts.iter().map(|p| t(*p)).collect::<Vec<_>>().join(" "),
+                        w * k
+                    );
                 }
                 for r in &g.runways {
-                    s += &format!("<line x1='{}' y1='{}' x2='{}' y2='{}' stroke='{}' stroke-width='{:.1}'/>", (r.a.x - lo.x) * k, (hi.y - r.a.y) * k, (r.b.x - lo.x) * k, (hi.y - r.b.y) * k, if r.paved { "#333" } else { "#6a4" }, r.width * k);
+                    s += &format!(
+                        "<line x1='{}' y1='{}' x2='{}' y2='{}' stroke='{}' stroke-width='{:.1}'/>",
+                        (r.a.x - lo.x) * k,
+                        (hi.y - r.a.y) * k,
+                        (r.b.x - lo.x) * k,
+                        (hi.y - r.b.y) * k,
+                        if r.paved { "#333" } else { "#6a4" },
+                        r.width * k
+                    );
                     for e in 0..2 {
                         let (p, d) = r.end(e);
-                        s += &format!("<text x='{}' y='{}' fill='white' font-size='14'>{}</text>", (p.x + d.x * 40.0 - lo.x) * k, (hi.y - p.y - d.y * 40.0) * k, r.ident[e]);
+                        s += &format!(
+                            "<text x='{}' y='{}' fill='white' font-size='14'>{}</text>",
+                            (p.x + d.x * 40.0 - lo.x) * k,
+                            (hi.y - p.y - d.y * 40.0) * k,
+                            r.ident[e]
+                        );
                     }
                 }
                 for e in &g.graph.edges {
-                    s += &format!("<polyline points='{} {}' fill='none' stroke='{}' stroke-width='0.7'/>", t(g.graph.nodes[e.a as usize].p), t(g.graph.nodes[e.b as usize].p), if e.rwy.is_some() { "#fff" } else { "#fd0" });
+                    s += &format!(
+                        "<polyline points='{} {}' fill='none' stroke='{}' stroke-width='0.7'/>",
+                        t(g.graph.nodes[e.a as usize].p),
+                        t(g.graph.nodes[e.b as usize].p),
+                        if e.rwy.is_some() { "#fff" } else { "#fd0" }
+                    );
                 }
                 for nd in g.graph.nodes.iter().filter(|n| n.edges.len() >= 3) {
-                    s += &format!("<circle cx='{}' cy='{}' r='1.6' fill='#0ff'/>", (nd.p.x - lo.x) * k, (hi.y - nd.p.y) * k);
+                    s += &format!(
+                        "<circle cx='{}' cy='{}' r='1.6' fill='#0ff'/>",
+                        (nd.p.x - lo.x) * k,
+                        (hi.y - nd.p.y) * k
+                    );
                 }
                 for h in &g.holds {
-                    s += &format!("<circle cx='{}' cy='{}' r='3' fill='none' stroke='#f00' stroke-width='1.5'/>", (h.p.x - lo.x) * k, (hi.y - h.p.y) * k);
+                    s += &format!(
+                        "<circle cx='{}' cy='{}' r='3' fill='none' stroke='#f00' stroke-width='1.5'/>",
+                        (h.p.x - lo.x) * k,
+                        (hi.y - h.p.y) * k
+                    );
                 }
                 for st in &g.stands {
                     let q = st.pos - st.dir * 30.0 * k.recip().min(1.0);
-                    s += &format!("<line x1='{}' y1='{}' x2='{}' y2='{}' stroke='{}' stroke-width='2'/>", (st.pos.x - lo.x) * k, (hi.y - st.pos.y) * k, (q.x - lo.x) * k, (hi.y - q.y) * k, ["#0f0", "#8f0", "#ff0", "#f80", "#f0f"][st.size as usize]);
+                    s += &format!(
+                        "<line x1='{}' y1='{}' x2='{}' y2='{}' stroke='{}' stroke-width='2'/>",
+                        (st.pos.x - lo.x) * k,
+                        (hi.y - st.pos.y) * k,
+                        (q.x - lo.x) * k,
+                        (hi.y - q.y) * k,
+                        ["#0f0", "#8f0", "#ff0", "#f80", "#f0f"][st.size as usize]
+                    );
                 }
                 for gt in &g.gates {
-                    s += &format!("<circle cx='{}' cy='{}' r='1.5' fill='#f8f'/>", (gt.0.x - lo.x) * k, (hi.y - gt.0.y) * k);
+                    s += &format!(
+                        "<circle cx='{}' cy='{}' r='1.5' fill='#f8f'/>",
+                        (gt.0.x - lo.x) * k,
+                        (hi.y - gt.0.y) * k
+                    );
                 }
                 s += "</svg>";
                 std::fs::write(path.replace("{}", code), s).unwrap();
@@ -1291,7 +1773,14 @@ mod seam_tests {
             let lon = lon0 + (i as f64 * step) / (geo::R * lat0.cos());
             let id = TileId::at(lat, lon, DATA_ZOOM);
             let (u, v) = id.frac(lat, lon);
-            (if std::env::var("RAW").is_ok() { src.elev_raw(id).unwrap().sample(u, v) } else { src.elev(id).unwrap().sample(u, v) }, id)
+            (
+                if std::env::var("RAW").is_ok() {
+                    src.elev_raw(id).unwrap().sample(u, v)
+                } else {
+                    src.elev(id).unwrap().sample(u, v)
+                },
+                id,
+            )
         };
         let mut worst = Vec::new();
         for j in -n / 2..n / 2 {
@@ -1309,7 +1798,13 @@ mod seam_tests {
         worst.sort_by(|a, b| b.0.total_cmp(&a.0));
         println!("{} jumps", worst.len());
         for w in worst.iter().take(25) {
-            println!("  {:.1} m at ({:.0}, {:.0}) m  tile border {}", w.0, w.1 as f64 * step, w.2 as f64 * step, w.3 || w.4);
+            println!(
+                "  {:.1} m at ({:.0}, {:.0}) m  tile border {}",
+                w.0,
+                w.1 as f64 * step,
+                w.2 as f64 * step,
+                w.3 || w.4
+            );
         }
     }
 }

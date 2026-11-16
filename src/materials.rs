@@ -9,8 +9,8 @@
 //! pixel is left. That keeps the photo's colour as the average, and removes the
 //! large blotches that make a repeating texture recognisable from afar.
 use crate::fetch::Fetcher;
-use anyhow::{anyhow, Result};
-use crossbeam_channel::{unbounded, Receiver};
+use anyhow::{Result, anyhow};
+use crossbeam_channel::{Receiver, unbounded};
 use image::imageops::FilterType;
 
 /// Texels per side (the arrays' size, DET_N in render.rs).
@@ -44,18 +44,126 @@ pub struct Spec {
 /// tussocks, bare patches, stones and fractures between a few centimetres and
 /// the ~1 m satellite pixel.
 pub const SPECS: [Spec; 12] = [
-    Spec { layer: 0, id: "leafy_grass", size: 2.0, range: 0.05, bump: 0.55, contrast: 0.9, chroma: 0.5, high_pass: 0.45 },
-    Spec { layer: 1, id: "brown_mud_dry", size: 1.3, range: 0.05, bump: 0.8, contrast: 0.9, chroma: 0.5, high_pass: 0.45 },
-    Spec { layer: 2, id: "rock_face_03", size: 2.7, range: 0.3, bump: 1.0, contrast: 0.9, chroma: 0.5, high_pass: 0.45 },
-    Spec { layer: 3, id: "sand_01", size: 1.5, range: 0.03, bump: 0.8, contrast: 0.8, chroma: 0.5, high_pass: 0.45 },
-    Spec { layer: 4, id: "asphalt_02", size: 3.0, range: 0.008, bump: 0.6, contrast: 0.8, chroma: 0.5, high_pass: 0.45 },
-    Spec { layer: 5, id: "forest_leaves_02", size: 3.0, range: 0.05, bump: 0.6, contrast: 0.8, chroma: 0.5, high_pass: 0.45 },
-    Spec { layer: 7, id: "brown_mud_leaves_01", size: 1.3, range: 0.04, bump: 0.6, contrast: 0.9, chroma: 0.5, high_pass: 0.45 },
-    Spec { layer: 8, id: "aerial_grass_rock", size: 15.0, range: 0.15, bump: 0.7, contrast: 0.55, chroma: 0.3, high_pass: 1.0 },
-    Spec { layer: 9, id: "aerial_ground_rock", size: 20.0, range: 0.15, bump: 0.7, contrast: 0.55, chroma: 0.3, high_pass: 1.0 },
-    Spec { layer: 10, id: "aerial_rocks_02", size: 50.0, range: 1.2, bump: 1.0, contrast: 0.55, chroma: 0.3, high_pass: 1.5 },
-    Spec { layer: 11, id: "coast_sand_01", size: 15.0, range: 0.1, bump: 0.8, contrast: 0.55, chroma: 0.3, high_pass: 1.0 },
-    Spec { layer: 12, id: "aerial_asphalt_01", size: 30.0, range: 0.01, bump: 0.6, contrast: 0.55, chroma: 0.3, high_pass: 1.0 },
+    Spec {
+        layer: 0,
+        id: "leafy_grass",
+        size: 2.0,
+        range: 0.05,
+        bump: 0.55,
+        contrast: 0.9,
+        chroma: 0.5,
+        high_pass: 0.45,
+    },
+    Spec {
+        layer: 1,
+        id: "brown_mud_dry",
+        size: 1.3,
+        range: 0.05,
+        bump: 0.8,
+        contrast: 0.9,
+        chroma: 0.5,
+        high_pass: 0.45,
+    },
+    Spec {
+        layer: 2,
+        id: "rock_face_03",
+        size: 2.7,
+        range: 0.3,
+        bump: 1.0,
+        contrast: 0.9,
+        chroma: 0.5,
+        high_pass: 0.45,
+    },
+    Spec {
+        layer: 3,
+        id: "sand_01",
+        size: 1.5,
+        range: 0.03,
+        bump: 0.8,
+        contrast: 0.8,
+        chroma: 0.5,
+        high_pass: 0.45,
+    },
+    Spec {
+        layer: 4,
+        id: "asphalt_02",
+        size: 3.0,
+        range: 0.008,
+        bump: 0.6,
+        contrast: 0.8,
+        chroma: 0.5,
+        high_pass: 0.45,
+    },
+    Spec {
+        layer: 5,
+        id: "forest_leaves_02",
+        size: 3.0,
+        range: 0.05,
+        bump: 0.6,
+        contrast: 0.8,
+        chroma: 0.5,
+        high_pass: 0.45,
+    },
+    Spec {
+        layer: 7,
+        id: "brown_mud_leaves_01",
+        size: 1.3,
+        range: 0.04,
+        bump: 0.6,
+        contrast: 0.9,
+        chroma: 0.5,
+        high_pass: 0.45,
+    },
+    Spec {
+        layer: 8,
+        id: "aerial_grass_rock",
+        size: 15.0,
+        range: 0.15,
+        bump: 0.7,
+        contrast: 0.55,
+        chroma: 0.3,
+        high_pass: 1.0,
+    },
+    Spec {
+        layer: 9,
+        id: "aerial_ground_rock",
+        size: 20.0,
+        range: 0.15,
+        bump: 0.7,
+        contrast: 0.55,
+        chroma: 0.3,
+        high_pass: 1.0,
+    },
+    Spec {
+        layer: 10,
+        id: "aerial_rocks_02",
+        size: 50.0,
+        range: 1.2,
+        bump: 1.0,
+        contrast: 0.55,
+        chroma: 0.3,
+        high_pass: 1.5,
+    },
+    Spec {
+        layer: 11,
+        id: "coast_sand_01",
+        size: 15.0,
+        range: 0.1,
+        bump: 0.8,
+        contrast: 0.55,
+        chroma: 0.3,
+        high_pass: 1.0,
+    },
+    Spec {
+        layer: 12,
+        id: "aerial_asphalt_01",
+        size: 30.0,
+        range: 0.01,
+        bump: 0.6,
+        contrast: 0.55,
+        chroma: 0.3,
+        high_pass: 1.0,
+    },
 ];
 
 /// One finished layer: N x N RGBA8 for each array.
@@ -79,7 +187,11 @@ pub fn spawn(fetch: Fetcher) -> Receiver<Layer> {
             let t0 = std::time::Instant::now();
             match load(&fetch, s) {
                 Ok(l) => {
-                    log::info!("ground scan {} ready in {:.0} ms", s.id, t0.elapsed().as_secs_f64() * 1000.0);
+                    log::info!(
+                        "ground scan {} ready in {:.0} ms",
+                        s.id,
+                        t0.elapsed().as_secs_f64() * 1000.0
+                    );
                     let _ = tx.send(l);
                 }
                 Err(e) => log::warn!("ground scan {}: {e} (keeping the procedural layer)", s.id),
@@ -91,17 +203,36 @@ pub fn spawn(fetch: Fetcher) -> Receiver<Layer> {
 
 fn load(fetch: &Fetcher, s: &Spec) -> Result<Layer> {
     let id = s.id;
-    let files = fetch.get_cached(&format!("ph/{id}/files.json"), &format!("https://api.polyhaven.com/files/{id}"))?;
+    let files = fetch.get_cached(
+        &format!("ph/{id}/files.json"),
+        &format!("https://api.polyhaven.com/files/{id}"),
+    )?;
     let j: serde_json::Value = serde_json::from_slice(&files)?;
     let get = |map: &str| -> Result<image::DynamicImage> {
-        let url = j[map]["1k"]["jpg"]["url"].as_str().ok_or_else(|| anyhow!("no 1k {map}"))?;
+        let url = j[map]["1k"]["jpg"]["url"]
+            .as_str()
+            .ok_or_else(|| anyhow!("no 1k {map}"))?;
         // The name comes from the server's JSON: keep only plain file-name characters so a
         // hostile reply (`..\`, `C:`, ...) can't point the cache write outside its folder.
-        let name: String = url.rsplit(['/', '\\']).next().unwrap_or("").chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')).collect();
-        let name = if name.is_empty() || name.starts_with('.') { format!("{map}.jpg") } else { name };
+        let name: String = url
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or("")
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+            .collect();
+        let name = if name.is_empty() || name.starts_with('.') {
+            format!("{map}.jpg")
+        } else {
+            name
+        };
         let data = fetch.get_cached(&format!("ph/{id}/{name}"), url)?;
         let img = image::load_from_memory(&data)?;
-        Ok(if img.width() == N && img.height() == N { img } else { img.resize_exact(N, N, FilterType::Triangle) })
+        Ok(if img.width() == N && img.height() == N {
+            img
+        } else {
+            img.resize_exact(N, N, FilterType::Triangle)
+        })
     };
     let diff = get("Diffuse")?.to_rgb8();
     let nor = get("nor_gl")?.to_rgb8();
@@ -110,7 +241,8 @@ fn load(fetch: &Fetcher, s: &Spec) -> Result<Layer> {
 
     // Colour: linear light, divided by its blurred self.
     let lut: Vec<f32> = (0..256).map(|i| srgb_to_linear(i as f32 / 255.0)).collect();
-    let mut ch: [Vec<f32>; 3] = std::array::from_fn(|c| diff.pixels().map(|p| lut[p[c] as usize]).collect());
+    let mut ch: [Vec<f32>; 3] =
+        std::array::from_fn(|c| diff.pixels().map(|p| lut[p[c] as usize]).collect());
     let sigma = s.high_pass / s.size * N as f32;
     let mut alb = vec![0u8; n * n * 4];
     for (c, plane) in ch.iter_mut().enumerate() {
@@ -160,17 +292,27 @@ fn load(fetch: &Fetcher, s: &Spec) -> Result<Layer> {
         nrm[i * 4 + 3] = hb;
         alb[i * 4 + 3] = hb;
     }
-    Ok(Layer { layer: s.layer, params: [s.size, s.range, s.chroma, s.contrast], alb, nrm })
+    Ok(Layer {
+        layer: s.layer,
+        params: [s.size, s.range, s.chroma, s.contrast],
+        alb,
+        nrm,
+    })
 }
 
 fn srgb_to_linear(c: f32) -> f32 {
-    if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
 }
 
 /// Approximate Gaussian blur of a periodic n x n plane: three box passes each way.
 fn gauss_wrap(v: &mut [f32], n: usize, sigma: f32) {
     // Box width w for three passes: sigma^2 = 3 (w^2 - 1) / 12.
-    let r = ((((4.0 * sigma * sigma + 1.0).sqrt() - 1.0) * 0.5).round() as usize).clamp(1, n / 2 - 1);
+    let r =
+        ((((4.0 * sigma * sigma + 1.0).sqrt() - 1.0) * 0.5).round() as usize).clamp(1, n / 2 - 1);
     let mut tmp = vec![0f32; n];
     let mut line = vec![0f32; n];
     for _ in 0..3 {

@@ -10,7 +10,7 @@
 //! the hole. Each piece has a slot: where it is now, and how much soot and
 //! dust it has taken on (photo.wgsl, `vs_skin`). A piece that breaks in two
 //! hands the triangles past the break to a new slot.
-use crate::render::{Renderer, SkinGpu, SkinVertex, SKIN_SLOTS};
+use crate::render::{Renderer, SKIN_SLOTS, SkinGpu, SkinVertex};
 use crate::tiles3d::SkinSrc;
 use glam::{DQuat, DVec3, Mat3, Vec3};
 use std::collections::HashMap;
@@ -66,7 +66,12 @@ impl Assign {
 /// split finer, to follow the aircraft's hole; `edge`: their longest edge elsewhere.
 pub fn assign(src: &SkinSrc, pieces: &[PieceRef], fine: Option<(DVec3, f64)>, edge: f32) -> Assign {
     let area = |p: &[DVec3; 3]| ((p[1] - p[0]).cross(p[2] - p[0]).length() * 0.5) as f32;
-    let total: f32 = src.tiles.iter().flat_map(|t| t.tris.iter()).map(|t| area(&t.0)).sum();
+    let total: f32 = src
+        .tiles
+        .iter()
+        .flat_map(|t| t.tris.iter())
+        .map(|t| area(&t.0))
+        .sum();
     // Coarser everywhere if the whole would be too many.
     let edge = edge.max((total / (0.43 * MAX_TRIS as f32 * 0.7)).sqrt());
     let mut tris: Vec<SubTri> = Vec::new();
@@ -79,8 +84,18 @@ pub fn assign(src: &SkinSrc, pieces: &[PieceRef], fine: Option<(DVec3, f64)>, ed
                     Some((f, r)) if (c - f).length_squared() < r * r => FINE_EDGE,
                     _ => edge,
                 };
-                let e2 = [(p[1] - p[0]).length_squared(), (p[2] - p[1]).length_squared(), (p[0] - p[2]).length_squared()];
-                let i = if e2[0] >= e2[1] && e2[0] >= e2[2] { 0 } else if e2[1] >= e2[2] { 1 } else { 2 };
+                let e2 = [
+                    (p[1] - p[0]).length_squared(),
+                    (p[2] - p[1]).length_squared(),
+                    (p[0] - p[2]).length_squared(),
+                ];
+                let i = if e2[0] >= e2[1] && e2[0] >= e2[2] {
+                    0
+                } else if e2[1] >= e2[2] {
+                    1
+                } else {
+                    2
+                };
                 if e2[i] > (l * l) as f64 && tris.len() + stack.len() < MAX_TRIS {
                     // In two across the longest edge.
                     let (a, b, o) = (i, (i + 1) % 3, (i + 2) % 3);
@@ -98,7 +113,12 @@ pub fn assign(src: &SkinSrc, pieces: &[PieceRef], fine: Option<(DVec3, f64)>, ed
                     continue;
                 }
                 if src.inside(c) {
-                    tris.push(SubTri { p, uv, tex: k as u32, piece: u32::MAX });
+                    tris.push(SubTri {
+                        p,
+                        uv,
+                        tex: k as u32,
+                        piece: u32::MAX,
+                    });
                 }
             }
         }
@@ -108,17 +128,30 @@ pub fn assign(src: &SkinSrc, pieces: &[PieceRef], fine: Option<(DVec3, f64)>, ed
     const G: f64 = 2.5;
     let key = |p: DVec3| {
         let d = p - src.o;
-        ((d.dot(src.e) / G).floor() as i32, (d.dot(src.n) / G).floor() as i32, (d.dot(src.u) / G).floor() as i32)
+        (
+            (d.dot(src.e) / G).floor() as i32,
+            (d.dot(src.n) / G).floor() as i32,
+            (d.dot(src.u) / G).floor() as i32,
+        )
     };
     let mut grid: HashMap<(i32, i32, i32), Vec<u32>> = HashMap::new();
-    let inv: Vec<Mat3> = pieces.iter().map(|p| Mat3::from_quat(p.rot.as_quat()).transpose()).collect();
+    let inv: Vec<Mat3> = pieces
+        .iter()
+        .map(|p| Mat3::from_quat(p.rot.as_quat()).transpose())
+        .collect();
     for (i, pc) in pieces.iter().enumerate() {
         if !pc.outer {
             continue;
         }
         let r = pc.half.length() as f64 + REACH as f64;
-        let (a, b) = (key(pc.pos - (src.e + src.n + src.u) * r), key(pc.pos + (src.e + src.n + src.u) * r));
-        let (a, b) = ((a.0.min(b.0), a.1.min(b.1), a.2.min(b.2)), (a.0.max(b.0), a.1.max(b.1), a.2.max(b.2)));
+        let (a, b) = (
+            key(pc.pos - (src.e + src.n + src.u) * r),
+            key(pc.pos + (src.e + src.n + src.u) * r),
+        );
+        let (a, b) = (
+            (a.0.min(b.0), a.1.min(b.1), a.2.min(b.2)),
+            (a.0.max(b.0), a.1.max(b.1), a.2.max(b.2)),
+        );
         for x in a.0..=b.0 {
             for y in a.1..=b.1 {
                 for z in a.2..=b.2 {
@@ -138,8 +171,17 @@ pub fn assign(src: &SkinSrc, pieces: &[PieceRef], fine: Option<(DVec3, f64)>, ed
     let mut wall = 0.0f32;
     tris.retain_mut(|t| {
         let c = (t.p[0] + t.p[1] + t.p[2]) / 3.0;
-        let Some(cell) = grid.get(&key(c)) else { return false };
-        let Some((best, d, l)) = cell.iter().map(|&i| (i, dist(i, c))).map(|(i, (d, l))| (i, d, l)).min_by(|a, b| a.1.total_cmp(&b.1)) else { return false };
+        let Some(cell) = grid.get(&key(c)) else {
+            return false;
+        };
+        let Some((best, d, l)) = cell
+            .iter()
+            .map(|&i| (i, dist(i, c)))
+            .map(|(i, (d, l))| (i, d, l))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+        else {
+            return false;
+        };
         if d > REACH {
             return false;
         }
@@ -148,7 +190,10 @@ pub fn assign(src: &SkinSrc, pieces: &[PieceRef], fine: Option<(DVec3, f64)>, ed
         let b = best as usize;
         ys[b] += l.y * a;
         ws[b] += a;
-        let uv = [(t.uv[0][0] + t.uv[1][0] + t.uv[2][0]) / 3.0, (t.uv[0][1] + t.uv[1][1] + t.uv[2][1]) / 3.0];
+        let uv = [
+            (t.uv[0][0] + t.uv[1][0] + t.uv[2][0]) / 3.0,
+            (t.uv[0][1] + t.uv[1][1] + t.uv[2][1]) / 3.0,
+        ];
         let col = src.tiles[t.tex as usize].tiny.at(uv);
         for j in 0..3 {
             cols[b][j] += col[j] * a;
@@ -157,10 +202,30 @@ pub fn assign(src: &SkinSrc, pieces: &[PieceRef], fine: Option<(DVec3, f64)>, ed
         wall += a;
         true
     });
-    let mean = if wall > 0.0 { all.map(|v| v / wall) } else { [0.3; 3] };
-    let shift = (0..n).map(|i| if ws[i] > 0.5 { (ys[i] / ws[i] - pieces[i].half.y).clamp(-3.0, 3.0) } else { 0.0 }).collect();
-    let col = (0..n).map(|i| (ws[i] > 0.0).then(|| cols[i].map(|v| v / ws[i]))).collect();
-    Assign { tris, shift, col, mean, area: ws }
+    let mean = if wall > 0.0 {
+        all.map(|v| v / wall)
+    } else {
+        [0.3; 3]
+    };
+    let shift = (0..n)
+        .map(|i| {
+            if ws[i] > 0.5 {
+                (ys[i] / ws[i] - pieces[i].half.y).clamp(-3.0, 3.0)
+            } else {
+                0.0
+            }
+        })
+        .collect();
+    let col = (0..n)
+        .map(|i| (ws[i] > 0.0).then(|| cols[i].map(|v| v / ws[i])))
+        .collect();
+    Assign {
+        tris,
+        shift,
+        col,
+        mean,
+        area: ws,
+    }
 }
 
 /// A piece's slot: where its mesh's own origin lies on the piece's axes (a
@@ -191,8 +256,25 @@ pub struct Group {
 
 impl Group {
     pub fn new(src: &SkinSrc) -> Self {
-        let texs = src.tiles.iter().map(|t| Tex { view: t.view.clone(), verts: Vec::new(), gpu: None, dirty: None }).collect();
-        Self { slots: vec![Slot { off: Vec3::ZERO, col0: [1.0; 3], runs: Vec::new() }], texs, xf: Vec::new() }
+        let texs = src
+            .tiles
+            .iter()
+            .map(|t| Tex {
+                view: t.view.clone(),
+                verts: Vec::new(),
+                gpu: None,
+                dirty: None,
+            })
+            .collect();
+        Self {
+            slots: vec![Slot {
+                off: Vec3::ZERO,
+                col0: [1.0; 3],
+                runs: Vec::new(),
+            }],
+            texs,
+            xf: Vec::new(),
+        }
     }
 
     /// A slot for a piece whose mesh has colour `col0` (DEAD when full).
@@ -200,7 +282,11 @@ impl Group {
         if self.slots.len() >= SKIN_SLOTS {
             return DEAD;
         }
-        self.slots.push(Slot { off: Vec3::ZERO, col0, runs: Vec::new() });
+        self.slots.push(Slot {
+            off: Vec3::ZERO,
+            col0,
+            runs: Vec::new(),
+        });
         self.slots.len() as u32 - 1
     }
 
@@ -215,7 +301,12 @@ impl Group {
         let m = Mat3::from_quat(rot.as_quat());
         let t = pos + m * sl.off;
         let k = |j: usize| (col[j] / sl.col0[j].max(1e-3)).clamp(0.15, 1.6);
-        [[m.x_axis.x, m.y_axis.x, m.z_axis.x, t.x], [m.x_axis.y, m.y_axis.y, m.z_axis.y, t.y], [m.x_axis.z, m.y_axis.z, m.z_axis.z, t.z], [k(0), k(1), k(2), 1.0]]
+        [
+            [m.x_axis.x, m.y_axis.x, m.z_axis.x, t.x],
+            [m.x_axis.y, m.y_axis.y, m.z_axis.y, t.y],
+            [m.x_axis.z, m.y_axis.z, m.z_axis.z, t.z],
+            [k(0), k(1), k(2), 1.0],
+        ]
     }
 
     /// Puts the triangles on their pieces: `slot_of` each piece's slot
@@ -234,7 +325,15 @@ impl Group {
             let nrm = (l[1] - l[0]).cross(l[2] - l[0]).normalize_or_zero();
             let q = |v: f32| (v * 127.0).round().clamp(-127.0, 127.0) as i8;
             let nr = [q(nrm.x), q(nrm.y), q(nrm.z), 0];
-            per[t.tex as usize].push((s, [0, 1, 2].map(|k| SkinVertex { pos: l[k].to_array(), uv: t.uv[k], nrm: nr, slot: s })));
+            per[t.tex as usize].push((
+                s,
+                [0, 1, 2].map(|k| SkinVertex {
+                    pos: l[k].to_array(),
+                    uv: t.uv[k],
+                    nrm: nr,
+                    slot: s,
+                }),
+            ));
         }
         for (k, mut v) in per.into_iter().enumerate() {
             v.sort_by_key(|x| x.0);
@@ -242,7 +341,9 @@ impl Group {
             while i < v.len() {
                 let s = v[i].0;
                 let j = i + v[i..].iter().take_while(|x| x.0 == s).count();
-                self.slots[s as usize].runs.push((k as u32, i as u32, j as u32));
+                self.slots[s as usize]
+                    .runs
+                    .push((k as u32, i as u32, j as u32));
                 i = j;
             }
             self.texs[k].verts = v.into_iter().flat_map(|x| x.1).collect();
@@ -261,14 +362,17 @@ impl Group {
         let off = self.slots[parent as usize].off;
         let runs = self.slots[parent as usize].runs.clone();
         for &(k, s, e) in &runs {
-            let Some(t) = self.texs.get_mut(k as usize) else { continue };
+            let Some(t) = self.texs.get_mut(k as usize) else {
+                continue;
+            };
             let mut any = false;
             for i in s as usize..e as usize {
                 let v = &mut t.verts[i * 3..i * 3 + 3];
                 if v[0].slot != parent {
                     continue;
                 }
-                let c = (Vec3::from(v[0].pos) + Vec3::from(v[1].pos) + Vec3::from(v[2].pos)) / 3.0 + off;
+                let c = (Vec3::from(v[0].pos) + Vec3::from(v[1].pos) + Vec3::from(v[2].pos)) / 3.0
+                    + off;
                 if c[axis] > cut {
                     for x in v.iter_mut() {
                         x.slot = new;
@@ -295,7 +399,9 @@ impl Group {
         for t in &mut self.texs {
             match (&t.gpu, t.dirty.take()) {
                 (None, _) if !t.verts.is_empty() => t.gpu = Some(r.make_skin(&t.verts, &t.view)),
-                (Some(g), Some((s, e))) => r.write_skin(g, s as usize * 3, &t.verts[s as usize * 3..e as usize * 3]),
+                (Some(g), Some((s, e))) => {
+                    r.write_skin(g, s as usize * 3, &t.verts[s as usize * 3..e as usize * 3])
+                }
                 _ => {}
             }
         }

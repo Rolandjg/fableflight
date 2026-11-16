@@ -33,7 +33,11 @@ fn to_lin() -> &'static [f32; 256] {
         let mut t = [0.0; 256];
         for (i, v) in t.iter_mut().enumerate() {
             let c = i as f32 / 255.0;
-            *v = if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
+            *v = if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            };
         }
         t
     })
@@ -46,7 +50,11 @@ fn to_srgb(v: f32) -> u8 {
         (0..4096)
             .map(|i| {
                 let c = (i as f32 + 0.5) / 4096.0;
-                let s = if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 };
+                let s = if c <= 0.003_130_8 {
+                    c * 12.92
+                } else {
+                    1.055 * c.powf(1.0 / 2.4) - 0.055
+                };
                 (s * 255.0).round().clamp(0.0, 255.0) as u8
             })
             .collect()
@@ -87,13 +95,18 @@ pub fn delight(px: &mut [u8]) -> Stats {
     let valid = |p: &[u8]| p[0].max(p[1]).max(p[2]) > 4;
     let mut lum: Vec<f32> = Vec::with_capacity(n);
     for p in px.chunks_exact(4).filter(|p| valid(p)) {
-        lum.push(lin[p[0] as usize] * LUM[0] + lin[p[1] as usize] * LUM[1] + lin[p[2] as usize] * LUM[2]);
+        lum.push(
+            lin[p[0] as usize] * LUM[0] + lin[p[1] as usize] * LUM[1] + lin[p[2] as usize] * LUM[2],
+        );
     }
     if lum.len() < 100 {
         for p in px.chunks_exact_mut(4) {
             p[3] = 255;
         }
-        return Stats { shadow: 0.0, k: [1.0; 3] };
+        return Stats {
+            shadow: 0.0,
+            k: [1.0; 3],
+        };
     }
     // Most of a tile is in the sun: its bright texels are the reference.
     let k75 = lum.len() * 3 / 4;
@@ -102,7 +115,13 @@ pub fn delight(px: &mut [u8]) -> Stats {
     let blue = |c: [f32; 3]| c[2] / (c[0] + c[1] + c[2] + 1e-4);
     let colour = |p: &[u8]| [lin[p[0] as usize], lin[p[1] as usize], lin[p[2] as usize]];
     let luma = |c: [f32; 3]| c[0] * LUM[0] + c[1] * LUM[1] + c[2] * LUM[2];
-    let mut lit_blue: Vec<f32> = px.chunks_exact(4).filter(|p| valid(p)).map(colour).filter(|&c| luma(c) > 0.5 * l_ref).map(blue).collect();
+    let mut lit_blue: Vec<f32> = px
+        .chunks_exact(4)
+        .filter(|p| valid(p))
+        .map(colour)
+        .filter(|&c| luma(c) > 0.5 * l_ref)
+        .map(blue)
+        .collect();
     let b_lit = if lit_blue.len() > 50 {
         let m = lit_blue.len() / 2;
         *lit_blue.select_nth_unstable_by(m, |a, b| a.total_cmp(b)).1
@@ -110,7 +129,8 @@ pub fn delight(px: &mut [u8]) -> Stats {
         0.33
     };
     // How much in shadow each texel is (kept in alpha for now: 255 = shadow).
-    let (mut sum_lit, mut sum_sh, mut n_lit, mut n_sh, mut n_half) = ([0.0f64; 3], [0.0f64; 3], 0usize, 0usize, 0usize);
+    let (mut sum_lit, mut sum_sh, mut n_lit, mut n_sh, mut n_half) =
+        ([0.0f64; 3], [0.0f64; 3], 0usize, 0usize, 0usize);
     for p in px.chunks_exact_mut(4) {
         if !valid(p) {
             p[3] = 0;
@@ -118,7 +138,8 @@ pub fn delight(px: &mut [u8]) -> Stats {
         }
         let c = colour(p);
         let l = luma(c);
-        let s = smooth(DARK_START, DARK_FULL, l / l_ref) * smooth(BLUE_START, BLUE_FULL, blue(c) - b_lit);
+        let s = smooth(DARK_START, DARK_FULL, l / l_ref)
+            * smooth(BLUE_START, BLUE_FULL, blue(c) - b_lit);
         p[3] = (s * 255.0).round() as u8;
         if s > 0.5 {
             n_half += 1;
@@ -160,7 +181,10 @@ pub fn delight(px: &mut [u8]) -> Stats {
         }
         p[3] = 255 - p[3];
     }
-    Stats { shadow: n_half as f32 / n as f32, k }
+    Stats {
+        shadow: n_half as f32 / n as f32,
+        k,
+    }
 }
 
 /// Where the photographer's sun stood, from the walls of a tile: the lit share
@@ -169,7 +193,15 @@ pub fn delight(px: &mut [u8]) -> Stats {
 /// (horizontal unit vector, our frame) and the sum of their areas; summed
 /// over many tiles, the direction is the sun's azimuth and the length over
 /// the area how clearly the walls show it.
-pub fn wall_sun(pos: &[Vec3], idx: &[u32], uv: &[[f32; 2]], px: &[u8], w: u32, h: u32, up: Vec3) -> (Vec3, f32) {
+pub fn wall_sun(
+    pos: &[Vec3],
+    idx: &[u32],
+    uv: &[[f32; 2]],
+    px: &[u8],
+    w: u32,
+    h: u32,
+    up: Vec3,
+) -> (Vec3, f32) {
     let lit_at = |u: [f32; 2]| {
         let x = ((u[0] * w as f32) as i64).clamp(0, w as i64 - 1) as usize;
         let y = ((u[1] * h as f32) as i64).clamp(0, h as i64 - 1) as usize;
@@ -187,7 +219,9 @@ pub fn wall_sun(pos: &[Vec3], idx: &[u32], uv: &[[f32; 2]], px: &[u8], w: u32, h
         if nrm.dot(up).abs() > 0.3 {
             continue;
         }
-        let Some(hz) = (nrm - up * nrm.dot(up)).try_normalize() else { continue };
+        let Some(hz) = (nrm - up * nrm.dot(up)).try_normalize() else {
+            continue;
+        };
         let (ua, ub, uc) = (uv[t[0] as usize], uv[t[1] as usize], uv[t[2] as usize]);
         let mid = [(ua[0] + ub[0] + uc[0]) / 3.0, (ua[1] + ub[1] + uc[1]) / 3.0];
         walls.push((hz, area, lit_at(mid)));
@@ -197,7 +231,10 @@ pub fn wall_sun(pos: &[Vec3], idx: &[u32], uv: &[[f32; 2]], px: &[u8], w: u32, h
         return (Vec3::ZERO, 0.0);
     }
     let mean = walls.iter().map(|w| w.1 * w.2).sum::<f32>() / total;
-    (walls.iter().map(|w| w.0 * (w.1 * (w.2 - mean))).sum(), total)
+    (
+        walls.iter().map(|w| w.0 * (w.1 * (w.2 - mean))).sum(),
+        total,
+    )
 }
 
 #[cfg(test)]
@@ -210,7 +247,9 @@ mod tests {
     fn lifts_shadow() {
         let lit = [180u8, 175, 170, 255];
         let sh = [68u8, 76, 94, 255];
-        let mut px: Vec<u8> = (0..4096).flat_map(|i| if i % 3 == 0 { sh } else { lit }).collect();
+        let mut px: Vec<u8> = (0..4096)
+            .flat_map(|i| if i % 3 == 0 { sh } else { lit })
+            .collect();
         let st = delight(&mut px);
         assert!((st.shadow - 1.0 / 3.0).abs() < 0.01, "{st:?}");
         let (l, s) = (&px[4..8], &px[0..4]);
@@ -233,13 +272,19 @@ mod tests {
             for (side, u) in [(1.0f32, 0.25f32), (-1.0, 0.75)] {
                 let b = pos.len() as u32;
                 // a wall square to x, facing +x (side 1) or -x
-                pos.extend([Vec3::new(x, 0.0, 0.0), Vec3::new(x, side, 0.0), Vec3::new(x, 0.0, 1.0)]);
+                pos.extend([
+                    Vec3::new(x, 0.0, 0.0),
+                    Vec3::new(x, side, 0.0),
+                    Vec3::new(x, 0.0, 1.0),
+                ]);
                 uv.extend([[u, 0.5]; 3]);
                 idx.extend([b, b + 1, b + 2]);
             }
         }
         // left half of the texture lit, right half dark
-        let px: Vec<u8> = (0..16).flat_map(|i| [0, 0, 0, if i % 4 < 2 { 255 } else { 0 }]).collect();
+        let px: Vec<u8> = (0..16)
+            .flat_map(|i| [0, 0, 0, if i % 4 < 2 { 255 } else { 0 }])
+            .collect();
         let (a, area) = wall_sun(&pos, &idx, &uv, &px, 4, 4, up);
         assert!(area > 0.0);
         assert!(a.normalize().dot(e) > 0.99, "{a}");
