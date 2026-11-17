@@ -28,6 +28,8 @@ mod radar;
 mod livewx;
 mod nav;
 mod settings;
+#[cfg(all(test, target_os = "macos"))]
+mod shadercheck;
 mod systems;
 mod gauges;
 mod gmaps;

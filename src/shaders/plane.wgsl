@@ -2789,7 +2789,9 @@ fn tex_glass(in: VOut) -> vec4f {
       // Rain on the outside (rain_water). Its axes: those of the spots, and
       // on the Hornet's one-piece canopy both sets, blended where they meet.
       let nl = normalize(in.Nl);
-      let down = ml * -l.upn;
+      // Copied to a plain vec3 first: naga's Metal output for mat3 * -packed vec3 does not compile.
+      let upn: vec3<f32> = l.upn;
+      let down = ml * -upn;
       let gt = length(down - nl * dot(down, nl));
       let edge_r = select(1.0 - smoothstep(0.0, 0.05, -d), 0.0, kind() == 2u);
       let side_w = smoothstep(0.42, 0.58, abs(nl.x));
