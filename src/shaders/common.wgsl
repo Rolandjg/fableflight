@@ -81,6 +81,10 @@ struct Globals {
   // camera-relative position + intensity (0 = off); the beam's direction +
   // cosine of its half-angle.
   spot: array<vec4f, 3>,
+  // The flown aircraft's NAV 1 (main.rs `nav_globals`): course needle -1..1
+  // (+ fly right), glide slope needle -1..1 (+ fly up), OBS (deg), flags (1
+  // alive, 2 TO, 4 FROM, 8 glide slope alive).
+  nav: vec4f,
 };
 @group(0) @binding(0) var<uniform> G: Globals;
 @group(0) @binding(1) var t_trans: texture_2d<f32>;

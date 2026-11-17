@@ -28,6 +28,7 @@ ureq = "3.5.1"
 wgpu = "30"
 winit = "0.30"
 roxmltree = "0.20"
+zip = { version = "9.6.0", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 naga = { version = "=30.0.1", features = ["wgsl-in"] }

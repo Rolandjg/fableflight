@@ -7,6 +7,7 @@ use crate::airfield::{L_GREEN, L_RED, L_STROBE, L_WHITE, Light};
 use crate::airmodels::{self as am, TYPES};
 use crate::airports::{Geo, hold_dist, right_of};
 use crate::render::Inst;
+use crate::weapons::{Target, TargetKey};
 use glam::{DVec3, Vec2, Vec3};
 
 /// Fuselage and fin colours: generic, made-up airlines.
@@ -112,6 +113,8 @@ impl Path {
 }
 
 pub struct Mover {
+    /// Stable for the mover's life, so a missile can keep pointing at it.
+    pub id: u32,
     pub ty: u8,
     body: u8,
     fin: u8,
@@ -151,6 +154,8 @@ pub struct Traffic {
     pub active: Option<(usize, usize)>,
     /// who has the runway: index into `movers`, for this frame
     lock: Option<usize>,
+    /// the next id a mover gets
+    next_id: u32,
 }
 
 /// Where the aircraft's origin (between its main wheels) is when parked at a stand.
@@ -190,17 +195,7 @@ impl Traffic {
             }
         }
         let next_arr = 2.0 + rng.f() * 10.0;
-        Self {
-            parked,
-            taken,
-            movers: Vec::new(),
-            rng,
-            t: 0.0,
-            next_dep: 1.0,
-            next_arr,
-            active: None,
-            lock: None,
-        }
+        Self { parked, taken, movers: Vec::new(), rng, t: 0.0, next_dep: 1.0, next_arr, active: None, lock: None, next_id: 1 }
     }
 
     /// The biggest type the longest paved runway can take.
@@ -541,6 +536,38 @@ impl Traffic {
         }
     }
 
+    /// The aircraft that are airborne, as targets for a heat-seeking missile.
+    /// Taxiing and parked aircraft are not (their engines are too cool, and
+    /// they are not going anywhere).
+    pub fn targets(&self, g: &Geo, out: &mut Vec<Target>) {
+        for m in &self.movers {
+            if !matches!(m.phase, Phase::Climb | Phase::Final) || m.alt <= 10.0 {
+                continue;
+            }
+            let ty = TYPES[m.ty as usize];
+            let h = m.ref_h + m.alt;
+            let pos = g.world(m.pos, h as f64);
+            let up = g.dir3(Vec3::Z);
+            let f = g.dir3(Vec3::new(m.hdg.x, m.hdg.y, 0.0));
+            let (sp, cp) = m.pitch.to_radians().sin_cos();
+            let dir = f * cp + up * sp;
+            out.push(Target { key: TargetKey::Airport { apt: g.idx, mover: m.id }, pos, vel: (dir * m.v).as_dvec3(), size: m.ty, label: format!("{} traffic", ty.name) });
+        }
+    }
+
+    /// A missile hit the aircraft with this id: it leaves the sky at the next
+    /// step, rather than flying on as if nothing had happened.
+    pub fn down(&mut self, id: u32) -> bool {
+        if let Some(m) = self.movers.iter_mut().find(|m| m.id == id) {
+            m.gone = true;
+            m.v = 0.0;
+            m.alt = 0.0;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Someone at a stand pushes back and taxis out.
     fn depart(&mut self, g: &Geo) {
         let t = self.t;
@@ -564,28 +591,9 @@ impl Traffic {
         } else {
             (Path::new(vec![pos, pos]), Phase::Push)
         };
-        self.movers.push(Mover {
-            ty: p.ty,
-            body: p.body,
-            fin: p.fin,
-            phase,
-            path,
-            s: 0.0,
-            v: 0.0,
-            pos,
-            hdg: dir,
-            alt: 0.0,
-            pitch: 0.0,
-            gear: true,
-            stand: p.stand,
-            rwy: self.active.unwrap_or((0, 0)),
-            hold_s: 0.0,
-            entry_s: 0.0,
-            wait: 0.0,
-            stuck: 0.0,
-            ref_h: g.h(pos),
-            gone: false,
-        });
+        let id = self.next_id;
+        self.next_id = self.next_id.wrapping_add(1).max(1);
+        self.movers.push(Mover { id, ty: p.ty, body: p.body, fin: p.fin, phase, path, s: 0.0, v: 0.0, pos, hdg: dir, alt: 0.0, pitch: 0.0, gear: true, stand: p.stand, rwy: self.active.unwrap_or((0, 0)), hold_s: 0.0, entry_s: 0.0, wait: 0.0, stuck: 0.0, ref_h: g.h(pos), gone: false });
         // The stand stays taken until it has left (see `step`).
     }
 
@@ -662,28 +670,9 @@ impl Traffic {
         let d0 = if ty == 0 { 3500.0 } else { 11_000.0 };
         let pos = thr - dir * d0;
         let alt = (d0 + aim_dist(r.len)) * 3f32.to_radians().tan();
-        self.movers.push(Mover {
-            ty,
-            body: self.rng.pick(BODY.len()) as u8,
-            fin: self.rng.pick(FIN.len()) as u8,
-            phase: Phase::Final,
-            path: Path::new(vec![pos, pos]),
-            s: 0.0,
-            v: t.v_app,
-            pos,
-            hdg: dir,
-            alt,
-            pitch: 2.5,
-            gear: true,
-            stand: si,
-            rwy: (ri, re),
-            hold_s: 0.0,
-            entry_s: 0.0,
-            wait: 0.0,
-            stuck: 0.0,
-            ref_h: g.h(thr),
-            gone: false,
-        });
+        let id = self.next_id;
+        self.next_id = self.next_id.wrapping_add(1).max(1);
+        self.movers.push(Mover { id, ty, body: self.rng.pick(BODY.len()) as u8, fin: self.rng.pick(FIN.len()) as u8, phase: Phase::Final, path: Path::new(vec![pos, pos]), s: 0.0, v: t.v_app, pos, hdg: dir, alt, pitch: 2.5, gear: true, stand: si, rwy: (ri, re), hold_s: 0.0, entry_s: 0.0, wait: 0.0, stuck: 0.0, ref_h: g.h(thr), gone: false });
     }
 
     /// From a stand to the runway's end: the path, where to hold short, and

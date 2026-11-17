@@ -452,6 +452,8 @@ pub static SPEC: Spec = Spec {
     name: "Concorde",
     keys: &["concorde"],
     blurb: "Four-engine supersonic airliner, 137 t. Mach 2 at 55,000 ft without reheat; Space for reheat to take off. No flaps: F droops the nose (5° to take off, 12.5° to land). Rotate at 200 kt to 10° and no more until it is off (the tail touches at 11.5°); 160 kt approach, 10° nose up. Z reversers.",
+    origin: None,
+    ext: None,
     still: include_bytes!("../../../assets/aircraft/concorde.png"),
     paint: Some(Paint {
         jpg: include_bytes!("../../../assets/concorde_paint.jpg"),

@@ -164,6 +164,11 @@ pub struct Globals {
     /// lamps, each camera-relative position + intensity (0 = off); then the
     /// beam's direction + cosine of its half-angle
     pub spot: [[f32; 4]; 3],
+    /// the flown aircraft's NAV 1 receiver, for the course deviation
+    /// indicators in its cockpit (plane.wgsl, gauge 15): course needle -1..1
+    /// (+ fly right), glide slope needle -1..1 (+ fly up), OBS (degrees),
+    /// flags (1 alive, 2 TO, 4 FROM, 8 glide slope alive)
+    pub nav: [f32; 4],
 }
 
 /// The cloud shadow map: the sun's view of the cloud layer (common.wgsl
@@ -690,6 +695,8 @@ pub struct MeshGpu {
     vbuf: wgpu::Buffer,
     ibuf: wgpu::Buffer,
     n_idx: u32,
+    /// its own textures (a downloaded aircraft's), in place of `bg_obj`'s
+    bind: Option<std::sync::Arc<wgpu::BindGroup>>,
 }
 pub struct DrawObj {
     pub mesh: usize,
@@ -1239,6 +1246,53 @@ fn upload_mips(
         );
     }
     view(&t)
+}
+
+/// An array texture with mip chains from RGBA layers (sRGB) of one size.
+fn array_texture(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, w: u32, h: u32, layers: &[&[u8]]) -> wgpu::TextureView {
+    let mips = 32 - w.max(h).leading_zeros();
+    let t = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: layers.len() as u32 },
+        mip_level_count: mips,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    for (layer, data) in layers.iter().enumerate() {
+        let mut cur: Vec<u8> = data.to_vec();
+        let (mut cw, mut ch) = (w, h);
+        for level in 0..mips {
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo { texture: &t, mip_level: level, origin: wgpu::Origin3d { x: 0, y: 0, z: layer as u32 }, aspect: wgpu::TextureAspect::All },
+                &cur,
+                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(cw * 4), rows_per_image: Some(ch) },
+                wgpu::Extent3d { width: cw, height: ch, depth_or_array_layers: 1 },
+            );
+            // The next level: each texel the mean of the four under it (in linear light, alpha weighted).
+            let (nw, nh) = ((cw / 2).max(1), (ch / 2).max(1));
+            let mut next = vec![0u8; (nw * nh * 4) as usize];
+            let lin = |v: u8| { let c = v as f32 / 255.0; if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) } };
+            let enc = |c: f32| -> u8 { let c = c.clamp(0.0, 1.0); ((if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }) * 255.0 + 0.5) as u8 };
+            for y in 0..nh {
+                for x in 0..nw {
+                    let at = |dx: u32, dy: u32| (((y * 2 + dy).min(ch - 1) * cw + (x * 2 + dx).min(cw - 1)) * 4) as usize;
+                    let px = [at(0, 0), at(1, 0), at(0, 1), at(1, 1)];
+                    let a: f32 = px.iter().map(|&i| cur[i + 3] as f32).sum::<f32>();
+                    let o = ((y * nw + x) * 4) as usize;
+                    for c in 0..3 {
+                        let v = if a > 0.0 { px.iter().map(|&i| lin(cur[i + c]) * cur[i + 3] as f32).sum::<f32>() / a } else { px.iter().map(|&i| lin(cur[i + c])).sum::<f32>() / 4.0 };
+                        next[o + c] = enc(v);
+                    }
+                    next[o + 3] = ((a / 4.0) + 0.5) as u8;
+                }
+            }
+            (cur, cw, ch) = (next, nw, nh);
+        }
+    }
+    t.create_view(&wgpu::TextureViewDescriptor { dimension: Some(wgpu::TextureViewDimension::D2Array), ..Default::default() })
 }
 
 /// What plane.wgsl's `hornet_paint` needs to know of a paint (its `PT`): the
@@ -4213,48 +4267,31 @@ impl Renderer {
     }
 
     pub fn add_mesh(&mut self, verts: &[PartVertex], idx: &[u32]) -> usize {
-        let vbuf = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: None,
-                contents: bytemuck::cast_slice(verts),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-        let ibuf = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: None,
-                contents: bytemuck::cast_slice(idx),
-                usage: wgpu::BufferUsages::INDEX,
-            });
-        self.meshes.push(MeshGpu {
-            vbuf,
-            ibuf,
-            n_idx: idx.len() as u32,
-        });
+        // (an empty piece, a hinge other pieces hang from, still gets a buffer: nothing is drawn from it)
+        let pad = [PartVertex::zeroed()];
+        let verts = if verts.is_empty() { &pad[..] } else { verts };
+        let vbuf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::cast_slice(verts), usage: wgpu::BufferUsages::VERTEX });
+        let ibuf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::cast_slice(if idx.is_empty() { &[0u32][..] } else { idx }), usage: wgpu::BufferUsages::INDEX });
+        self.meshes.push(MeshGpu { vbuf, ibuf, n_idx: idx.len() as u32, bind: None });
         self.meshes.len() - 1
+    }
+    /// A downloaded aircraft's textures, as the object bind group its meshes draw with.
+    pub fn texture_set(&self, t: &crate::fgmodel::TexSet) -> std::sync::Arc<wgpu::BindGroup> {
+        let white = vec![255u8; (t.size * t.size * 4) as usize];
+        let layers: Vec<&[u8]> = if t.layers.is_empty() { vec![&white[..]] } else { t.layers.iter().map(|l| &l[..]).collect() };
+        let view = array_texture(&self.device, &self.queue, "aircraft textures", t.size, t.size, &layers);
+        std::sync::Arc::new(self.device.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout: &self.l_obj, entries: &[buf_res(0, &self.obj_ub, std::mem::size_of::<ObjU>() as u64), tex_res(1, &view), buf_res(2, &self.paint_ub, 32)] }))
+    }
+    /// Draw a mesh with its own textures.
+    pub fn set_mesh_bind(&mut self, i: usize, bind: std::sync::Arc<wgpu::BindGroup>) {
+        self.meshes[i].bind = Some(bind);
     }
     /// Swap the geometry behind an existing mesh id.
     pub fn replace_mesh(&mut self, i: usize, verts: &[PartVertex], idx: &[u32]) {
-        let vbuf = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: None,
-                contents: bytemuck::cast_slice(verts),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-        let ibuf = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: None,
-                contents: bytemuck::cast_slice(idx),
-                usage: wgpu::BufferUsages::INDEX,
-            });
-        self.meshes[i] = MeshGpu {
-            vbuf,
-            ibuf,
-            n_idx: idx.len() as u32,
-        };
+        let vbuf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::cast_slice(verts), usage: wgpu::BufferUsages::VERTEX });
+        let ibuf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::cast_slice(idx), usage: wgpu::BufferUsages::INDEX });
+        let bind = self.meshes[i].bind.take();
+        self.meshes[i] = MeshGpu { vbuf, ibuf, n_idx: idx.len() as u32, bind };
     }
 
     /// Append particles to the ring buffer (oldest are overwritten).
@@ -4893,7 +4930,10 @@ impl Renderer {
                     cur = Some(o.cut);
                 }
                 let m = &self.meshes[o.mesh];
-                rp.set_bind_group(1, &self.bg_obj, &[i as u32 * 256]);
+                if m.n_idx == 0 {
+                    continue;
+                }
+                rp.set_bind_group(1, m.bind.as_deref().unwrap_or(&self.bg_obj), &[i as u32 * 256]);
                 rp.set_vertex_buffer(0, m.vbuf.slice(..));
                 rp.set_index_buffer(m.ibuf.slice(..), wgpu::IndexFormat::Uint32);
                 rp.draw_indexed(0..m.n_idx, 0, 0..1);
@@ -5106,7 +5146,10 @@ impl Renderer {
                         &self.p_obj_shadow_solid
                     });
                     let m = &self.meshes[o.mesh];
-                    rp.set_bind_group(1, &self.bg_obj, &[i as u32 * 256]);
+                    if m.n_idx == 0 {
+                    continue;
+                }
+                rp.set_bind_group(1, m.bind.as_deref().unwrap_or(&self.bg_obj), &[i as u32 * 256]);
                     rp.set_vertex_buffer(0, m.vbuf.slice(..));
                     rp.set_index_buffer(m.ibuf.slice(..), wgpu::IndexFormat::Uint32);
                     rp.draw_indexed(0..m.n_idx, 0, 0..1);
@@ -5359,7 +5402,10 @@ impl Renderer {
                     continue;
                 }
                 let m = &self.meshes[o.mesh];
-                rp.set_bind_group(1, &self.bg_obj, &[i as u32 * 256]);
+                if m.n_idx == 0 {
+                    continue;
+                }
+                rp.set_bind_group(1, m.bind.as_deref().unwrap_or(&self.bg_obj), &[i as u32 * 256]);
                 rp.set_vertex_buffer(0, m.vbuf.slice(..));
                 rp.set_index_buffer(m.ibuf.slice(..), wgpu::IndexFormat::Uint32);
                 rp.draw_indexed(0..m.n_idx, 0, 0..1);

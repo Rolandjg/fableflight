@@ -67,6 +67,8 @@ pub static SPEC: Spec = Spec {
     name: "Cessna 172RG",
     keys: &["c172", "172", "cessna"],
     blurb: "Four-seat single, 180 hp, retractable gear. Forgiving and slow: 125 kt flat out.",
+    origin: None,
+    ext: None,
     still: include_bytes!("../../../assets/aircraft/c172.png"),
     paint: None,
     build,

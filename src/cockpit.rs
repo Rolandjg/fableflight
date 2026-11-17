@@ -210,7 +210,7 @@ fn lookup(t: &[f32], d: DVec3) -> f32 {
 /// For each look direction from the seat, how much of it lands inside the cabin.
 fn table(spec: &'static Spec) -> &'static [f32] {
     // (one for each type, by its id)
-    static T: [std::sync::OnceLock<Vec<f32>>; 8] = [const { std::sync::OnceLock::new() }; 8];
+    static T: [std::sync::OnceLock<Vec<f32>>; 9] = [const { std::sync::OnceLock::new() }; 9];
     T[spec.id as usize].get_or_init(|| {
         let mut t = vec![0.0f32; LW * LH];
         std::thread::scope(|s| {

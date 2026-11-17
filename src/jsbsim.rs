@@ -41,6 +41,8 @@ enum Func {
     /// lt, le, gt, ge, eq, nt: 1 when true
     Cmp(&'static str, Vec<Func>),
     IfThen(Vec<Func>),
+    /// the other operations, by their name
+    Op(&'static str, Vec<Func>),
     Table(Table),
 }
 
@@ -109,6 +111,8 @@ impl Props {
 #[derive(Debug)]
 pub struct Aircraft {
     pub name: String,
+    /// the flight model it was read from: "JSBSim", or "YASim" for one made from a YASim file (yasim.rs)
+    pub source: &'static str,
     pub wing_area_ft2: f64,
     pub span_ft: f64,
     pub chord_ft: f64,
@@ -118,9 +122,79 @@ pub struct Aircraft {
     pub weight_lbs: f64,
     /// control surface travel (radians) by output property ("fcs/elevator-pos-rad")
     pub travel: HashMap<String, (f64, f64)>,
+    /// the empty weight, the point masses (crew, passengers, baggage), the
+    /// fuel as loaded and with the tanks full (lbs)
+    pub empty_lbs: f64,
+    pub points_lbs: f64,
+    pub fuel_lbs: f64,
+    pub fuel_cap_lbs: f64,
+    /// full flap travel (degrees), from the flaps' kinematic or scale component
+    pub flaps_max_deg: Option<f64>,
+    /// each engine: its file and its thruster's (names without ".xml")
+    pub engines: Vec<(String, Option<String>)>,
+    /// the file header: author, description, the license it states (name, URL), notes
+    pub author: String,
+    pub description: String,
+    pub license: Option<(String, String)>,
+    pub notes: String,
     /// helper functions, evaluated first (in order) into properties
     functions: Vec<(String, Func)>,
     axes: Vec<(Axis, Vec<(String, Func)>)>,
+    /// geometry, structural frame (x aft, y right, z up; feet): the empty
+    /// centre of gravity, the visual reference point (where a 3D model's
+    /// origin goes), the pilot's eye
+    pub cg: Option<[f64; 3]>,
+    pub vrp: Option<[f64; 3]>,
+    pub eye: Option<[f64; 3]>,
+    /// the ground reactions, in file order (a 3D model's gear\[n\] is the n-th)
+    pub contacts: Vec<Contact>,
+}
+
+/// A lift and drag polar for an aircraft read from another flight model
+/// (see yasim.rs), given to an `Aircraft` as its aerodynamics.
+#[derive(Clone, Debug)]
+pub struct Polar {
+    /// the clean lift curve: (angle of attack in degrees, CL), increasing in angle
+    pub lift: Vec<(f64, f64)>,
+    /// lift added by full flaps (at every angle), and their drag
+    pub flap_cl: f64,
+    pub cd_flap: f64,
+    /// parasite drag, induced drag factor (CD = cd0 + k CL²), drag of the gear down
+    pub cd0: f64,
+    pub k: f64,
+    pub cd_gear: f64,
+}
+
+impl Default for Aircraft {
+    fn default() -> Aircraft {
+        Aircraft { name: String::new(), source: "JSBSim", wing_area_ft2: 0.0, span_ft: 0.0, chord_ft: 0.0, inertia: [0.0; 3], weight_lbs: 0.0, travel: HashMap::new(), empty_lbs: 0.0, points_lbs: 0.0, fuel_lbs: 0.0, fuel_cap_lbs: 0.0, flaps_max_deg: None, engines: Vec::new(), author: String::new(), description: String::new(), license: None, notes: String::new(), functions: Vec::new(), axes: Vec::new(), cg: None, vrp: None, eye: None, contacts: Vec::new() }
+    }
+}
+
+/// A point that touches the ground (structural frame, feet; lbs/ft and lbs/ft/s).
+#[derive(Clone, Debug)]
+pub struct Contact {
+    pub name: String,
+    /// a wheel (BOGEY), or part of the airframe (STRUCTURE)
+    pub bogey: bool,
+    pub at: [f64; 3],
+    pub spring: f64,
+    pub damping: f64,
+    /// how far it steers (degrees; 360 = castering)
+    pub max_steer: f64,
+    pub brakes: bool,
+    pub retractable: bool,
+}
+
+/// A `<location>` in feet.
+fn location(n: roxmltree::Node) -> Option<[f64; 3]> {
+    let k = match n.attribute("unit").unwrap_or("IN").to_uppercase().as_str() {
+        "M" => 1.0 / 0.3048,
+        "FT" => 1.0,
+        _ => 1.0 / 12.0,
+    };
+    let c = |a: &str| child(n, a).and_then(|v| num(text(v))).unwrap_or(0.0) * k;
+    Some([c("x"), c("y"), c("z")])
 }
 
 /// Forces (lbs) and moments (ft·lbs) on the six axes.
@@ -138,6 +212,11 @@ pub struct Forces {
 
 fn num(s: &str) -> Option<f64> {
     s.trim().parse().ok()
+}
+
+/// Text on one line, its runs of white space as single spaces.
+fn squash(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn text<'a>(n: roxmltree::Node<'a, 'a>) -> &'a str {
@@ -185,7 +264,7 @@ fn parse_func(n: roxmltree::Node) -> Result<Func, String> {
         })?))
     };
     Ok(match n.tag_name().name() {
-        "value" => Func::Value(num(text(n)).ok_or_else(|| format!("bad <value> {:?}", text(n)))?),
+        "value" | "v" => Func::Value(num(text(n)).ok_or_else(|| format!("bad <value> {:?}", text(n)))?),
         "property" | "p" => {
             let (p, neg) = prop_ref(text(n));
             Func::Prop(p, neg)
@@ -209,6 +288,11 @@ fn parse_func(n: roxmltree::Node) -> Result<Func, String> {
         "eq" => Func::Cmp("eq", args()?),
         "nt" => Func::Cmp("nt", args()?),
         "ifthen" => Func::IfThen(args()?),
+        "atan2" => Func::Op("atan2", args()?),
+        "atan" | "asin" | "acos" | "exp" | "ln" | "log2" | "log10" | "floor" | "ceil" | "sign" | "toradians" | "todegrees" | "not" | "integer" | "fraction" => Func::Op(n.tag_name().name().to_string().leak(), args()?),
+        "and" | "or" | "avg" | "mod" | "fmod" | "switch" | "interpolate1d" => Func::Op(n.tag_name().name().to_string().leak(), args()?),
+        // noise and integrators: at rest
+        "random" | "urandom" => Func::Value(0.0),
         "table" => Func::Table(parse_table(n)?),
         // A function written inside another: its single operation.
         "function" => *one()?,
@@ -237,7 +321,12 @@ fn parse_table(n: roxmltree::Node) -> Result<Table, String> {
         return Err("<table> without <tableData>".into());
     }
     let lines = |d: roxmltree::Node| -> Result<Vec<Vec<f64>>, String> {
-        text(d)
+        // (all its text, around any comments)
+        d.children()
+            .filter(|c| c.is_text())
+            .filter_map(|c| c.text())
+            .collect::<Vec<_>>()
+            .join("\n")
             .lines()
             .map(|l| {
                 l.split_whitespace()
@@ -250,14 +339,10 @@ fn parse_table(n: roxmltree::Node) -> Result<Table, String> {
             .filter(|r| !matches!(r, Ok(v) if v.is_empty()))
             .collect()
     };
-    let mut t = Table {
-        vars,
-        rows: Vec::new(),
-        cols: Vec::new(),
-        data: Vec::new(),
-        breaks: Vec::new(),
-    };
-    for d in datas {
+    let mut t = Table { vars, rows: Vec::new(), cols: Vec::new(), data: Vec::new(), breaks: Vec::new() };
+    // (only a table of three variables has several; any extra after the first is left out)
+    let n_data = if nvars >= 3 { datas.len() } else { 1 };
+    for d in datas.into_iter().take(n_data) {
         let l = lines(d)?;
         if nvars <= 1 {
             // x y pairs (several to a line allowed)
@@ -294,17 +379,25 @@ fn parse_table(n: roxmltree::Node) -> Result<Table, String> {
 }
 
 /// A section, from the file itself or from the file its `file` attribute names.
+/// JSBSim looks for it beside the aircraft file, then in its `Systems/`
+/// folder. Of the sections, only the ones the aerodynamics need must be
+/// found: a missing system (autopilot, electrics…) is left out.
 fn section(doc_dir: &Path, n: roxmltree::Node) -> Result<Option<(String, PathBuf)>, String> {
-    match n.attribute("file") {
-        Some(f) => {
-            let mut p = doc_dir.join(f);
-            if p.extension().is_none() {
-                p.set_extension("xml");
-            }
-            let s = std::fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))?;
-            Ok(Some((s, p)))
+    let Some(f) = n.attribute("file") else { return Ok(None) };
+    let mut tried = None;
+    for dir in [doc_dir.to_path_buf(), doc_dir.join("Systems")] {
+        let mut p = dir.join(f);
+        if p.extension().is_none() {
+            p.set_extension("xml");
         }
-        None => Ok(None),
+        match std::fs::read_to_string(&p) {
+            Ok(s) => return Ok(Some((s, p))),
+            Err(e) => tried = tried.or(Some(format!("{}: {e}", p.display()))),
+        }
+    }
+    match n.tag_name().name() {
+        "metrics" | "mass_balance" | "aerodynamics" | "propulsion" => Err(tried.unwrap_or_default()),
+        _ => Ok(None),
     }
 }
 
@@ -320,17 +413,7 @@ impl Aircraft {
         if !root.has_tag_name("fdm_config") {
             return Err("not a JSBSim aircraft (no <fdm_config>)".into());
         }
-        let mut a = Aircraft {
-            name: root.attribute("name").unwrap_or("?").to_string(),
-            wing_area_ft2: 0.0,
-            span_ft: 0.0,
-            chord_ft: 0.0,
-            inertia: [0.0; 3],
-            weight_lbs: 0.0,
-            travel: HashMap::new(),
-            functions: Vec::new(),
-            axes: Vec::new(),
-        };
+        let mut a = Aircraft { name: root.attribute("name").unwrap_or("?").to_string(), ..Default::default() };
         for sec in root.children().filter(|c| c.is_element()) {
             // (A section may live in a file of its own.)
             let other = section(dir, sec)?;
@@ -342,22 +425,90 @@ impl Aircraft {
             };
             let n = other_doc.as_ref().map(|d| d.root_element()).unwrap_or(sec);
             match sec.tag_name().name() {
+                "fileheader" => {
+                    let t = |k: &str| child(n, k).map(|c| squash(text(c))).unwrap_or_default();
+                    (a.author, a.description) = (t("author"), t("description"));
+                    a.notes = n.children().filter(|c| c.has_tag_name("note")).map(|c| squash(text(c))).collect::<Vec<_>>().join("\n\n");
+                    if let Some(l) = child(n, "license") {
+                        // as attributes, or as elements
+                        let get = |k: &str| l.attribute(k).map(squash).or_else(|| child(l, k).map(|c| squash(text(c)))).unwrap_or_default();
+                        let (name, url) = (get("licenseName"), get("licenseURL"));
+                        let name = if name.is_empty() { squash(text(l)) } else { name };
+                        if !name.is_empty() || !url.is_empty() {
+                            a.license = Some((name, url));
+                        }
+                    }
+                }
                 "metrics" => {
                     let get = |k: &str| child(n, k).and_then(imperial).unwrap_or(0.0);
-                    (a.wing_area_ft2, a.span_ft, a.chord_ft) =
-                        (get("wingarea"), get("wingspan"), get("chord"));
+                    (a.wing_area_ft2, a.span_ft, a.chord_ft) = (get("wingarea"), get("wingspan"), get("chord"));
+                    for l in n.children().filter(|c| c.has_tag_name("location")) {
+                        match l.attribute("name").unwrap_or("").to_uppercase().as_str() {
+                            "VRP" => a.vrp = location(l),
+                            "EYEPOINT" => a.eye = location(l),
+                            _ => {}
+                        }
+                    }
                 }
                 "mass_balance" => {
                     let get = |k: &str| child(n, k).and_then(imperial).unwrap_or(0.0);
                     a.inertia = [get("ixx"), get("iyy"), get("izz")];
-                    a.weight_lbs += get("emptywt");
+                    a.empty_lbs = get("emptywt");
+                    if let Some(l) = n.children().find(|c| c.has_tag_name("location")) {
+                        a.cg = location(l);
+                    }
+                    a.weight_lbs += a.empty_lbs;
                     for pm in n.children().filter(|c| c.has_tag_name("pointmass")) {
-                        a.weight_lbs += child(pm, "weight").and_then(imperial).unwrap_or(0.0);
+                        let w = child(pm, "weight").and_then(imperial).unwrap_or(0.0);
+                        a.weight_lbs += w;
+                        a.points_lbs += w;
                     }
                 }
                 "propulsion" => {
                     for tank in n.children().filter(|c| c.has_tag_name("tank")) {
-                        a.weight_lbs += child(tank, "contents").and_then(imperial).unwrap_or(0.0);
+                        let fuel = tank.attribute("type").is_none_or(|t| t.eq_ignore_ascii_case("FUEL"));
+                        let have = child(tank, "contents").and_then(imperial).unwrap_or(0.0);
+                        a.weight_lbs += have;
+                        if fuel {
+                            a.fuel_lbs += have;
+                            a.fuel_cap_lbs += child(tank, "capacity").and_then(imperial).unwrap_or(have);
+                        }
+                    }
+                    for e in n.children().filter(|c| c.has_tag_name("engine")) {
+                        let Some(f) = e.attribute("file") else { continue };
+                        let th = child(e, "thruster").and_then(|t| t.attribute("file")).map(str::to_string);
+                        a.engines.push((f.to_string(), th));
+                    }
+                }
+                "ground_reactions" => {
+                    for c in n.children().filter(|c| c.has_tag_name("contact")) {
+                        let Some(at) = child(c, "location").and_then(location) else { continue };
+                        let get = |k: &str| child(c, k).and_then(|v| num(text(v))).unwrap_or(0.0);
+                        // (spring and damper in lbs/ft unless stated otherwise)
+                        let per_ft = |k: &str| {
+                            child(c, k).map(|v| {
+                                let x = num(text(v)).unwrap_or(0.0);
+                                match v.attribute("unit").unwrap_or("").to_uppercase().as_str() {
+                                    "N/M" => x * 0.3048 / 4.448_22,
+                                    "N/M/SEC" | "N/M/S" => x * 0.3048 / 4.448_22,
+                                    "LBS/IN" => x * 12.0,
+                                    "LBS/IN/SEC" => x * 12.0,
+                                    _ => x,
+                                }
+                            })
+                            .unwrap_or(0.0)
+                        };
+                        let brake = child(c, "brake_group").map(|b| text(b).to_uppercase()).unwrap_or_default();
+                        a.contacts.push(Contact {
+                            name: c.attribute("name").unwrap_or("").to_string(),
+                            bogey: c.attribute("type").unwrap_or("BOGEY").eq_ignore_ascii_case("BOGEY"),
+                            at,
+                            spring: per_ft("spring_coeff"),
+                            damping: per_ft("damping_coeff"),
+                            max_steer: get("max_steer"),
+                            brakes: !brake.is_empty() && brake != "NONE",
+                            retractable: get("retractable") > 0.5,
+                        });
                     }
                 }
                 "flight_control" | "system" | "autopilot" => {
@@ -376,6 +527,20 @@ impl Aircraft {
                         if let (Some(lo), Some(hi)) = (lim("min"), lim("max")) {
                             let (x, y) = (lo * g, hi * g);
                             a.travel.insert(text(out).to_string(), (x.min(y), x.max(y)));
+                            if text(out).contains("flap-pos-deg") {
+                                a.flaps_max_deg = Some(x.abs().max(y.abs()));
+                            }
+                        }
+                    }
+                    // The flaps: a kinematic component running through its settings (degrees).
+                    for c in n.descendants().filter(|c| c.has_tag_name("kinematic")) {
+                        let Some(out) = child(c, "output") else { continue };
+                        if !text(out).contains("flap-pos-deg") {
+                            continue;
+                        }
+                        let most = c.descendants().filter(|p| p.has_tag_name("position")).filter_map(|p| num(text(p))).fold(0.0f64, |m, v| m.max(v.abs()));
+                        if most > 0.0 {
+                            a.flaps_max_deg = Some(most);
                         }
                     }
                 }
@@ -411,6 +576,24 @@ impl Aircraft {
             return Err("no <aerodynamics> axes".into());
         }
         Ok(a)
+    }
+
+    /// Gives it a polar as its aerodynamics, in place of any it had: CL is
+    /// the lift curve plus the flaps' share (`fcs/flap-pos-norm`), CD the
+    /// polar's with the flaps' and the gear's drag (`gear/gear-pos-norm`).
+    pub fn set_polar(&mut self, p: &Polar) {
+        let prop = |k: &str| Func::Prop(k.to_string(), false);
+        let curve = Table { vars: vec![("aero/alpha-deg".into(), false)], rows: p.lift.iter().map(|x| x.0).collect(), cols: Vec::new(), data: vec![p.lift.iter().map(|x| vec![x.1]).collect()], breaks: Vec::new() };
+        let cl = Func::Sum(vec![Func::Table(curve), Func::Product(vec![prop("fcs/flap-pos-norm"), Func::Value(p.flap_cl)])]);
+        let cd = Func::Sum(vec![
+            Func::Value(p.cd0),
+            Func::Product(vec![Func::Value(p.k), prop("aero/polar/cl"), prop("aero/polar/cl")]),
+            Func::Product(vec![prop("fcs/flap-pos-norm"), Func::Value(p.cd_flap)]),
+            Func::Product(vec![prop("gear/gear-pos-norm"), Func::Value(p.cd_gear)]),
+        ]);
+        let force = |c: &str| Func::Product(vec![prop("aero/qbar-psf"), prop("metrics/Sw-sqft"), prop(c)]);
+        self.functions = vec![("aero/polar/cl".into(), cl), ("aero/polar/cd".into(), cd)];
+        self.axes = vec![(Axis::Lift, vec![("aero/polar/lift".into(), force("aero/polar/cl"))]), (Axis::Drag, vec![("aero/polar/drag".into(), force("aero/polar/cd"))])];
     }
 
     // ------------------------------------------------------------ evaluating
@@ -482,6 +665,9 @@ impl Aircraft {
             ("aero/qbar-psf", qbar),
             ("aero/qbarUW-psf", qbar),
             ("aero/alpha-rad", a),
+            ("aero/alpha-wing-rad", a),
+            ("aero/qbar-area", qbar * self.wing_area_ft2),
+            ("aero/qbarUV-psf", qbar),
             ("aero/alpha-deg", alpha_deg),
             ("aero/mag-alpha-rad", a.abs()),
             ("aero/beta-rad", b),
@@ -599,8 +785,43 @@ fn eval(f: &Func, p: &mut Props) -> f64 {
                 x.get(2).copied().unwrap_or(0.0)
             }
         }
+        Func::Op(op, v) => {
+            let x = all(v, p);
+            let a = x.first().copied().unwrap_or(0.0);
+            let b = x.get(1).copied().unwrap_or(0.0);
+            match *op {
+                "atan2" => a.atan2(b),
+                "atan" => a.atan(),
+                "asin" => a.clamp(-1.0, 1.0).asin(),
+                "acos" => a.clamp(-1.0, 1.0).acos(),
+                "exp" => a.exp(),
+                "ln" => if a > 0.0 { a.ln() } else { 0.0 },
+                "log2" => if a > 0.0 { a.log2() } else { 0.0 },
+                "log10" => if a > 0.0 { a.log10() } else { 0.0 },
+                "floor" => a.floor(),
+                "ceil" => a.ceil(),
+                "sign" => if a < 0.0 { -1.0 } else { 1.0 },
+                "toradians" => a.to_radians(),
+                "todegrees" => a.to_degrees(),
+                "not" => if a == 0.0 { 1.0 } else { 0.0 },
+                "integer" => a.trunc(),
+                "fraction" => a.fract(),
+                "and" => if x.iter().all(|v| *v != 0.0) { 1.0 } else { 0.0 },
+                "or" => if x.iter().any(|v| *v != 0.0) { 1.0 } else { 0.0 },
+                "avg" => if x.is_empty() { 0.0 } else { x.iter().sum::<f64>() / x.len() as f64 },
+                "mod" | "fmod" => if b != 0.0 { a % b } else { 0.0 },
+                // the first argument picks one of the rest
+                "switch" => x.get(1 + a.max(0.0) as usize).copied().unwrap_or(0.0),
+                // index, then x y pairs
+                "interpolate1d" => {
+                    let (xs, ys): (Vec<f64>, Vec<f64>) = x[1.min(x.len())..].chunks(2).filter(|c| c.len() == 2).map(|c| (c[0], c[1])).unzip();
+                    interp(&xs, &ys, a)
+                }
+                _ => 0.0,
+            }
+        }
         Func::Table(t) => {
-            let mut var = |k: usize, p: &mut Props| -> f64 {
+            let var = |k: usize, p: &mut Props| -> f64 {
                 let (name, neg) = &t.vars[k.min(t.vars.len() - 1)];
                 let v = p.get(name);
                 if *neg { -v } else { v }
@@ -629,7 +850,10 @@ fn eval(f: &Func, p: &mut Props) -> f64 {
 
 /// Linear interpolation in a table, held at its ends.
 fn interp(xs: &[f64], ys: &[f64], x: f64) -> f64 {
-    match xs.len() {
+    // (a table with more break points than values is read as far as both go)
+    let n = xs.len().min(ys.len());
+    let (xs, ys) = (&xs[..n], &ys[..n]);
+    match n {
         0 => 0.0,
         1 => ys[0],
         _ => {

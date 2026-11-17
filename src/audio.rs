@@ -39,6 +39,8 @@ pub struct Warn {
     pub overspeed: f32,
     /// throttle back near the ground with the gear up
     pub gear: bool,
+    /// the missile seeker's growl: 0 silent, 0.1 searching, up to 1 locked
+    pub seeker: f32,
 }
 
 /// What the sound is made from, set once a frame.
@@ -125,6 +127,8 @@ pub enum Event {
     Crunch(f32),
     /// something big going into the water (~0.2 .. 2)
     Splash(f32),
+    /// a missile leaving its rail (strength ~0.2 .. 2)
+    Missile(f32),
 }
 
 #[derive(Default)]
@@ -1224,28 +1228,14 @@ struct Alarms {
     clack: [Bq; 2],
     gear_ph: f32,
     gear_env: f32,
+    seek_ph: f32,
+    seek_env: f32,
     env_k: f32,
 }
 
 impl Alarms {
     fn new() -> Self {
-        Self {
-            t: 0.0,
-            beep_ph: 0.0,
-            beep_f: 1000.0,
-            beep_env: 0.0,
-            horn_ph: 0.0,
-            horn_env: 0.0,
-            vib: 0.0,
-            clack_ph: 0.0,
-            clack: [
-                Bq::new(Bq::ring, 2400.0, 22.0),
-                Bq::new(Bq::ring, 950.0, 14.0),
-            ],
-            gear_ph: 0.0,
-            gear_env: 0.0,
-            env_k: kf(80.0),
-        }
+        Self { t: 0.0, beep_ph: 0.0, beep_f: 1000.0, beep_env: 0.0, horn_ph: 0.0, horn_env: 0.0, vib: 0.0, clack_ph: 0.0, clack: [Bq::new(Bq::ring, 2400.0, 22.0), Bq::new(Bq::ring, 950.0, 14.0)], gear_ph: 0.0, gear_env: 0.0, seek_ph: 0.0, seek_env: 0.0, env_k: kf(80.0) }
     }
     fn sample(&mut self, w: &Warn) -> f32 {
         self.t = (self.t + DT) % 240.0;
@@ -1311,6 +1301,22 @@ impl Alarms {
             self.gear_ph = (self.gear_ph + 480.0 * DT).fract();
             let x = TAU * self.gear_ph;
             out += (x.sin() + 0.33 * (3.0 * x).sin() + 0.2 * (5.0 * x).sin()) * self.gear_env * 0.3;
+        }
+        // Missile seeker: a low growl that gate-flickers while searching and
+        // turns into a steady higher note once the target is locked.
+        if w.seeker > 0.01 {
+            let locked = w.seeker >= 0.99;
+            let gate = locked || (t * 3.2).fract() < 0.58;
+            let amp = if gate { 0.18 + 0.2 * w.seeker.min(1.0) } else { 0.0 };
+            self.seek_env += (amp - self.seek_env) * self.env_k * 0.7;
+            if self.seek_env > 1e-4 {
+                let f = if locked { 980.0 } else { 620.0 + 240.0 * w.seeker };
+                self.seek_ph = (self.seek_ph + f * DT).fract();
+                let x = TAU * self.seek_ph;
+                out += (x.sin() + 0.25 * (3.0 * x).sin()) * self.seek_env * 0.55;
+            }
+        } else {
+            self.seek_env += (0.0 - self.seek_env) * self.env_k * 0.7;
         }
         out
     }
@@ -1545,6 +1551,11 @@ impl Synth {
                     )
                     .noise(4200.0, 3000.0, 0.7, 0.8 * s, 0.25)
                     .tone(70.0, 45.0, 0.5 * s, 0.06);
+                self.push(v);
+            }
+            Event::Missile(s) => {
+                let s = s.clamp(0.2, 2.0);
+                let v = Voice::new(1.6, r.range(-0.25, 0.25), Bus::Mid).noise(2600.0, 700.0, 0.9, 1.3 * s, 0.32).tone(95.0, 55.0, 0.7 * s, 0.18).pulses(170.0, 40.0, false, 0.35 * s);
                 self.push(v);
             }
             Event::Splash(s) => {

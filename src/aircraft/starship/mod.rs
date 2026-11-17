@@ -194,6 +194,8 @@ pub static SPEC: Spec = Spec {
     name: "SpaceX Starship",
     keys: &["starship", "spacex", "rocket"],
     blurb: "Two-stage rocket, 121 m and 5,000 t on the pad. Throttle up to lift off on 33 engines, then hold W a few seconds to tip it over. 1 picks which engines burn, Backspace lights the ship and drops the booster, 2 has the ship land itself.",
+    origin: None,
+    ext: None,
     still: include_bytes!("../../../assets/aircraft/starship.png"),
     paint: None,
     build,

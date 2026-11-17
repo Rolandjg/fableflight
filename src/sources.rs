@@ -296,10 +296,12 @@ impl Sources {
         Ok(u)
     }
 
-    pub fn vector(&self, id: TileId) -> Result<Arc<VecTile>> {
-        if let Some(t) = self.vec.lock().get(id) {
-            return Ok(t);
-        }
+    /// Shared raw vector cache; the minimap only decodes its small set of layers.
+    pub fn map_layers(&self, id: TileId) -> Result<HashMap<String, mvt::Layer>> {
+        Ok(mvt::decode(&self.vector_bytes(id)?, &["water", "landcover", "landuse", "transportation", "place"]))
+    }
+
+    fn vector_bytes(&self, id: TileId) -> Result<Vec<u8>> {
         let key = format!("vec/{}/{}/{}.pbf", id.z, id.x, id.y);
         let data = match std::fs::read(self.fetch.root.join(&key)) {
             Ok(d) if !d.is_empty() => d,
@@ -312,21 +314,16 @@ impl Sources {
                 self.fetch.get_cached(&key, &url)?
             }
         };
-        let mut layers = mvt::decode(
-            &data,
-            &[
-                "water",
-                "building",
-                "transportation",
-                "landcover",
-                "landuse",
-                "aeroway",
-            ],
-        );
-        let mut vt = VecTile {
-            extent: 4096.0,
-            ..Default::default()
-        };
+        Ok(data)
+    }
+
+    pub fn vector(&self, id: TileId) -> Result<Arc<VecTile>> {
+        if let Some(t) = self.vec.lock().get(id) {
+            return Ok(t);
+        }
+        let data = self.vector_bytes(id)?;
+        let mut layers = mvt::decode(&data, &["water", "building", "transportation", "landcover", "landuse", "aeroway"]);
+        let mut vt = VecTile { extent: 4096.0, ..Default::default() };
         if let Some(l) = layers.remove("water") {
             vt.extent = l.extent;
             for f in l.features {

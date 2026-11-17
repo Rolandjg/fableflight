@@ -208,6 +208,8 @@ const PIECES: &[(&str, usize, Role, Option<&str>)] = &[
     ("right aileron", G_RWING, Role::Aileron(1), None),
     ("left tip rail", G_LWING, Role::Other, None),
     ("right tip rail", G_RWING, Role::Other, None),
+    ("left sidewinder", G_LWING, Role::Other, None),
+    ("right sidewinder", G_RWING, Role::Other, None),
     ("left nav light", G_LWING, Role::Other, None),
     ("right nav light", G_RWING, Role::Other, None),
     ("left stabilator", G_TAIL, Role::Elevator, None),
@@ -424,11 +426,19 @@ const fn main_leg(x: f64, name: &'static str, kick: f64) -> Leg {
     }
 }
 
+/// Its two wingtip Sidewinders (the pieces split out of the tip rails).
+pub static MISSILES: [MissileStation; 2] = [
+    MissileStation { piece: "left sidewinder", side: 0, name: "L WINGTIP" },
+    MissileStation { piece: "right sidewinder", side: 1, name: "R WINGTIP" },
+];
+
 pub static SPEC: Spec = Spec {
     id: 2,
     name: "F/A-18C Hornet",
     keys: &["fa18", "f18", "fa-18", "f/a-18", "hornet"],
-    blurb: "Twin-engine carrier fighter, 15.5 t. Fly-by-wire holds it to 7.5 g; Space for afterburner, / speedbrake. 135 kt approach.",
+    origin: None,
+    ext: None,
+    blurb: "Twin-engine carrier fighter, 15.5 t. Fly-by-wire holds it to 7.5 g; Space for afterburner, / speedbrake. 135 kt approach. 3 master arm, 4 lock, 5 fire.",
     still: include_bytes!("../../../assets/aircraft/fa18.png"),
     paint: Some(Paint {
         jpg: include_bytes!("../../../assets/fa18_paint.jpg"),
@@ -665,6 +675,14 @@ mod tests {
         assert!((len - 17.07).abs() < 0.3, "{len}");
         assert!((span - 12.31).abs() < 0.3, "{span}");
         assert!((top - 4.66).abs() < 0.3, "{top}");
+    }
+
+    #[test]
+    fn missile_pieces_are_in_the_model() {
+        let m = build();
+        for st in &MISSILES {
+            assert!(m.pieces.iter().any(|p| p.name == st.piece), "missing {}", st.piece);
+        }
     }
 
     #[test]

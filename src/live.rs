@@ -8,9 +8,11 @@
 use crate::airfield::{L_GREEN, L_RED, L_STROBE, L_WHITE, Light};
 use crate::airmodels::{self as am, TYPES};
 use crate::render::Inst;
+use crate::weapons::{Target, TargetKey};
 use crate::{geo, sources::Sources};
-use glam::{DVec3, Vec3};
+use glam::{DQuat, DVec3, Vec3};
 use parking_lot::Mutex;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -53,7 +55,7 @@ pub struct Plane {
     pub size: u8,
     /// position at the last report, velocity (m/s, world axes), and when
     fix: DVec3,
-    vel: DVec3,
+    pub vel: DVec3,
     at: Instant,
     /// what is left of the jump at the last report, faded out
     off: DVec3,
@@ -65,6 +67,9 @@ pub struct Plane {
     pub alt_ft: f64,
     pub gs_kt: f64,
     pub vs_fpm: f64,
+    /// Seconds since it was hit (0: flying normally). A downed aircraft
+    /// tumbles and falls for a few seconds, then is forgotten.
+    pub downed: f64,
 }
 
 #[derive(Default)]
@@ -84,18 +89,14 @@ pub struct Live {
     last_got: Option<Instant>,
     last_step: Option<Instant>,
     pub planes: Vec<Plane>,
+    /// Aircraft shot down: their ICAO addresses and when, so a fresh ADS-B
+    /// report does not put them back in the sky straight away.
+    killed: HashMap<String, Instant>,
 }
 
 impl Live {
     pub fn new(on: bool) -> Self {
-        Self {
-            shared: Arc::default(),
-            on: Arc::new(AtomicBool::new(on)),
-            thread: false,
-            last_got: None,
-            last_step: None,
-            planes: Vec::new(),
-        }
+        Self { shared: Arc::default(), on: Arc::new(AtomicBool::new(on)), thread: false, last_got: None, last_step: None, planes: Vec::new(), killed: HashMap::new() }
     }
 
     pub fn enabled(&self) -> bool {
@@ -106,6 +107,7 @@ impl Live {
         self.on.store(on, Ordering::Relaxed);
         if !on {
             self.planes.clear();
+            self.killed.clear();
             self.shared.lock().got = None;
         }
     }
@@ -148,11 +150,22 @@ impl Live {
             self.last_got = Some(t);
             self.take(t, &reports);
         }
-        self.planes
-            .retain(|p| (now - p.seen).as_secs_f64() < FORGET);
+        // A killed aircraft's ICAO address stays out of the sky for a while.
+        self.killed.retain(|_, t| now.duration_since(*t) < Duration::from_secs(300));
+        self.planes.retain(|p| if p.downed > 0.0 { p.downed < 14.0 } else { (now - p.seen).as_secs_f64() < FORGET });
         let fade = (-dt / 1.5).exp();
         let turn = (dt * 1.5).min(1.0);
         for p in &mut self.planes {
+            if p.downed > 0.0 {
+                // Hit: it stops reporting, tumbles, and falls under gravity.
+                p.downed += dt;
+                let down = p.pos.normalize();
+                p.vel = (p.vel - down * 9.81 * dt) * (-dt * 0.18).exp();
+                p.pos += p.vel * dt;
+                let axis = p.fwd.any_orthonormal_vector();
+                p.fwd = (DQuat::from_axis_angle(axis, dt * 1.7) * p.fwd).normalize();
+                continue;
+            }
             p.off *= fade;
             let coast = (now - p.at).as_secs_f64().min(COAST);
             p.pos = p.fix + p.vel * coast + p.off;
@@ -162,13 +175,52 @@ impl Live {
         }
     }
 
+    /// The aircraft as targets for a heat-seeking missile. Downed ones are no
+    /// longer valid, and the ones still in the air are handed to the weapon
+    /// system with their velocity and size.
+    pub fn targets(&self) -> Vec<Target> {
+        self.planes
+            .iter()
+            .filter(|p| p.downed == 0.0)
+            .map(|p| {
+                let label = if p.ty.is_empty() { p.call.clone() } else { format!("{} {}", p.call, p.ty) };
+                Target { key: TargetKey::Live(p.hex.clone()), pos: p.pos, vel: p.vel, size: p.size, label }
+            })
+            .collect()
+    }
+
+    /// A missile hit it: it falls out of the sky for a few seconds, and its
+    /// address is kept out of the feed for a while afterwards.
+    pub fn down(&mut self, hex: &str) -> bool {
+        let now = Instant::now();
+        if let Some(p) = self.planes.iter_mut().find(|p| p.hex == hex) {
+            if p.downed > 0.0 {
+                return false;
+            }
+            p.downed = 1e-6;
+            p.seen = now;
+            p.vel += p.fwd.cross(p.pos.normalize()) * 25.0;
+            self.killed.insert(hex.to_string(), now);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Take a downed aircraft out of the sky at once (after it reaches the
+    /// ground, for instance).
+    pub fn remove(&mut self, hex: &str) {
+        self.planes.retain(|p| p.hex != hex);
+    }
+
     /// A new set of reports, received at `t`.
     fn take(&mut self, t: Instant, reports: &[Report]) {
         let now = Instant::now();
         for r in reports {
-            let at = t
-                .checked_sub(Duration::from_secs_f64(r.age.clamp(0.0, 60.0)))
-                .unwrap_or(t);
+            if self.killed.contains_key(&r.hex) {
+                continue;
+            }
+            let at = t.checked_sub(Duration::from_secs_f64(r.age.clamp(0.0, 60.0))).unwrap_or(t);
             let fix = geo::lla_to_pos(r.lat.to_radians(), r.lon.to_radians(), r.alt_m);
             let (e, n, u) = geo::enu(fix);
             let (s, c) = r.trk.to_radians().sin_cos();
@@ -176,6 +228,9 @@ impl Live {
             let predicted = fix + vel * (now - at).as_secs_f64().min(COAST);
             let (alt_ft, gs_kt, vs_fpm) = (r.alt_m * 3.28084, r.gs * 1.94384, r.vs * 196.85);
             if let Some(p) = self.planes.iter_mut().find(|p| p.hex == r.hex) {
+                if p.downed > 0.0 {
+                    continue;
+                }
                 // Keep it where it was drawn and let the difference fade.
                 let jump = p.pos - predicted;
                 p.off = if jump.length() < 3000.0 {
@@ -215,6 +270,7 @@ impl Live {
                     alt_ft,
                     gs_kt,
                     vs_fpm,
+                    downed: 0.0,
                 });
             }
         }

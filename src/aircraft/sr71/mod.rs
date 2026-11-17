@@ -394,6 +394,8 @@ pub static SPEC: Spec = Spec {
     name: "SR-71A Blackbird",
     keys: &["sr71", "sr-71", "sr71a", "sr-71a", "blackbird", "habu"],
     blurb: "Two-seat Mach 3 reconnaissance aircraft, 50 t. Hold Space: it cruises in afterburner, Mach 3.2 at 80,000 ft. Keep under 450 kt indicated on the way up and 3 g always. No flaps; / streams the drag chute once it is down. 175 kt approach.",
+    origin: None,
+    ext: None,
     still: include_bytes!("../../../assets/aircraft/sr71.png"),
     paint: Some(Paint {
         jpg: include_bytes!("../../../assets/sr71_paint.jpg"),

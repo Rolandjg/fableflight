@@ -103,6 +103,23 @@ pub fn tr_owned(en: &str) -> String {
     }
 }
 
+/// French "de" before a place name, as it is written: "d'Amsterdam",
+/// "du Havre", "des Sables-d'Olonne", "de la Rochelle", "de Paris".
+/// (No elision before an H: "de Hambourg"; it depends on the word.)
+pub fn de_place(name: &str) -> String {
+    if let Some(rest) = name.strip_prefix("Le ") {
+        return format!("du {rest}");
+    }
+    if let Some(rest) = name.strip_prefix("Les ") {
+        return format!("des {rest}");
+    }
+    if let Some(rest) = name.strip_prefix("La ") {
+        return format!("de la {rest}");
+    }
+    let vowel = name.chars().next().is_some_and(|c| "AEIOUYÀÂÄÉÈÊËÎÏÔÖÙÛÜaeiouyàâäéèêëîïôöùûü".contains(c));
+    if vowel { format!("d'{name}") } else { format!("de {name}") }
+}
+
 /// "{n} request(s)" and the like.
 pub fn plural(n: u64, en_one: &str, en_many: &str, fr_one: &str, fr_many: &str) -> String {
     let w = match (is_fr(), n) {
@@ -167,15 +184,26 @@ fn fr(en: &str) -> Option<&'static str> {
         "wheel brakes" => "freins de roues",
         "flaps down / up a notch" => "volets : sortir / rentrer d'un cran",
         "landing gear down / up" => "train d'atterrissage : sortir / rentrer",
+        "slide the canopy open / shut (Robin)" => "ouvrir / fermer la verrière coulissante (Robin)",
         "speedbrake (airliners)" => "aérofreins (avions de ligne)",
         "thrust reversers, on the ground (hold)" => "inverseurs de poussée, au sol (maintenir)",
         "set the heading indicator to the compass" => {
             "recaler le conservateur de cap sur le compas"
         }
         "chase / cockpit camera" => "caméra extérieure / cockpit",
+        "C switches between the chase view and the cockpit; drag the mouse to look around." => "C passe de la vue extérieure au cockpit ; glissez la souris pour regarder autour.",
+        "F4 starts or stops the engine; for a start by hand: Ins battery, Page Up mixture, I magnetos, hold O." => "F4 démarre ou coupe le moteur ; pour un démarrage à la main : Inser batterie, Page ↑ mélange, I magnétos, maintenir O.",
+        "J shows the radio navigation instruments; the Radio page of the panel (Tab) tunes VORs and ILSs." => "J affiche les instruments de radionavigation ; la page Radios du panneau (Tab) règle VOR et ILS.",
+        "X sets the altimeter to the QNH before take-off and on the way down." => "X cale l'altimètre au QNH avant le décollage et en descente.",
+        "F and V move the flaps a notch; L the landing gear; B the wheel brakes." => "F et V sortent ou rentrent les volets d'un cran ; L le train ; B les freins.",
+        "Tab opens the flight panel: instruments, places, weather, fuel and balance." => "Tab ouvre le panneau de vol : instruments, lieux, météo, carburant et centrage.",
+        "R starts again in the air over where you are; G goes to any place or address." => "R repart en vol au-dessus de votre position ; G va à n'importe quel lieu ou adresse.",
+        "The weather and the traffic are real: METAR at the airports, live aircraft around you." => "La météo et le trafic sont réels : METAR des aéroports, avions en vol autour de vous.",
+        "F1 lists every key; joysticks and pedals are set up in Settings, Bindings." => "F1 liste toutes les touches ; joysticks et palonniers se règlent dans Réglages, Assignations.",
         "look around" => "regarder autour",
         "camera distance / cockpit zoom" => "distance caméra / zoom cockpit",
         "hide / show the HUD" => "masquer / afficher le HUD",
+        "hide / show the minimap" => "masquer / afficher la mini-carte",
         "screenshot" => "capture d'écran",
         "time of day forward / back" => "avancer / reculer l'heure",
         "more / fewer clouds" => "plus / moins de nuages",
@@ -251,30 +279,15 @@ fn fr(en: &str) -> Option<&'static str> {
         "NW" => "NO",
 
         // ---- aircraft
-        "Twin-engine carrier fighter, 15.5 t. Fly-by-wire holds it to 7.5 g; Space for afterburner, / speedbrake. 135 kt approach." => {
-            "Chasseur embarqué biréacteur, 15,5 t. Les commandes de vol électriques le limitent à 7,5 g ; Espace pour la postcombustion, / aérofreins. Approche à 135 kt."
-        }
-        "Twin-engine two-seat fighter, 17 t. No fly-by-wire: mind the g and the angle of attack; Space for afterburner, / speedbrakes. 150 kt approach." => {
-            "Chasseur biplace biréacteur, 17 t. Pas de commandes de vol électriques : attention aux g et à l'incidence ; Espace pour la postcombustion, / aérofreins. Approche à 150 kt."
-        }
-        "Twin-engine stealth fighter, 25 t. Fly-by-wire holds it to 9 g; supersonic without afterburner up high. Space for afterburner, / to brake. 145 kt approach." => {
-            "Chasseur furtif biréacteur, 25 t. Les commandes de vol électriques le limitent à 9 g ; supersonique sans postcombustion en altitude. Espace pour la postcombustion, / pour freiner. Approche à 145 kt."
-        }
-        "Two-seat Mach 3 reconnaissance aircraft, 50 t. Hold Space: it cruises in afterburner, Mach 3.2 at 80,000 ft. Keep under 450 kt indicated on the way up and 3 g always. No flaps; / streams the drag chute once it is down. 175 kt approach." => {
-            "Biplace de reconnaissance à Mach 3, 50 t. Maintenez Espace : il croise en postcombustion, Mach 3,2 à 80 000 ft. Restez sous 450 kt indiqués en montée et sous 3 g en permanence. Pas de volets ; / sort le parachute-frein une fois posé. Approche à 175 kt."
-        }
-        "Two-stage rocket, 121 m and 5,000 t on the pad. Throttle up to lift off on 33 engines, then hold W a few seconds to tip it over. 1 picks which engines burn, Backspace lights the ship and drops the booster, 2 has the ship land itself." => {
-            "Fusée à deux étages, 121 m et 5 000 t sur le pas de tir. Mettez les gaz pour décoller sur 33 moteurs, puis tenez W quelques secondes pour l'incliner. 1 choisit les moteurs allumés, Retour arrière allume le vaisseau et largue le booster, 2 laisse le vaisseau se poser seul."
-        }
-        "Four-engine supersonic airliner, 137 t. Mach 2 at 55,000 ft without reheat; Space for reheat to take off. No flaps: F droops the nose (5° to take off, 12.5° to land). Rotate at 200 kt to 10° and no more until it is off (the tail touches at 11.5°); 160 kt approach, 10° nose up. Z reversers." => {
-            "Quadriréacteur de ligne supersonique, 137 t. Mach 2 à 55 000 ft sans réchauffe ; Espace pour la réchauffe au décollage. Pas de volets : F abaisse le nez (5° au décollage, 12,5° à l'atterrissage). Rotation à 200 kt jusqu'à 10°, pas plus avant l'envol (la queue touche à 11,5°) ; approche à 160 kt, 10° à cabrer. Z inverseurs."
-        }
-        "Four-seat single, 180 hp, retractable gear. Forgiving and slow: 125 kt flat out." => {
-            "Monomoteur quatre places, 180 ch, train rentrant. Indulgent et lent : 125 kt à fond."
-        }
-        "Four-engine wide-body airliner, 290 t. Heavy and slow to answer the controls; Mach 0.85 cruise, 150 kt approach. / speedbrake, Z reversers." => {
-            "Quadriréacteur gros-porteur, 290 t. Lourd et lent à répondre aux commandes ; croisière à Mach 0,85, approche à 150 kt. / aérofreins, Z inverseurs."
-        }
+        "Twin-engine carrier fighter, 15.5 t. Fly-by-wire holds it to 7.5 g; Space for afterburner, / speedbrake. 135 kt approach." => "Chasseur embarqué biréacteur, 15,5 t. Les commandes de vol électriques le limitent à 7,5 g ; Espace pour la postcombustion, / aérofreins. Approche à 135 kt.",
+        "Twin-engine two-seat fighter, 17 t. No fly-by-wire: mind the g and the angle of attack; Space for afterburner, / speedbrakes. 150 kt approach." => "Chasseur biplace biréacteur, 17 t. Pas de commandes de vol électriques : attention aux g et à l'incidence ; Espace pour la postcombustion, / aérofreins. Approche à 150 kt.",
+        "Twin-engine stealth fighter, 25 t. Fly-by-wire holds it to 9 g; supersonic without afterburner up high. Space for afterburner, / to brake. 145 kt approach." => "Chasseur furtif biréacteur, 25 t. Les commandes de vol électriques le limitent à 9 g ; supersonique sans postcombustion en altitude. Espace pour la postcombustion, / pour freiner. Approche à 145 kt.",
+        "Two-seat Mach 3 reconnaissance aircraft, 50 t. Hold Space: it cruises in afterburner, Mach 3.2 at 80,000 ft. Keep under 450 kt indicated on the way up and 3 g always. No flaps; / streams the drag chute once it is down. 175 kt approach." => "Biplace de reconnaissance à Mach 3, 50 t. Maintenez Espace : il croise en postcombustion, Mach 3,2 à 80 000 ft. Restez sous 450 kt indiqués en montée et sous 3 g en permanence. Pas de volets ; / sort le parachute-frein une fois posé. Approche à 175 kt.",
+        "Two-stage rocket, 121 m and 5,000 t on the pad. Throttle up to lift off on 33 engines, then hold W a few seconds to tip it over. 1 picks which engines burn, Backspace lights the ship and drops the booster, 2 has the ship land itself." => "Fusée à deux étages, 121 m et 5 000 t sur le pas de tir. Mettez les gaz pour décoller sur 33 moteurs, puis tenez W quelques secondes pour l'incliner. 1 choisit les moteurs allumés, Retour arrière allume le vaisseau et largue le booster, 2 laisse le vaisseau se poser seul.",
+        "Four-engine supersonic airliner, 137 t. Mach 2 at 55,000 ft without reheat; Space for reheat to take off. No flaps: F droops the nose (5° to take off, 12.5° to land). Rotate at 200 kt to 10° and no more until it is off (the tail touches at 11.5°); 160 kt approach, 10° nose up. Z reversers." => "Quadriréacteur de ligne supersonique, 137 t. Mach 2 à 55 000 ft sans réchauffe ; Espace pour la réchauffe au décollage. Pas de volets : F abaisse le nez (5° au décollage, 12,5° à l'atterrissage). Rotation à 200 kt jusqu'à 10°, pas plus avant l'envol (la queue touche à 11,5°) ; approche à 160 kt, 10° à cabrer. Z inverseurs.",
+        "Four-seat single, 180 hp, retractable gear. Forgiving and slow: 125 kt flat out." => "Monomoteur quatre places, 180 ch, train rentrant. Indulgent et lent : 125 kt à fond.",
+        "French four-seat wooden tourer and glider tug, 180 hp, fixed gear. Light on the controls; 60° flaps for steep, short landings." => "Quadriplace de voyage français en bois et remorqueur de planeurs, 180 ch, train fixe. Commandes légères ; volets à 60° pour des atterrissages courts et pentus.",
+        "Four-engine wide-body airliner, 290 t. Heavy and slow to answer the controls; Mach 0.85 cruise, 150 kt approach. / speedbrake, Z reversers." => "Quadriréacteur gros-porteur, 290 t. Lourd et lent à répondre aux commandes ; croisière à Mach 0,85, approche à 150 kt. / aérofreins, Z inverseurs.",
 
         // ---- places (cities, one-click places, airports)
         "Mexico City" => "Mexico",
@@ -457,6 +470,17 @@ const CAUSES: &[(&str, &str)] = &[
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn de_before_place_names() {
+        assert_eq!(de_place("Amsterdam"), "d'Amsterdam");
+        assert_eq!(de_place("Évreux"), "d'Évreux");
+        assert_eq!(de_place("Paris"), "de Paris");
+        assert_eq!(de_place("Le Havre"), "du Havre");
+        assert_eq!(de_place("Les Mureaux"), "des Mureaux");
+        assert_eq!(de_place("La Rochelle"), "de la Rochelle");
+        assert_eq!(de_place("Hambourg"), "de Hambourg");
+    }
+
     use super::*;
 
     // One test touches the global language, so the others cannot race it.

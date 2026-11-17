@@ -66,7 +66,7 @@ pub fn build(b: &mut Builder) {
 }
 
 /// Quad with a [-1, 1] local frame, facing ax x ay.
-fn rect(m: &mut Mesh, mm: &Mat, c: Vec3, ax: Vec3, ay: Vec3, hx: f32, hy: f32) {
+pub fn rect(m: &mut Mesh, mm: &Mat, c: Vec3, ax: Vec3, ay: Vec3, hx: f32, hy: f32) {
     let n = ax.cross(ay).normalize();
     let base = m.v.len() as u32;
     for (u, v) in [(-1.0f32, -1.0f32), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
@@ -83,7 +83,7 @@ fn circle(c: Vec2, r: f32, n: usize) -> Vec<Vec2> {
         .collect()
 }
 /// Strap or bar between two points, `w` wide, lying flat against `n`.
-fn strap(m: &mut Mesh, mm: &Mat, a: Vec3, c: Vec3, n: Vec3, w: f32, t: f32) {
+pub fn strap(m: &mut Mesh, mm: &Mat, a: Vec3, c: Vec3, n: Vec3, w: f32, t: f32) {
     let d = (c - a).normalize();
     let x = n.cross(d).normalize();
     let rot = Quat::from_mat3(&Mat3::from_cols(x, d, x.cross(d)));

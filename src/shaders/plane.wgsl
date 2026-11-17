@@ -24,7 +24,7 @@ struct Obj { model: mat4x4f, tint: vec4f, glow: vec4f, params: array<vec4f, 6>, 
 const M_PAINT = 0u; const M_LIVERY = 1u; const M_ALU = 2u; const M_STEEL = 3u; const M_RUBBER = 4u;
 const M_PLASTIC = 5u; const M_FABRIC = 6u; const M_GLASS = 7u; const M_LAMP = 8u; const M_GAUGE = 9u;
 const M_BLACK = 10u; const M_EXHAUST = 11u; const M_SCREW = 12u; const M_PROP = 13u; const M_DISPLAY = 14u;
-const M_SATIN = 15u; const M_PROPDISC = 16u; const M_PLUME = 17u;
+const M_SATIN = 15u; const M_PROPDISC = 16u; const M_PLUME = 17u; const M_TEX = 18u;
 const P_FUSE = 1u; const P_WING = 2u; const P_CTRL = 3u; const P_COWL = 4u; const P_TAIL = 5u; const P_TREAD = 6u;
 const P_LINING = 7u; const P_SEAT = 8u; const P_CARPET = 9u; const P_PANEL = 10u; const P_PLACARD = 11u; const P_KNURL = 12u;
 const P_NACELLE = 13u; const P_LEGEND = 14u; const P_FLEECE = 15u; const P_SPINNER = 16u; const P_HORNET = 17u;
@@ -39,6 +39,12 @@ const P_PIT = 18u; const P_MESH = 19u; const P_WEBBING = 20u; const P_NONSLIP = 
 // many pictures (0: it has no paint); .y: how much relief its lines stand
 // for; .z: how much its sheen follows its tone (a dark paint's panels).
 @group(1) @binding(1) var t_paint: texture_2d_array<f32>;
+// A downloaded aircraft's meshes bind its own textures there instead (fgmodel.rs):
+// layer `layer` (< 0: none), repeating.
+fn tex_at(uv: vec2f, layer: f32, dx: vec2f, dy: vec2f) -> vec4f {
+  if (layer < -0.5) { return vec4f(1.0); }
+  return textureSampleGrad(t_paint, s_aniso, fract(uv), i32(layer + 0.5), dx, dy);
+}
 struct Paint { box: vec4f, view: vec4f };
 @group(1) @binding(2) var<uniform> PT: Paint;
 
@@ -130,6 +136,8 @@ fn quad(a: vec2f, b: vec2f, c: vec2f, d: vec2f) -> array<vec2f, 5> { return arra
 // Window openings (negative inside); matches c172::window / b747::window.
 fn window(p: vec3f) -> f32 {
   if (kind() == 1u) { return window747(p); }
+  // (The Robin's canopy is a glass piece of its own, all of it clear.)
+  if (kind() == 8u) { return -1.0; }
   // A fighter's canopy is blown glass: all of it is window.
   if (fighter()) { return -1.0; }
   // (Concorde's windscreen, side windows and visor are glass pieces of their own.)
@@ -148,6 +156,7 @@ fn window(p: vec3f) -> f32 {
 // Landing gear wells (only the skin has them); matches c172::well / b747::well.
 fn well(p: vec3f) -> f32 {
   if (kind() == 1u) { return well747(p); }
+  if (kind() == 8u) { return 1.0; }
   var d = 1.0;
   if (p.y < -0.40) {
     d = min(d, sd_poly(vec2f(p.z, p.x), quad(vec2f(-3.0, -0.135), vec2f(-1.915, -0.135), vec2f(-1.915, 0.135), vec2f(-3.0, 0.135)), 4) + 0.005);
@@ -158,7 +167,15 @@ fn well(p: vec3f) -> f32 {
   }
   return d;
 }
+// The Robin's two round cooling-air inlets in the nose bowl (dr400::INLET,
+// body frame): negative inside, where the skin is cut away to the ducts.
+fn inlet_dr400(L: vec3f) -> f32 {
+  if (L.z > -1.62) { return 1.0; }
+  return length(vec2f(abs(L.x) - 0.225, L.y + 0.19)) - 0.060;
+}
 fn cut_here(L: vec3f, pt: u32) -> bool {
+  // Nothing else is cut out of the Robin's skin: it simply stops under the canopy.
+  if (kind() == 8u) { return pt == P_COWL && inlet_dr400(L) < 0.0; }
   // The 747's wing gear passes through the lower wing skin as well.
   let wing_well = kind() == 1u && pt == P_WING && well(L) < 0.0;
   return wing_well || ((pt == P_FUSE || pt == P_COWL || pt == P_LINING) && (window(L) < 0.0 || (pt != P_LINING && well(L) < 0.0)));
@@ -490,6 +507,7 @@ fn pack(a: u32, b: u32, c: u32, d: u32, e: u32, f: u32) -> u32 {
 
 fn livery(L: vec3f, aa: f32, pt: u32) -> vec3f {
   if (kind() == 1u) { return livery747(L, aa, pt); }
+  if (kind() == 8u) { return livery_dr400(L, aa, pt); }
   var c = WHITE_PAINT;
   let ax = abs(L.x);
   let fin = ax < 0.15 && L.y > 0.33 && L.z > 2.8;
@@ -526,6 +544,55 @@ fn livery(L: vec3f, aa: f32, pt: u32) -> vec3f {
   return c;
 }
 
+// The Robin DR 400: white, a blue cheat line from the spinner to the tail
+// with a red pinstripe under it, the top of the fin blue, red wing tips and
+// spinner (a classic Robin scheme, made up; no registration).
+const ROBIN_BLUE = vec3f(0.012, 0.045, 0.20);
+const ROBIN_RED = vec3f(0.42, 0.02, 0.015);
+// Coverage of the walkway on the top of a wing root (body frame; 0 off it).
+fn walkway_dr400(Lb: vec3f, aa: f32) -> f32 {
+  let L = Lb - vec3f(0.0, 0.0, 0.55);
+  let ax = abs(L.x);
+  let xc = (L.z + 1.0) / 1.71;
+  if (ax < 0.56 || ax > 1.0 || xc < 0.05 || xc > 0.75 || L.y < -0.66 - 0.0895 * xc) { return 0.0; }
+  let e = min(min(ax - 0.585, 0.975 - ax), min(xc - 0.08, 0.72 - xc) * 1.71);
+  return smoothstep(-aa, aa, e);
+}
+fn livery_dr400(Lb: vec3f, aa: f32, pt: u32) -> vec3f {
+  // (In dr400.rs's design frame, 0.55 m ahead of the body frame.)
+  let L = Lb - vec3f(0.0, 0.0, 0.55);
+  var c = WHITE_PAINT;
+  let ax = abs(L.x);
+  // The black anti-skid walkway on top of each wing root, greyer where worn.
+  if (pt == P_WING) {
+    let wk = walkway_dr400(Lb, aa);
+    if (wk > 0.0) {
+      let worn = smoothstep(0.55, 0.85, nz(L * vec3f(9.0, 9.0, 3.0)).g) * 0.5;
+      return mix(c, mix(vec3f(0.022, 0.022, 0.024), vec3f(0.055, 0.052, 0.05), worn), wk);
+    }
+  }
+  let fin = ax < 0.12 && L.y > 0.12 && L.z > 3.1;
+  if (!fin && ax < 0.6 && L.y < 0.5 && L.y > -0.5 && L.z > -2.42 && L.z < 4.4) {
+    let zz = max(L.z - 0.9, 0.0);
+    let yc = -0.07 + zz * 0.025;
+    let taper = 1.0 - 0.5 * smoothstep(1.0, 4.3, L.z);
+    let hw = 0.045 * taper;
+    let blue = smoothstep(hw + aa, hw - aa, abs(L.y - yc));
+    let red = smoothstep(0.010 + aa, 0.010 - aa, abs(L.y - (yc - hw - 0.028)));
+    c = mix(c, ROBIN_BLUE, blue);
+    c = mix(c, ROBIN_RED, red);
+  }
+  if (fin) {
+    let edge = 0.78 - (L.z - 3.6) * 0.25;
+    c = mix(c, ROBIN_BLUE, smoothstep(edge - aa, edge + aa, L.y));
+    c = mix(c, ROBIN_RED, smoothstep(aa, -aa, abs(L.y - (edge - 0.05)) - 0.012));
+  }
+  if (ax > 4.12 && L.y > -0.2) { c = ROBIN_RED; }
+  if (ax > 1.45 && L.z > 3.4 && abs(L.y - 0.06) < 0.15) { c = ROBIN_BLUE; }
+  if (L.z < -2.41) { c = ROBIN_RED; }
+  return c;
+}
+
 // Grime, exhaust soot, oil and fuel stains, fading: everything a few hundred
 // hours of flying leaves on the paint. Returns (colour, extra roughness).
 fn weather(L: vec3f, N: vec3f, base: vec3f) -> vec4f {
@@ -534,6 +601,7 @@ fn weather(L: vec3f, N: vec3f, base: vec3f) -> vec4f {
   let belly = sat(-N.y * 1.5 + 0.2);
   c *= 1.0 - (0.03 + 0.07 * belly) * n.g;
   if (kind() == 1u) { return weather747(L, N, c, belly, n); }
+  if (kind() == 8u) { return weather_dr400(L, N, c, belly); }
   // Soot from the exhaust stack streaking back along the belly.
   let d = L.z + 2.1;
   if (d > 0.0 && L.y < -0.2) {
@@ -556,13 +624,201 @@ fn weather(L: vec3f, N: vec3f, base: vec3f) -> vec4f {
   return vec4f(c, 0.08 * belly * n.b);
 }
 
+
+// The Robin's: exhaust soot from the two stubs under the cowl streaking
+// back along the belly, an oil mist from the breather, grey grime on the
+// walkways and round the step, avgas stains under the wing fillers.
+fn weather_dr400(Lb: vec3f, N: vec3f, base: vec3f, belly: f32) -> vec4f {
+  let L = Lb - vec3f(0.0, 0.0, 0.55);
+  var c = base;
+  let ax = abs(L.x);
+  let d = L.z + 1.56;
+  if (d > -0.05 && L.y < -0.30 && L.z < 3.0 && ax < 0.62) {
+    let cx = 0.15 + min(max(d, 0.0), 1.2) * 0.07;
+    let spread = 0.035 + max(d, 0.0) * 0.06;
+    let streak = nz(vec3f(L.x * 9.0, L.y * 9.0, L.z * 0.4)).r;
+    let soot = exp(-pow((ax - cx) / spread, 2.0)) * exp(-max(d, 0.0) / 1.3) * smoothstep(-0.05, 0.03, d) * sat(belly * 1.6) * (0.5 + 0.7 * streak);
+    c = mix(c, vec3f(0.04, 0.035, 0.03), sat(soot * 1.3));
+  }
+  if (L.y < -0.5 && L.z > -1.6 && L.z < 2.5) {
+    let oil = exp(-L.x * L.x / 0.012) * exp(-(L.z + 1.6) / 1.2) * (0.4 + 0.6 * nz(vec3f(L.x * 6.0, 0.0, L.z * 0.6)).b);
+    c = mix(c, c * vec3f(0.6, 0.5, 0.34), sat(oil * 0.7));
+  }
+  // Scuffed paint where shoes go: either side of the walkway, the root fairing, the step.
+  if (L.y > -0.75 && L.y < -0.35 && ax > 0.5 && ax < 1.05 && L.z > -0.9 && L.z < 0.95) {
+    let scuff = smoothstep(0.55, 0.9, nz(L * vec3f(5.0, 5.0, 2.0)).g) * sat(N.y * 2.0);
+    c = mix(c, c * vec3f(0.78, 0.76, 0.72), scuff * 0.6);
+  }
+  // Avgas round the wing tank fillers (a faint blue tide mark).
+  let fl = length(vec2f(ax - 1.2, L.z + 0.49));
+  if (fl < 0.35 && L.y > -0.6) {
+    let f = exp(-fl / 0.08) * (0.4 + 0.6 * nz(vec3f(L.x * 14.0, 0.0, L.z * 14.0)).r) * smoothstep(0.04, 0.05, fl);
+    c = mix(c, c * vec3f(0.74, 0.84, 1.0), sat(f * 1.5));
+  }
+  return vec4f(c, 0.08 * belly);
+}
+
 // ---------------------------------------------------------------- surface relief
 
 fn chord_at(s: f32) -> f32 { return select(1.65 - 0.5 * (s - 2.55) / 2.95, 1.65, s <= 2.55); }
 
+
+// ---------------------------------------------------------------- the Robin's skin
+// Wood under doped fabric: plywood ahead of the spars, bare fabric shrunk
+// over the ribs behind them, every rib under a pinked tape; a glass-fibre
+// cowling in pieces held by fasteners. (dr400.rs's design frame is 0.55 m
+// ahead of the body frame L is in; uv is in the design frame.)
+
+// A pinked fabric tape `hw` wide centred on d (m), its edges zigzag cut.
+fn tape(d: f32, along: f32, hw: f32, px: f32) -> f32 {
+  let zig = abs(fract(along / 0.007) - 0.5) * 0.0024;
+  let e = hw + zig;
+  let a = max(px, 0.0006);
+  return smoothstep(e + a, e - a, abs(d));
+}
+// Fabric over ribs `pitch` apart from s0 along s, spanning chord distance x
+// (m) from x0 to x1 (sagging between them most halfway), rib tapes on top.
+fn fabric(s: f32, x: f32, s0: f32, pitch: f32, x0: f32, x1: f32, px: f32) -> vec2f {
+  if (x < x0 - 0.02 || x > x1 + 0.02) { return vec2f(0.0); }
+  let d = (fract((s - s0) / pitch + 0.5) - 0.5) * pitch;
+  let f = sat((x - x0) / max(x1 - x0, 1e-3));
+  let env = sin(f * 3.14159);
+  let fade = 1.0 - smoothstep(0.004, 0.02, px);
+  var h = -0.0028 * env * (0.5 - 0.5 * cos(6.2831853 * (d / pitch))) * fade;
+  // (The tape: raised, with the rib stitching under it in a row of small bumps.)
+  let t = tape(d, x, 0.016, px) * step(x0, x);
+  let stitch = line(fract(x / 0.065) - 0.5, 0.06) * line(d, 0.004) * (1.0 - smoothstep(0.0005, 0.002, px));
+  h += 0.0005 * t + 0.0003 * stitch;
+  let dirt = 0.45 * line(abs(d) - 0.017, max(px, 0.0012)) * step(x0, x) + 0.25 * stitch;
+  return vec2f(h, dirt * fade);
+}
+fn relief_dr400(pt: u32, uv: vec2f, L: vec3f, px: f32) -> vec3f {
+  var h = 0.0;
+  var dirt = 0.0;
+  let gw = max(0.0007, px * 0.9);
+  let ga = 0.00045 * min(1.0, 0.0012 / gw);
+  // Dope and paint over fabric: a faint weave, and the slight waviness of
+  // a hand-finished wooden airframe.
+  let weave = (1.0 - smoothstep(0.0003, 0.0012, px)) * 0.00004 * (sin(uv.x * 9000.0) + sin(uv.y * 9000.0));
+  h += 0.00035 * (nz(L * 1.7).r - 0.5) + weave;
+  switch pt {
+    case 2u: { // wing
+      let s = abs(uv.x);
+      let x = abs(uv.y);
+      let c = select(1.71 - 0.56 * (s - 1.95) / 2.49, 1.71, s < 1.95);
+      let xc = x / c;
+      if (s > 0.56 && s < 4.3) {
+        let f = fabric(s, x, 0.45, 0.29, 0.30 * c, 0.985 * c, px);
+        h += f.x;
+        dirt += f.y;
+      }
+      // The spar cap tape along the edge of the plywood, the trailing edge tape.
+      h += 0.0003 * tape(xc - 0.30, s, 0.022 / c, px / c) + 0.0003 * tape(xc - 0.985, s, 0.025 / c, px / c);
+      // The joint between the centre section and the outer panel (under its strip).
+      let dk = s - 1.95;
+      h -= ga * line(abs(dk) - 0.006, gw);
+      dirt += line(abs(dk) - 0.006, gw * 2.0);
+      // Black anti-skid walkway on the root of the centre section.
+      if (uv.y > 0.0 && s > 0.58 && s < 0.98 && xc > 0.08 && xc < 0.72) {
+        h += 0.0005 * nz(L * 180.0).r * (1.0 - smoothstep(0.0003, 0.0012, px));
+      }
+      // Access panel round the wing tank's gauge and the aileron cable pulleys.
+      if (uv.y < 0.0) {
+        for (var i = 0; i < 2; i++) {
+          let q = vec2f(s - select(1.35, 2.85, i == 1), x - 0.62);
+          let b = abs(q) - vec2f(0.09, 0.07);
+          let od = length(max(b, vec2f(0.0))) + min(max(b.x, b.y), 0.0) - 0.015;
+          h -= ga * 1.2 * line(od, gw);
+          dirt += line(od, gw * 2.0);
+        }
+      }
+    }
+    case 3u: { // control surfaces: fabric over ribs
+      let s = abs(uv.x);
+      let x = abs(uv.y);
+      let f = fabric(s, x, 0.0, 0.16, -10.0, 12.0, px);
+      h += f.x * 0.6;
+      dirt += f.y;
+    }
+    case 5u: { // fin: plywood ahead of its spar, fabric behind
+      let s = uv.x;
+      let x = abs(uv.y);
+      let f = fabric(s, x, 0.05, 0.2, 0.3, 1.2, px);
+      h += f.x * 0.8;
+      dirt += f.y;
+    }
+    case 1u: { // fuselage: plywood under fabric
+      let z = uv.x;
+      // Inspection hatches on the tail cone, the access panel under the belly.
+      let ax = abs(L.x);
+      if (z > 2.2 && z < 3.2 && ax > 0.1) {
+        let d = length(vec2f(z - 2.65, L.y + 0.12)) - 0.055;
+        h -= ga * 1.5 * line(d, gw);
+        dirt += line(d, gw * 2.5);
+      }
+      if (L.y < -0.6 && z > -0.3 && z < 0.4) {
+        let q = vec2f(z - 0.05, L.x);
+        let b = abs(q) - vec2f(0.20, 0.14);
+        let od = length(max(b, vec2f(0.0))) + min(max(b.x, b.y), 0.0) - 0.02;
+        h -= ga * 1.4 * line(od, gw);
+        dirt += line(od, gw * 2.5);
+      }
+      // The static port, both sides of the tail cone.
+      if (z > 1.5 && z < 1.7) {
+        let d = length(vec2f(z - 1.6, L.y + 0.05)) ;
+        h -= 0.0008 * smoothstep(0.004 + px, 0.004 - px, d);
+        dirt += smoothstep(0.012, 0.004, d) * 0.6;
+      }
+    }
+    case 4u: { // cowling (and the gear fairings, glass fibre too)
+      let z = L.z - 0.55;
+      if (L.y > -0.72 && z < -1.45) {
+        // The split between the upper and lower halves, the nose bowl, the firewall edge.
+        var lines = array<f32, 3>(select(1.0, L.y + 0.12, abs(L.x) > 0.15), z + 2.22, z + 1.52);
+        for (var i = 0; i < 3; i++) {
+          h -= ga * 1.5 * line(lines[i], gw);
+          dirt += line(lines[i], gw * 2.5);
+        }
+        // The oil door on top.
+        if (L.y > 0.05) {
+          let q = vec2f(z + 1.86, L.x);
+          let b = abs(q) - vec2f(0.10, 0.075);
+          let od = length(max(b, vec2f(0.0))) + min(max(b.x, b.y), 0.0) - 0.02;
+          h -= ga * 1.5 * line(od, gw);
+          dirt += line(od, gw * 2.0);
+        }
+      } else if (L.y < -0.72) {
+        // A wheel fairing's halves join down its middle, a mud scraper cut-out underneath.
+        let cx = select(1.30, 0.0, abs(L.x) < 0.6);
+        let d = abs(L.x) - cx;
+        h -= ga * 1.3 * line(d, gw);
+        dirt += line(d, gw * 2.5);
+      }
+    }
+    case 6u: { // tyre tread: circumferential grooves
+      var c = vec3f(sign(L.x) * 1.30, -1.01, 0.15);
+      var r = 0.19;
+      var g = vec2f(0.020, 0.044);
+      if (abs(L.x) < 0.6) { c = vec3f(0.0, -1.035, -1.43); r = 0.165; g = vec2f(0.016, 0.036); }
+      let ax = abs(L.x - c.x);
+      let rad = length(L.yz - c.yz);
+      if (rad > r * 0.9) {
+        let gd = min(abs(ax - g.x), abs(ax - g.y));
+        h -= 0.002 * line(gd, max(0.003, px));
+        dirt += line(gd, max(0.004, px));
+      }
+    }
+    default: {}
+  }
+  return vec3f(h, sat(dirt) * min(1.0, 0.0022 / gw), 0.0);
+}
+
 // Height (m), seam dirt, rivet coverage, for the surface pattern.
 fn relief(pt: u32, uv: vec2f, L: vec3f, Nl: vec3f, px: f32) -> vec3f {
   if (kind() == 1u) { return relief747(pt, uv, L, Nl, px); }
+  // The Robin is wood and fabric: no rivets, no laps (its cabin keeps its
+  // upholstery, carpet, crinkle paint and knurling).
+  if (kind() == 8u && pt <= 6u) { return relief_dr400(pt, uv, L, px); }
   var h = 0.0;
   var dirt = 0.0;
   var rv = 0.0;
@@ -664,12 +920,21 @@ fn relief(pt: u32, uv: vec2f, L: vec3f, Nl: vec3f, px: f32) -> vec3f {
       }
     }
     case 7u: { // cabin lining: door gaps, headliner seams, grain
-      if (abs(L.x) > 0.35) {
+      if (kind() == 8u) {
+        // The Robin's vinyl side panels: a stitched seam under the sill and a coarser grain.
+        let d = L.y + 0.035;
+        h -= 0.0012 * line(d, max(0.0018, px));
+        let st = step(0.5, fract(L.z / 0.006)) * line(abs(d) - 0.006, max(0.0006, px));
+        h -= 0.0002 * st;
+        dirt += 0.6 * line(d, max(0.004, px * 2.0)) + 0.3 * st;
+        h += 0.00025 * nz(L * 70.0).r * (1.0 - smoothstep(0.0004, 0.0016, px));
+      }
+      if (kind() != 8u && abs(L.x) > 0.35) {
         let dd = door(L);
         h -= 0.0015 * line(dd, max(0.0015, px));
         dirt += line(dd, max(0.003, px * 2.0));
       }
-      if (L.y > 0.46) {
+      if (kind() != 8u && L.y > 0.46) {
         let d = (fract((L.z + 0.6) / 0.42) - 0.5) * 0.42;
         h -= 0.001 * line(d, max(0.004, px));
         dirt += 0.5 * line(d, 0.006);
@@ -1033,17 +1298,48 @@ fn gauge(id: u32, uv: vec2f, px: f32) -> vec4f {
       }
       hub = false;
     }
-    case 15u: { // VOR / CDI with the OBS card and a NAV flag
+    case 15u: { // VOR / ILS course deviation indicator, on NAV 1 (G.nav, main.rs `nav_globals`)
+      let nv = G.nav;
+      let flags = u32(nv.w + 0.5);
+      let live = (flags & 1u) != 0u;
+      // The OBS card turns under the index at the top: ticks every 5°, figures every 30°.
+      let obs = rad(nv.z);
       a0 = 0.0; a1 = rad(360.0); tn = 72.0; tper = 2.0;
+      q = rot2(uv, -obs);
       if (r < 0.8) { tn = 0.0; }
-      let dev = sin(G.time.x * 0.07) * 0.25;
-      ndl = (1.0 - smoothstep(0.0, px, abs(uv.x - dev) - 0.018)) * step(abs(uv.y), 0.6);
-      let k = clamp(round(uv.x / 0.13), -4.0, 4.0);
-      ink = (1.0 - smoothstep(0.022, 0.022 + px, length(uv - vec2f(k * 0.13, 0.0)))) * step(0.5, abs(k));
-      let flag = step(abs(uv.x - 0.35), 0.1) * step(abs(uv.y - 0.35), 0.06);
-      col = vec3f(0.6, 0.02, 0.01) * flag;
-      cov = flag;
-      tc = vec2f(0.0, 0.66); tcode = pack(0u, 9u, 0u, 0u, 0u, 0u); tlen = 3u; th = 0.15;
+      let k = round((ang_of(uv) + obs) / rad(30.0));
+      let a = k * rad(30.0) - obs;
+      tp = rot2(uv - vec2f(sin(a), cos(a)) * 0.68, a);
+      tc = vec2f(0.0);
+      let cc = card_code(i32(k));
+      tcode = cc.x; tlen = cc.y; th = 0.13;
+      if (r < 0.6) { tlen = 0u; }
+      let index = step(abs(uv.x), (0.99 - uv.y) * 0.35) * step(0.88, uv.y);
+      // Five dots each side of centre for the course, and for the glide slope on the right.
+      let kx = clamp(round(uv.x / 0.1), -5.0, 5.0);
+      var dots = (1.0 - smoothstep(0.016, 0.016 + px, length(uv - vec2f(kx * 0.1, 0.0)))) * step(0.5, abs(kx));
+      let gsl = (flags & 8u) != 0u;
+      let ky = clamp(round(uv.y / 0.1), -5.0, 5.0);
+      dots = max(dots, (1.0 - smoothstep(0.013, 0.013 + px, length(uv - vec2f(0.6, ky * 0.1)))) * step(0.5, abs(ky)));
+      ink = max(ink, dots);
+      // The course needle hangs from the top; full scale at the fifth dot.
+      let dev = select(0.0, clamp(nv.x, -1.0, 1.0) * 0.5, live);
+      ndl = (1.0 - smoothstep(0.0, px, abs(uv.x - dev) - 0.016)) * step(abs(uv.y), 0.62);
+      // The glide slope needle, across, while it is alive (stowed below otherwise).
+      let gy = select(-0.66, clamp(nv.y, -1.0, 1.0) * 0.5, gsl);
+      ndl = max(ndl, (1.0 - smoothstep(0.0, px, abs(uv.y - gy) - 0.014)) * step(abs(uv.x), 0.5));
+      // TO / FROM: a white triangle pointing up or down beside the centre.
+      let tri_up = step(abs(uv.x + 0.3), (0.32 - uv.y) * 0.6) * step(0.2, uv.y);
+      let tri_dn = step(abs(uv.x + 0.3), (uv.y + 0.32) * 0.6) * step(uv.y, -0.2);
+      var tf = 0.0;
+      if ((flags & 2u) != 0u) { tf = tri_up; }
+      if ((flags & 4u) != 0u) { tf = tri_dn; }
+      // The red NAV flag while the receiver hears nothing usable; the GS flag the same.
+      let flag = step(abs(uv.x - 0.3), 0.12) * step(abs(uv.y - 0.32), 0.06) * select(1.0, 0.0, live);
+      let gflag = step(abs(uv.x - 0.6), 0.06) * step(abs(uv.y - 0.6), 0.1) * select(1.0, 0.0, gsl);
+      col = vec3f(0.75, 0.35, 0.02) * index + vec3f(0.7) * tf + vec3f(0.6, 0.02, 0.01) * max(flag, gflag);
+      cov = max(max(index, tf), max(flag, gflag));
+      hub = false;
     }
     case 17u: { // magnetic compass: a card seen edge-on through a window
       let hdg = O.params[5].x % 1000.0;
@@ -1442,7 +1738,9 @@ fn surface(in: VOut) -> Shaded {
   let dPx = dpdx(in.P);
   let dPy = dpdy(in.P);
   let px = max(length(dPx), length(dPy));
-  let duv = max(length(dpdx(in.uv)), length(dpdy(in.uv)));
+  let duvx = dpdx(in.uv);
+  let duvy = dpdy(in.uv);
+  let duv = max(length(duvx), length(duvy));
   let dLx = dpdx(in.L);
   let dLy = dpdy(in.L);
   var rel = relief(pt, in.uv, in.L, in.Nl, px);
@@ -1455,10 +1753,10 @@ fn surface(in: VOut) -> Shaded {
   }
   let hx = dpdx(rel.x);
   let hy = dpdy(rel.x);
-  let cuts = pt == P_FUSE || pt == P_COWL || pt == P_LINING;
+  let cuts = ((pt == P_FUSE || pt == P_COWL || pt == P_LINING) && kind() != 8u) || (pt == P_COWL && kind() == 8u);
   var wd = 1.0;
   var wl = 1.0;
-  if (cuts) { wd = window(in.L); }
+  if (cuts) { wd = select(window(in.L), inlet_dr400(in.L), kind() == 8u); }
   // The 747's lining is cut back round its windows by the width of the trim (b747::deck::lining_window).
   if (kind() == 1u && pt == P_LINING) {
     // Measured on the skin straight outside (radially from 0.3 m up), less the trim.
@@ -1470,7 +1768,10 @@ fn surface(in: VOut) -> Shaded {
   // belly that stretches distances along the skin, so measure the edge there.
   let wl_s = wl * px / max(length(vec2f(dpdx(wl), dpdy(wl))), 1e-7);
   let td = tear_d(in.L);
-  let kill = (cuts && (wd < 0.0 || wl < 0.0)) || id == M_GLASS || id == M_PROPDISC || id == M_PLUME || td > 0.0;
+  // A downloaded aircraft's own texture (fgmodel.rs), its see-through parts cut out.
+  var tex = vec4f(1.0);
+  if (id == M_TEX) { tex = tex_at(in.uv, in.mat.w, duvx, duvy); }
+  let kill = (cuts && (wd < 0.0 || wl < 0.0)) || id == M_GLASS || id == M_PROPDISC || id == M_PLUME || td > 0.0 || tex.a < 0.5;
 
   var n0 = in.N;
   if (dot(n0, n0) < 1e-10) { n0 = -in.P; }
@@ -1540,6 +1841,11 @@ fn surface(in: VOut) -> Shaded {
         rough = mix(rough, 0.4, sc);
         albedo = mix(albedo, albedo * 0.6, smoothstep(0.62, 0.85, nz(L * 9.0).g) * 0.4);
       }
+      if (kind() == 8u && pt == P_WING) {
+        let wk = walkway_dr400(L, px);
+        rough = mix(rough, 0.85, wk);
+        spec_k = mix(spec_k, 0.5, wk);
+      }
       if (pt == P_NONSLIP) {
         rough = 0.92;
         spec_k = 0.4;
@@ -1585,7 +1891,7 @@ fn surface(in: VOut) -> Shaded {
       }
       // Window sealant and the edges of the gear wells.
       if (pt == P_FUSE || pt == P_COWL) {
-        let gk = smoothstep(0.016 + px, 0.016 - px, wd) * step(-0.001, wd);
+        let gk = smoothstep(0.016 + px, 0.016 - px, wd) * step(-0.001, wd) * select(1.0, 0.0, kind() == 8u);
         let we = smoothstep(0.004 + px, 0.004 - px, wl_s) * step(-0.001, wl);
         albedo = mix(albedo, vec3f(0.012), max(gk, we * 0.6));
         rough = mix(rough, 0.6, gk);
@@ -1871,6 +2177,15 @@ fn surface(in: VOut) -> Shaded {
       emit = display(did, in.uv, max(duv * 0.012, 0.00015)) * G.sun_dir.w * mix(0.09, 0.012, night);
       }
     }
+    case 18u: { // a downloaded aircraft's surface: its texture times its material colour
+      albedo = tex.rgb * in.col.rgb;
+      ao = 1.0;
+      let r = in.mat.z;
+      let glow = r >= 1.5;
+      rough = clamp(select(r, r - 2.0, glow), 0.08, 1.0);
+      if (glow) { emit = albedo * G.sun_dir.w * mix(0.02, 0.004, 1.0 - night); }
+      ssr = select(0.0, 0.25, rough < 0.3);
+    }
     default: {}
   }
 
@@ -1951,7 +2266,10 @@ fn surface(in: VOut) -> Shaded {
   if (kind() == 3u) { inside = step(abs(L.x), F4_TUB.x) * step(F4_TUB.z, L.z) * step(L.z, F4_TUB.w) * step(F4_TUB.y, L.y) * select(0.0, 1.0, pt != P_HORNET); }
   if (kind() == 4u) { inside = step(abs(L.x), F22_TUB.x) * step(F22_TUB.z, L.z) * step(L.z, F22_TUB.w) * step(F22_TUB.y, L.y) * select(0.0, 1.0, pt != P_HORNET); }
   if (kind() == 6u) { inside = step(abs(L.x), CONCORDE_TUB.x) * step(CONCORDE_TUB.z, L.z) * step(L.z, CONCORDE_TUB.w) * step(CONCORDE_TUB.y, L.y) * select(0.0, 1.0, pt != P_HORNET); }
+  if (kind() == 8u) { inside = step(abs(L.x), 0.56) * step(-0.62, L.z) * step(L.z, 1.66) * step(L.y, 0.62) * select(0.0, 1.0, id != M_LIVERY && pt != P_FUSE && pt != P_COWL); }
   if (kind() == 7u) { inside = step(abs(L.x), SR71_TUB.x) * step(SR71_TUB.z, L.z) * step(L.z, SR71_TUB.w) * step(SR71_TUB.y, L.y) * select(0.0, 1.0, pt != P_HORNET); }
+  // (a downloaded aircraft has no cabin of ours where its own model is)
+  if (id == M_TEX) { inside = 0.0; }
   // (The baked occlusion already counts only the sky seen through the
   // windows; the eye adapts to the dimmer cabin, main.rs / cockpit.rs.)
   let amb_ao = mix(ao * ao * (3.0 - 2.0 * ao), 0.06 + 0.94 * ao, inside);
@@ -2017,10 +2335,34 @@ fn cabin_mirror(p0: vec3f, r: vec3f, l: Light, ls: vec3f) -> vec3f {
 }
 const GS_Z = -1.30; // cabin::PANEL_Z
 
+// A downloaded aircraft's see-through surfaces (windows, propeller discs):
+// its texture's alpha times its material's, lit, with the sky mirrored on top.
+fn tex_glass(in: VOut) -> vec4f {
+  let t = tex_at(in.uv, in.mat.w, dpdx(in.uv), dpdy(in.uv));
+  let V = normalize(in.P);
+  var N = normalize(in.N);
+  if (dot(N, V) > 0.0) { N = -N; }
+  let l = light_at(in.P);
+  let sh = shadow_at(in.P, N);
+  let Ls = G.sun_dir.xyz;
+  let a = sat(t.a * in.col.a);
+  let base = t.rgb * in.col.rgb;
+  let lit = base * (l.sun * max(dot(N, Ls), 0.0) * sh / PI + l.amb * (0.55 + 0.45 * dot(N, l.upn)));
+  let ndv = max(dot(N, -V), 0.0);
+  let F = 0.04 + 0.96 * pow(1.0 - ndv, 5.0);
+  let R = reflect(V, N);
+  // (a window, whose material is see-through, reflects; a texture's cut-outs, like a propeller's blur, don't)
+  let k = select(0.0, F * (1.0 - a * 0.8), in.col.a < 0.99);
+  let H = normalize(Ls - V);
+  let glint = l.sun * ggx(max(dot(N, H), 0.0), 0.004) * vis(ndv, max(dot(N, Ls), 0.0), 0.004) * F * max(dot(N, Ls), 0.0) * sh;
+  return vec4f(lit * a + env_reflect(in.P, R, l.upn, false) * k + glint * k, sat(a + k));
+}
+
 @fragment fn fs_glass(in: VOut) -> @location(0) vec4f {
   let px = max(length(dpdx(in.P)), length(dpdy(in.P)));
   let id = u32(in.mat.x + 0.5);
   if (id == M_PLUME) { return plume(in); }
+  if (id == M_TEX) { return tex_glass(in); }
   let V = normalize(in.P);
   var N = normalize(in.N);
   let from_inside = dot(N, V) > 0.0;
@@ -2066,6 +2408,7 @@ const GS_Z = -1.30; // cabin::PANEL_Z
   if (kind() == 3u) { in_cabin = from_inside && abs(eye_l.x) < F4_CABIN[0] && eye_l.y > F4_CABIN[1] && eye_l.y < F4_CABIN[2] && eye_l.z > F4_CABIN[3] && eye_l.z < F4_CABIN[4]; }
   if (kind() == 4u) { in_cabin = from_inside && abs(eye_l.x) < F22_CABIN[0] && eye_l.y > F22_CABIN[1] && eye_l.y < F22_CABIN[2] && eye_l.z > F22_CABIN[3] && eye_l.z < F22_CABIN[4]; }
   if (kind() == 6u) { in_cabin = from_inside && abs(eye_l.x) < CONCORDE_CABIN[0] && eye_l.y > CONCORDE_CABIN[1] && eye_l.y < CONCORDE_CABIN[2] && eye_l.z > CONCORDE_CABIN[3] && eye_l.z < CONCORDE_CABIN[4]; }
+  if (kind() == 8u) { in_cabin = from_inside && abs(eye_l.x) < 0.56 && eye_l.y > -0.52 && eye_l.y < 0.62 && eye_l.z > -0.62 && eye_l.z < 1.66; }
   if (kind() == 7u) { in_cabin = from_inside && abs(eye_l.x) < SR71_CABIN[0] && eye_l.y > SR71_CABIN[1] && eye_l.y < SR71_CABIN[2] && eye_l.z > SR71_CABIN[3] && eye_l.z < SR71_CABIN[4]; }
   let wind = abs(in.Nl.x) < 0.5;
   let tb = select(vec3f(0.0, 0.0, 1.0), vec3f(1.0, 0.0, 0.0), wind);

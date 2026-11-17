@@ -809,22 +809,26 @@ def wings():
             g.finish(side + " " + name, pivot=M(p0, s), axis=pair_axis((p1 - p0).normalized(), s))
 
         # Wingtip launch rail with a Sidewinder on it: a slab with chamfered ends,
-        # the shoe the missile hangs from under it.
+        # the shoe the missile hangs from under it. The missile is a piece of its
+        # own, so the game can hide it once it has been fired; its pivot is its
+        # middle, where the game launches it from.
         g = Geo()
         rings = []
         for y, hw, top, bot in ((-0.95, 0.012, -0.12, -0.13), (-1.15, 0.045, -0.10, -0.19), (-1.30, 0.048, -0.10, -0.20), (-2.80, 0.048, -0.10, -0.20), (-2.95, 0.04, -0.11, -0.17)):
             rings.append([V((5.80 * s - hw, y, top)), V((5.80 * s + hw, y, top)), V((5.80 * s + hw, y, bot)), V((5.80 * s - hw, y, bot))])
         g.loft(rings, "skin")
         g.box(V((5.86 * s, -2.05, -0.20)), (0.022, 0.70, 0.012), "steel")
+        g.finish(side + " tip rail", smooth=30)
+        sw = Geo()
         c = V((5.90 * s, -2.75, -0.20))
-        lathe(g, c, V((0, 1, 0)), [(0.0, 0.0), (0.0635, 0.0), (0.0635, 2.62)], "missile", n=16)
-        lathe(g, c, V((0, 1, 0)), [(0.0635, 2.62), (0.058, 2.72), (0.040, 2.80), (0.0, 2.86)], "seeker", n=16)
+        lathe(sw, c, V((0, 1, 0)), [(0.0, 0.0), (0.0635, 0.0), (0.0635, 2.62)], "missile", n=16)
+        lathe(sw, c, V((0, 1, 0)), [(0.0635, 2.62), (0.058, 2.72), (0.040, 2.80), (0.0, 2.86)], "seeker", n=16)
         for k in range(4):
             a = math.radians(45 + 90 * k)
             d = V((math.cos(a), 0, math.sin(a)))
             for yc, span, chord in ((-2.55, 0.20, 0.30), (-0.05, 0.15, 0.20)):
-                g.box(c + V((0, yc + 2.75, 0)) + d * (0.0635 + span / 2), (span / 2, chord / 2, 0.006), "missile", (d, V((0, 1, 0)), d.cross(V((0, 1, 0)))))
-        g.finish(side + " tip rail", smooth=30)
+                sw.box(c + V((0, yc + 2.75, 0)) + d * (0.0635 + span / 2), (span / 2, chord / 2, 0.006), "missile", (d, V((0, 1, 0)), d.cross(V((0, 1, 0)))))
+        sw.finish(side + " sidewinder", smooth=30, pivot=c + V((0, 1.43, 0)))
 
         g = Geo()
         g.box(V((5.70 * s, -1.38, -0.125)), (0.035, 0.05, 0.022), "nav_green" if s > 0 else "nav_red")
@@ -1180,7 +1184,7 @@ def check_gear():
 # ---------------------------------------------------------------- export
 # Every piece the game looks for (PIECES in src/aircraft/fa18/mod.rs); other objects are ignored.
 EXPECTED = ["radome", "nose section", "fuselage", "tail cone", "spine", "canopy", "canopy frame", "speedbrake", "tail light", "nose leg", "nose fork", "nose wheel", "afterburner"] + [
-    f"{s} {n}" for s in ("left", "right") for n in ("intake", "lex", "nozzle", "wing", "le flap", "flap", "aileron", "tip rail", "nav light", "stabilator", "fin", "rudder", "main leg", "main strut", "main wheel", "nose door", "strut door", "main door")]
+    f"{s} {n}" for s in ("left", "right") for n in ("intake", "lex", "nozzle", "wing", "le flap", "flap", "aileron", "tip rail", "sidewinder", "nav light", "stabilator", "fin", "rudder", "main leg", "main strut", "main wheel", "nose door", "strut door", "main door")]
 
 
 def game_mat(m):
@@ -1295,7 +1299,7 @@ def render_guides(outdir):
     sc.world = world
     sh = sc.display.shading
     # Gear up and nothing on the rails: only what the paint goes on.
-    hidden = [o for o in COLL.all_objects if any(k in o.name for k in ("leg", "strut", "wheel", "fork", "door", "tip rail", "afterburner"))]
+    hidden = [o for o in COLL.all_objects if any(k in o.name for k in ("leg", "strut", "wheel", "fork", "door", "tip rail", "sidewinder", "afterburner"))]
     for o in hidden:
         o.hide_render = True
     cam, cam_data = camera()

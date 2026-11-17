@@ -17,6 +17,13 @@ pub struct Settings {
     pub look_sens: f64,
     pub show_hud: bool,
     pub taa: bool,
+    pub minimap: bool,
+    pub landing_guidance: bool,
+    pub minimap_plan: bool,
+    pub minimap_heading_up: bool,
+    pub minimap_zoom: u8,
+    pub minimap_size: f32,
+    pub minimap_height: f32,
     /// real air traffic (see live.rs)
     pub live_traffic: bool,
     /// real weather (see livewx.rs)
@@ -27,19 +34,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self {
-            lang: None,
-            sound_on: true,
-            volume: 1.0,
-            cam_mode: 0,
-            cockpit_fov: crate::cockpit::FOV,
-            look_sens: 1.0,
-            show_hud: true,
-            taa: true,
-            live_traffic: true,
-            live_weather: true,
-            real_time: true,
-        }
+        Self { lang: None, sound_on: true, volume: 1.0, cam_mode: 0, cockpit_fov: crate::cockpit::FOV, look_sens: 1.0, show_hud: true, minimap: true, landing_guidance: true, minimap_plan: false, minimap_heading_up: false, minimap_zoom: 12, minimap_size: 280.0, minimap_height: 280.0, taa: true, live_traffic: true, live_weather: true, real_time: true }
     }
 }
 
@@ -76,6 +71,13 @@ impl Settings {
             look_sens: f("mouse_look_speed", d.look_sens).clamp(0.25, 3.0),
             show_hud: b("hud", d.show_hud),
             taa: b("taa", d.taa),
+            minimap: b("minimap", d.minimap),
+            landing_guidance: b("landing_guidance", d.landing_guidance),
+            minimap_plan: b("minimap_plan", d.minimap_plan),
+            minimap_heading_up: b("minimap_heading_up", d.minimap_heading_up),
+            minimap_size: f("minimap_size", d.minimap_size as f64).clamp(240.0, 640.0) as f32,
+            minimap_height: f("minimap_height", f("minimap_size", d.minimap_size as f64)).clamp(240.0, 640.0) as f32,
+            minimap_zoom: f("minimap_zoom", d.minimap_zoom as f64).clamp(3.0, 17.0) as u8,
             live_traffic: b("live_traffic", d.live_traffic),
             live_weather: b("live_weather", d.live_weather),
             real_time: b("real_time", d.real_time),
@@ -92,6 +94,13 @@ impl Settings {
             "mouse_look_speed": self.look_sens,
             "hud": self.show_hud,
             "taa": self.taa,
+            "minimap": self.minimap,
+            "landing_guidance": self.landing_guidance,
+            "minimap_plan": self.minimap_plan,
+            "minimap_heading_up": self.minimap_heading_up,
+            "minimap_zoom": self.minimap_zoom,
+            "minimap_size": self.minimap_size,
+            "minimap_height": self.minimap_height,
             "live_traffic": self.live_traffic,
             "live_weather": self.live_weather,
             "real_time": self.real_time,
@@ -118,23 +127,18 @@ mod tests {
 
     #[test]
     fn round_trip() {
-        let s = Settings {
-            lang: Some(Lang::Fr),
-            sound_on: false,
-            volume: 0.4,
-            cam_mode: 1,
-            cockpit_fov: 50.0,
-            look_sens: 1.5,
-            show_hud: false,
-            taa: false,
-            live_traffic: false,
-            live_weather: false,
-            real_time: false,
-        };
+        let s = Settings { lang: Some(Lang::Fr), sound_on: false, volume: 0.4, cam_mode: 1, cockpit_fov: 50.0, look_sens: 1.5, show_hud: false, minimap: false, landing_guidance: false, minimap_plan: true, minimap_heading_up: true, minimap_zoom: 15, minimap_size: 420.0, minimap_height: 300.0, taa: false, live_traffic: false, live_weather: false, real_time: false };
         assert_eq!(Settings::from_json(&s.to_json()), s);
+        let legacy = Settings::from_json(&serde_json::json!({"minimap_size": 420}));
+        assert_eq!((legacy.minimap_size, legacy.minimap_height), (420.0, 420.0));
         // Missing or odd values fall back to the defaults.
         let j = serde_json::json!({ "volume": 7.0, "language": "xx" });
         let t = Settings::from_json(&j);
         assert_eq!((t.volume, t.lang, t.taa), (1.0, None, true));
+        assert_eq!((t.minimap, t.minimap_heading_up, t.minimap_zoom), (true, false, 12));
+        assert_eq!(Settings::from_json(&serde_json::json!({"minimap_size": 9999})).minimap_size, 640.0);
+        assert_eq!(Settings::from_json(&serde_json::json!({"minimap_size": -5})).minimap_size, 240.0);
+        assert_eq!(Settings::from_json(&serde_json::json!({"minimap_zoom": 999})).minimap_zoom, 17);
+        assert_eq!(Settings::from_json(&serde_json::json!({"minimap_zoom": -5})).minimap_zoom, 3);
     }
 }

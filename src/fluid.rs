@@ -1099,10 +1099,10 @@ impl FluidGpu {
 impl FluidGpu {
     /// Before the device goes: let pending maps finish and unmap them.
     pub fn shutdown(&mut self, d: &wgpu::Device) {
-        let _ = d.poll(wgpu::PollType::Wait {
-            submission_index: None,
-            timeout: None,
-        });
+        // Bounded: if the GPU has hung (it can when the compositor closes the
+        // window under us), an unbounded wait lasts until the driver resets
+        // the context, and wgpu then panics on the lost device.
+        let _ = d.poll(wgpu::PollType::Wait { submission_index: None, timeout: Some(std::time::Duration::from_secs(1)) });
         for r in &self.readback {
             if r.state.load(Ordering::Acquire) == 2 {
                 r.buf.unmap();

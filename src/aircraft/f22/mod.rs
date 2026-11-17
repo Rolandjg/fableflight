@@ -350,6 +350,8 @@ pub static SPEC: Spec = Spec {
     name: "F-22A Raptor",
     keys: &["f22", "f-22", "f22a", "f-22a", "raptor"],
     blurb: "Twin-engine stealth fighter, 25 t. Fly-by-wire holds it to 9 g; supersonic without afterburner up high. Space for afterburner, / to brake. 145 kt approach.",
+    origin: None,
+    ext: None,
     still: include_bytes!("../../../assets/aircraft/f22.png"),
     paint: Some(Paint {
         jpg: include_bytes!("../../../assets/f22_paint.jpg"),

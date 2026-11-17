@@ -2635,6 +2635,8 @@ pub static SPEC: Spec = Spec {
     name: "Boeing 747-400",
     keys: &["747", "b747", "747-400", "jumbo"],
     blurb: "Four-engine wide-body airliner, 290 t. Heavy and slow to answer the controls; Mach 0.85 cruise, 150 kt approach. / speedbrake, Z reversers.",
+    origin: None,
+    ext: None,
     still: include_bytes!("../../../assets/aircraft/747.png"),
     paint: None,
     build,
