@@ -238,11 +238,12 @@ impl Menu {
     }
 
     /// The point on the globe under a screen position, if any.
-    pub fn pick_at(&self, x: f64, y: f64, w: f64, h: f64, fov: f64) -> Option<(f64, f64)> {
+    /// (`cx`: where the middle of the view is across the window, 0..1.)
+    pub fn pick_at(&self, x: f64, y: f64, w: f64, h: f64, fov: f64, cx: f64) -> Option<(f64, f64)> {
         let (cam, dir, up) = self.camera();
         let right = dir.cross(up);
         let t = (fov * 0.5).tan();
-        let d = (dir + right * ((x / w * 2.0 - 1.0) * t * w / h) + up * ((1.0 - y / h * 2.0) * t)).normalize();
+        let d = (dir + right * ((x / w - cx) * 2.0 * t * w / h) + up * ((1.0 - y / h * 2.0) * t)).normalize();
         let b = cam.dot(d);
         let c = cam.length_squared() - geo::R * geo::R;
         let disc = b * b - c;

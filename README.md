@@ -37,6 +37,9 @@ cargo run --release
 # Language
 The interface is in English or French. It follows the system language, can be changed in Settings (start screen or pause menu), and is remembered. For one run: `cargo run --release -- --lang fr`.
 
+# Full screen and several monitors
+In Graphics (pause menu or start screen), Display: in a window, full screen on the monitor of your choice, or across all screens. F11 switches between the window and the last full-screen choice. Across all screens, the game draws one view over the monitors as the system lays them out (two side by side, three, six in two rows…): click the screens on the little map to take them in or leave them out, choose the one the menus and instruments go on (the globe and the view straight ahead are centred on it too, or on the middle of all the screens if you prefer, as with three or five), and set the widest field of view so that a very wide view does not bend at the edges. On a Wayland desktop that mode runs through XWayland, which is the only way a program can place its window over several screens: restart the game after choosing it. Kept in `display.json` in the config folder; for one run, `--display windowed|fullscreen|span`.
+
 # Joysticks, pedals and key bindings
 Any joystick, throttle, rudder pedals or wheel can be used: in Bindings (pause menu, or Settings on the start screen), bind each axis by moving it the way that means "more" (nose up, right roll, right rudder, full throttle, brake pressed) and each button to any action. Each axis has an Invert switch and a dead zone. Presets set a device up in one click; the Turtle Beach VelocityOne Flightstick and rudder pedals get theirs on their own the first time they are plugged in. Keyboard keys can be moved too. Everything is kept in `bindings.json` in the config folder.
 

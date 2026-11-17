@@ -35,6 +35,9 @@ zip = { version = "9.6.0", default-features = false, features = ["deflate"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 # opens Feral GameMode's client library at run time (gamemode.rs)
 libloading = "0.8"
+# spreading the window over all the monitors under X11 (display.rs); already
+# in the tree through winit
+x11rb = "0.13"
 
 [dev-dependencies]
 naga = { version = "=30.0.1", features = ["wgsl-in"] }

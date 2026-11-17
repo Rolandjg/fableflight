@@ -218,13 +218,15 @@ pub fn show(ctx: &egui::Context, game: &mut Game, in_flight: bool) -> bool {
 
 impl Game {
     pub(crate) fn settings_screen(&mut self, ctx: &egui::Context, in_flight: bool) -> bool {
-        let screen = ctx.content_rect();
+        // (The backdrop over every screen when the window spans several; the settings on the one the menus are on.)
+        let (whole, screen) = (ctx.viewport_rect(), ctx.content_rect());
         let mut closed = false;
-        egui::Area::new(egui::Id::unique("settings_screen")).order(egui::Order::Foreground).fixed_pos(screen.min).show(ctx, |ui| {
+        egui::Area::new(egui::Id::unique("settings_screen")).order(egui::Order::Foreground).constrain_to(whole).fixed_pos(whole.min).show(ctx, |ui| {
+            ui.set_clip_rect(whole);
             // The backdrop takes every click; the game (or globe) behind is all but hidden.
-            ui.interact(screen, ui.scope_id().with("backdrop"), Sense::click());
+            ui.interact(whole, ui.scope_id().with("backdrop"), Sense::click());
             let p = ui.painter().clone();
-            p.rect_filled(screen, 0.0, if in_flight { Color32::from_rgba_premultiplied(4, 6, 9, 226) } else { menu::BG });
+            p.rect_filled(whole, 0.0, if in_flight { Color32::from_rgba_premultiplied(4, 6, 9, 226) } else { menu::BG });
             let side_w = if screen.width() < 1000.0 { 220.0 } else { 264.0 };
             let side = Rect::from_min_size(screen.min, vec2(side_w, screen.height()));
             p.rect_filled(side, 0.0, Color32::from_black_alpha(110));
@@ -374,6 +376,8 @@ impl Game {
         card(ui, t!("Preset", "Préréglage"), |ui| self.gfx.preset_ui(ui));
         card(ui, t!("Quality", "Qualité"), |ui| self.gfx.quality_ui(ui));
         card(ui, t!("Display", "Affichage"), |ui| self.gfx.display_ui(ui, (size.width, size.height), self.fps));
+        // Window, full screen, or one view across several monitors (display.rs).
+        card(ui, t!("Screens", "Écrans"), |ui| self.display_settings(ui));
         let on = if self.src.google.photoreal() { t!("on", "activées") } else { t!("off", "désactivées") };
         note(ui, &t!("Google's photorealistic 3D cities ({}) have their own switch and detail level under Map and data.", "Les villes 3D photoréalistes de Google ({}) ont leur propre réglage dans Carte et données.", on));
         if self.gfx != before {

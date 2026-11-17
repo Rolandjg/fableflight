@@ -14,7 +14,8 @@ pub fn find_font() -> Option<Vec<u8>> {
 
 /// The title's coverage (0..255) on a `w` x `h` screen with UI scale
 /// `scale`: centred, near the top, widely letter-spaced.
-pub fn mask(font: &[u8], w: u32, h: u32, scale: f32) -> Vec<u8> {
+/// (`cx`: where its middle goes across the screen, 0..1.)
+pub fn mask(font: &[u8], w: u32, h: u32, scale: f32, cx: f32) -> Vec<u8> {
     let mut out = vec![0u8; (w * h) as usize];
     let Ok(font) = FontRef::try_from_slice(font) else { return out };
     let cap = 34.0 * scale;
@@ -37,7 +38,7 @@ pub fn mask(font: &[u8], w: u32, h: u32, scale: f32) -> Vec<u8> {
         prev = Some(id);
     }
     let width = x - track;
-    let x0 = (w as f32 - width) * 0.5;
+    let x0 = w as f32 * cx - width * 0.5;
     // Capitals sit between `top` and `top + cap`.
     let top = 34.0 * scale;
     let base = top + cap;

@@ -767,7 +767,8 @@ pub struct Frame<'a> {
     pub egui: Option<(Vec<egui::ClippedPrimitive>, egui::TexturesDelta, f32)>,
     pub shot: Option<std::path::PathBuf>,
     /// the start screen's title, drawn at this UI scale (None: not shown)
-    pub logo: Option<f32>,
+    /// the title: its scale, and where its middle is across the screen (0..1)
+    pub logo: Option<(f32, f32)>,
     /// raindrops to draw around the camera (0: no rain)
     pub rain_drops: u32,
     /// lightning channel segments (storm.rs `Lightning::segments`)
@@ -3452,12 +3453,12 @@ impl Renderer {
             let mut rp = enc.begin_render_pass(&pass_desc(&[Some(color_att(&t.ldr, false))], None)).forget_lifetime();
             self.egui.render(&mut rp, jobs, sd);
         }
-        if let Some(scale) = f.logo {
+        if let Some((scale, cx)) = f.logo {
             let (w, h) = (self.config.width, self.config.height);
-            if self.logo_key != Some((w, h, scale.to_bits())) {
-                let m = self.logo_font.as_deref().map(|font| crate::logo::mask(font, w, h, scale)).unwrap_or_else(|| vec![0; (w * h) as usize]);
+            if self.logo_key != Some((w, h, scale.to_bits() ^ cx.to_bits().rotate_left(16))) {
+                let m = self.logo_font.as_deref().map(|font| crate::logo::mask(font, w, h, scale, cx)).unwrap_or_else(|| vec![0; (w * h) as usize]);
                 self.queue.write_texture(t.logo_tex.as_image_copy(), &m, wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w), rows_per_image: Some(h) }, wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 });
-                self.logo_key = Some((w, h, scale.to_bits()));
+                self.logo_key = Some((w, h, scale.to_bits() ^ cx.to_bits().rotate_left(16)));
             }
             full(&mut enc, &t.ldr, false, &self.p_logo, &t.bg_logo);
         }
