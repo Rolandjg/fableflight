@@ -179,13 +179,18 @@ pub const SOOT: f32 = 8.0; // smoke carried on from the fire simulation
 pub const GLASS: f32 = 9.0; // shards of window glass
 pub const DROPS: f32 = 10.0; // thrown water, streaked along its flight
 
-fn crash_ignition_chance(fuel: f32, energy_per_kg: f32, steep: f32, tank_hit: bool) -> f32 {
-    let fuel = fuel.clamp(0.0, 1.0);
-    if fuel <= 0.02 { return 0.0; }
-    if tank_hit { return 0.95 * fuel; }
-    let x = ((energy_per_kg - 250.0) / 1_750.0).clamp(0.0, 1.0);
-    let severity = x * x * (3.0 - 2.0 * x);
-    severity * fuel * (0.45 + 0.55 * steep.clamp(0.0, 1.0))
+/// The chance the fuel catches fire. `fuel_kg`: what is left in the tanks;
+/// `impact_speed`: how hard the airframe was driven into what it hit (m/s):
+/// all of the speed into a building's wall, mostly the part into the ground
+/// otherwise, so a gear-up slide stays survivable while a dive or a building
+/// is not. Above 40 m/s (about 78 kt) the tanks are certain to rupture and
+/// light: the fireball no longer depends on a roll or on how full they were.
+/// (Game thresholds, not crash data.)
+fn crash_ignition_chance(fuel_kg: f32, impact_speed: f32, tank_hit: bool) -> f32 {
+    if fuel_kg < 5.0 { return 0.0; }
+    if tank_hit { return 1.0; }
+    let x = ((impact_speed - 12.0) / 28.0).clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
 }
 
 impl Crash {
@@ -210,10 +215,10 @@ impl Crash {
         let slide = imp.vel - up * vn;
         let water = imp.water;
         let fuel = if spec.fuel_kg > 0.0 { (plane.fuel / spec.fuel_kg).clamp(0.0, 1.0) as f32 } else { 0.0 };
-        let steep = (-vn / speed.max(1.0) as f64).clamp(0.0, 1.0) as f32;
         let tank_hit = plane.cause == "wing tank";
-        let ignition_chance = crash_ignition_chance(fuel, 0.5 * speed * speed, steep, tank_hit);
-        let ignited = !water && fuel > 0.02 && rng.f() < ignition_chance;
+        let impact_speed = if imp.building.is_some() { speed } else { (vn * vn + 0.0625 * slide.length_squared()).sqrt() as f32 };
+        let ignition_chance = crash_ignition_chance(plane.fuel as f32, impact_speed, tank_hit);
+        let ignited = !water && rng.f() < ignition_chance;
         let fire_power = power * (0.35 + 0.65 * fuel);
         let carry = if water {
             // Water gives way, but it is no cushion: the downward part is
@@ -1241,10 +1246,17 @@ mod tests {
 
     #[test]
     fn crash_fire_depends_on_fuel_and_impact_severity() {
-        assert_eq!(crash_ignition_chance(1.0, 0.5 * 8.0 * 8.0, 0.0, false), 0.0);
-        assert_eq!(crash_ignition_chance(0.0, 10_000.0, 1.0, true), 0.0);
-        assert!(crash_ignition_chance(1.0, 0.5 * 70.0 * 70.0, 1.0, false) > 0.99);
-        assert!((crash_ignition_chance(1.0, 10_000.0, 0.0, true) - 0.95).abs() < 1e-6);
+        // A gentle touch or empty tanks never burn.
+        assert_eq!(crash_ignition_chance(80_000.0, 8.0, false), 0.0);
+        assert_eq!(crash_ignition_chance(0.0, 150.0, true), 0.0);
+        // A dive or a building at speed always does, however little fuel is left.
+        assert_eq!(crash_ignition_chance(87_000.0, 150.0, false), 1.0);
+        assert_eq!(crash_ignition_chance(500.0, 40.0, false), 1.0);
+        // A ruptured tank lights.
+        assert_eq!(crash_ignition_chance(100.0, 0.0, true), 1.0);
+        // In between it may or may not.
+        let mid = crash_ignition_chance(1_000.0, 26.0, false);
+        assert!(mid > 0.3 && mid < 0.7, "{mid}");
     }
 }
 
