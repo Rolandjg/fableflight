@@ -586,6 +586,9 @@ pub struct Spec {
     pub steer_fade: f64,
     pub engine: Engine,
     pub handling: Handling,
+    /// the surface-element aerodynamics (aero.rs): an aircraft with a rig flies
+    /// on its strips and coefficients, one without on the `handling` gains
+    pub rig: Option<&'static crate::aero::Rig>,
 
     // ---- the game around it
     /// starting speed in the air, and on a final approach (m/s) with that flap notch

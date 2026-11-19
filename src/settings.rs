@@ -23,6 +23,9 @@ pub struct Settings {
     pub landing_guidance: bool,
     /// arcade mode: the game's fun features (missiles, boost, respawn at will, weather keys)
     pub arcade: bool,
+    /// the auto-trim assist: winds the elevator trim while the pilot flies the
+    /// stick, on aircraft with a real trim (on by default)
+    pub auto_trim: bool,
     pub minimap_plan: bool,
     pub minimap_heading_up: bool,
     pub minimap_zoom: u8,
@@ -76,7 +79,7 @@ impl LastStart {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { lang: None, sound_on: true, volume: 1.0, cam_mode: 0, cockpit_fov: crate::cockpit::FOV, look_sens: 1.0, show_hud: true, hud_cockpit: false, minimap: true, landing_guidance: true, arcade: false, minimap_plan: false, minimap_heading_up: false, minimap_zoom: 12, minimap_size: 280.0, minimap_height: 280.0, taa: true, live_traffic: true, live_weather: true, real_time: true, snow: crate::snow::Mode::Auto, last: None, multiplayer: false, mp_server: "auto".into(), mp_name: String::new() }
+        Self { lang: None, sound_on: true, volume: 1.0, cam_mode: 0, cockpit_fov: crate::cockpit::FOV, look_sens: 1.0, show_hud: true, hud_cockpit: false, minimap: true, landing_guidance: true, arcade: false, auto_trim: true, minimap_plan: false, minimap_heading_up: false, minimap_zoom: 12, minimap_size: 280.0, minimap_height: 280.0, taa: true, live_traffic: true, live_weather: true, real_time: true, snow: crate::snow::Mode::Auto, last: None, multiplayer: false, mp_server: "auto".into(), mp_name: String::new() }
     }
 }
 
@@ -110,6 +113,7 @@ impl Settings {
             minimap: b("minimap", d.minimap),
             landing_guidance: b("landing_guidance", d.landing_guidance),
             arcade: b("arcade", d.arcade),
+            auto_trim: b("auto_trim", d.auto_trim),
             minimap_plan: b("minimap_plan", d.minimap_plan),
             minimap_heading_up: b("minimap_heading_up", d.minimap_heading_up),
             minimap_size: f("minimap_size", d.minimap_size as f64).clamp(240.0, 640.0) as f32,
@@ -140,6 +144,7 @@ impl Settings {
             "minimap": self.minimap,
             "landing_guidance": self.landing_guidance,
             "arcade": self.arcade,
+            "auto_trim": self.auto_trim,
             "minimap_plan": self.minimap_plan,
             "minimap_heading_up": self.minimap_heading_up,
             "minimap_zoom": self.minimap_zoom,
@@ -176,7 +181,7 @@ mod tests {
 
     #[test]
     fn round_trip() {
-        let s = Settings { lang: Some(Lang::Fr), sound_on: false, volume: 0.4, cam_mode: 1, cockpit_fov: 50.0, look_sens: 1.5, show_hud: false, hud_cockpit: true, minimap: false, landing_guidance: false, arcade: true, minimap_plan: true, minimap_heading_up: true, minimap_zoom: 15, minimap_size: 420.0, minimap_height: 300.0, taa: false, live_traffic: false, live_weather: false, real_time: false, snow: crate::snow::Mode::Always, last: Some(LastStart { lat: 37.6, lon: -122.4, name: "KSFO".into(), airport: Some("KSFO".into()), start: "approach".into(), runway: Some("28L".into()), aircraft: "c172".into() }), multiplayer: true, mp_server: "example.org:7000".into(), mp_name: "Dany".into() };
+        let s = Settings { lang: Some(Lang::Fr), sound_on: false, volume: 0.4, cam_mode: 1, cockpit_fov: 50.0, look_sens: 1.5, show_hud: false, hud_cockpit: true, minimap: false, landing_guidance: false, arcade: true, auto_trim: false, minimap_plan: true, minimap_heading_up: true, minimap_zoom: 15, minimap_size: 420.0, minimap_height: 300.0, taa: false, live_traffic: false, live_weather: false, real_time: false, snow: crate::snow::Mode::Always, last: Some(LastStart { lat: 37.6, lon: -122.4, name: "KSFO".into(), airport: Some("KSFO".into()), start: "approach".into(), runway: Some("28L".into()), aircraft: "c172".into() }), multiplayer: true, mp_server: "example.org:7000".into(), mp_name: "Dany".into() };
         assert_eq!(Settings::from_json(&s.to_json()), s);
         assert_eq!(Settings::from_json(&serde_json::json!({"last_start": {"lat": 300.0, "lon": 0.0}})).last, None);
         let legacy = Settings::from_json(&serde_json::json!({"minimap_size": 420}));

@@ -73,7 +73,7 @@ struct At {
 
 /// The direction the wind aloft blows towards at `pos` (Globals.storm.xyz).
 pub fn downwind(wx: &Weather, pos: DVec3) -> DVec3 {
-    let w = wx.steady(pos, 2000.0);
+    let w = wx.cloud_drift(pos);
     if w.length() > 0.1 { w.normalize() } else { geo::enu(pos).0 }
 }
 

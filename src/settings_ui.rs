@@ -378,6 +378,9 @@ impl Game {
             row(ui, t!("Arcade mode", "Mode arcade"), t!("missiles, boost on any aircraft, respawn at will, weather and time keys", "missiles, boost sur tous les avions, réapparition à volonté, touches météo et heure"), |ui| {
                 menu::switch(ui, &mut self.arcade);
             });
+            row(ui, t!("Auto-trim", "Trim automatique"), t!("winds the trim for you while you fly the stick", "règle le trim pour vous pendant que vous pilotez"), |ui| {
+                menu::switch(ui, &mut self.auto_trim);
+            });
         });
         card(ui, t!("Air traffic", "Trafic aérien"), |ui| {
             row(ui, t!("Live air traffic", "Trafic aérien réel"), t!("real aircraft around you, from adsb.lol", "les vrais avions autour de vous, via adsb.lol"), |ui| {

@@ -231,7 +231,7 @@ impl Game {
             "spoilers": num(p.spoilers),
             "parking_brake": p.parking_brake,
             "mixture": num(p.mixture),
-            "trim_deg": num(p.trim.to_degrees()),
+            "trim_deg": num(p.trim_deg()),
             "reverser": num(p.reverser),
             "chute_spent": p.chute_spent,
         })
@@ -848,12 +848,10 @@ impl Game {
         }
         if let Some(deg) = args.trim_deg {
             any = true;
-            let rad = deg.to_radians();
-            let clamped = rad.clamp(-0.05, 0.24);
-            if (clamped - rad).abs() > 1e-9 {
-                notes.push(format!("trim clamped to {:.1} deg", clamped.to_degrees()));
+            let set = p.set_trim_deg(deg);
+            if (set - deg).abs() > 1e-6 {
+                notes.push(format!("trim clamped to {set:.1} deg"));
             }
-            p.trim = clamped;
         }
         if !any {
             return Err("nothing to set: give at least one of throttle, flaps_notch, flaps_delta, gear_down, speedbrake, parking_brake, mixture, trim_deg".into());

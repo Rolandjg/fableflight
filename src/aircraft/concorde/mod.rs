@@ -503,6 +503,7 @@ pub static SPEC: Spec = Spec {
         stall_drop: 0.2,
         stall_yaw: 0.4,
     },
+    rig: None,
     cruise: 180.0,
     approach: (82.0, 3),
     cam_dist: 76.0,

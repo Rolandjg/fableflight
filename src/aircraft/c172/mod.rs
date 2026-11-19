@@ -4,6 +4,7 @@
 //! The cockpit lives in `cabin.rs`.
 pub mod cabin;
 
+use crate::aero::{Ctrl, Foil2d, Fuse, Planform, Rig};
 use crate::aircraft::{Engine, Handling, Hole, Hull, Leg, Part, Piston, Sound, Spec, Tail};
 use crate::airframe::*;
 use glam::{DVec3, Mat4, Quat, Vec2, Vec3};
@@ -27,6 +28,45 @@ const V_NONE: f64 = 1e9;
 const fn leg(at: DVec3, r: f32, travel: f64, steer: f64, fold_vn: f64, fold_kick: DVec3, name: &'static str) -> Leg {
     Leg { at, wheel_r: r as f64, travel, k: 70_000.0, c: 7_000.0, nf_max: 120_000.0, steer, brakes: at.x != 0.0, side_k: 5000.0, side_mu: 0.9, roll_k: 80.0, roll_mu: 0.025, brake_k: 2500.0, brake_mu: 0.55, fold_vn, fold_kick, name }
 }
+
+/// The surface-element rig (aero.rs). Geometry is this model's own (the wing
+/// from `wing_sect`, the tail from `tail()`'s planforms below); the rest:
+///
+/// - wing section NACA 2412 (Cessna 172 type data; Abbott & von Doenhoff,
+///   Theory of Wing Sections: a ≈ 0.105/deg, α0 ≈ -2.1°, cm ≈ -0.045; cl_max
+///   1.65 here, a little under the smooth section's, for a real wing's
+///   roughness and Reynolds number, chosen to give the published stall);
+/// - control travel from FAA Type Certificate Data Sheet 3A12 (Cessna 172RG
+///   / 172 series): ailerons 20° up / 15° down, elevator 28° up / 23° down,
+///   rudder 16°10' each way, elevator trim tab 28° up / 13° down, flaps 0-30°;
+/// - the fuselage's coefficients and the slotted flaps' extra lift are
+///   estimates for a high-wing single of this size (Roskam, Airplane Flight
+///   Dynamics I, Appendix B, Cessna 182 data as the guide), tuned to the
+///   handling harness (plane/modes.rs).
+pub static RIG: Rig = Rig {
+    wing_foil: Foil2d { cl_a: 6.0, a0: -0.0367, cl_max: 1.65, cd0: 0.0065, cm0: -0.045 },
+    wing_strips: 10,
+    oswald: 0.78,
+    flap: Ctrl { span: [FLAP[0] as f64, FLAP[1] as f64], chord: 0.30, travel: [0.0, 0.5236] },
+    flap_dcl_max: 1.0,
+    aileron_chord: 0.24,
+    aileron_travel: [0.3491, 0.2618],
+    elevons: false,
+    htail: Planform { root: DVec3::new(0.0, 0.11, 3.77), tip: DVec3::new(1.70, 0.11, 4.03), chord: [1.08, 0.60], incidence: [-0.0436, -0.0436] },
+    htail_foil: Foil2d::SYMMETRIC,
+    elevator: Ctrl { span: [0.0, 1.70], chord: 0.42, travel: [0.4887, 0.4014] },
+    // The tab holds the elevator where its hinge moment is nil: about 12°
+    // of elevator either way for the tab's travel.
+    trim: [0.21, 0.21],
+    fin: Planform { root: DVec3::new(0.0, 0.27, 3.415), tip: DVec3::new(0.0, 1.80, 4.14), chord: [1.66, 0.64], incidence: [0.0, 0.0] },
+    fin_foil: Foil2d::SYMMETRIC,
+    rudder: Ctrl { span: [0.0, 1.53], chord: 0.28, travel: [0.2827, 0.2827] },
+    fuse: Fuse { cm_a: 0.35, cn_b: -0.04, cl_b: -0.05, cy_b: -0.2 },
+    downwash: 1.0,
+    eta_tail: 0.9,
+    prop_hub: DVec3::new(0.0, -0.03, -3.30),
+    swirl: 0.25,
+};
 
 pub static SPEC: Spec = Spec {
     id: 0,
@@ -187,6 +227,7 @@ pub static SPEC: Spec = Spec {
         stall_drop: 1.8,
         stall_yaw: 2.5,
     },
+    rig: Some(&RIG),
     cruise: 55.0,
     approach: (36.0, 2),
     cam_dist: 16.0,

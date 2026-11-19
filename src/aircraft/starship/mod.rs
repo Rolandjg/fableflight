@@ -274,6 +274,7 @@ pub static SPEC: Spec = Spec {
         stall_yaw: 0.0,
     },
     // An air start: already climbing at 100 m/s.
+    rig: None,
     cruise: 100.0,
     approach: (100.0, 0),
     cam_dist: 230.0,

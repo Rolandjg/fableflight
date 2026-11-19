@@ -1,3 +1,4 @@
+mod aero;
 mod airframe;
 mod airfield;
 mod airmodels;
@@ -20,6 +21,7 @@ mod fluid;
 mod gputime;
 mod geo;
 mod globeclouds;
+mod gust;
 mod hangar;
 mod hangar_ui;
 mod bind;
@@ -52,6 +54,7 @@ mod photonight;
 mod relight;
 mod rain;
 mod storm;
+mod wake;
 mod weather;
 mod weapons;
 mod mvt;
@@ -63,6 +66,7 @@ mod sources;
 mod traffic;
 mod trees;
 mod ocean;
+mod orographic;
 mod shore;
 mod skyglow;
 mod snow;
@@ -987,6 +991,8 @@ struct Game {
     hud_cockpit: bool,
     /// arcade mode (settings.rs): the fun features on
     arcade: bool,
+    /// the auto-trim assist (settings.rs)
+    auto_trim: bool,
     goto_open: bool,
     goto_text: String,
     goto_rx: Option<std::sync::mpsc::Receiver<Option<(f64, f64, f64, String)>>>,
@@ -1173,6 +1179,10 @@ struct Game {
     mp_mirror: bool,
     /// real weather (sets `wx` while `wx.live` is on)
     livewx: livewx::LiveWx,
+    /// the ground along the wind line: ridge lift, lee waves and rotors (orographic.rs)
+    oro: orographic::Orography,
+    /// other aircraft's wake vortices (wake.rs)
+    wakes: wake::Wakes,
     /// the real clouds on the start screen's globe
     gclouds: globeclouds::GlobeClouds,
     /// the start time has been set by hand (the menu's Time sliders, or
@@ -1244,6 +1254,11 @@ impl Game {
             }
         }
         let alt = args.alt.unwrap_or_else(|| ground_elev(&src, lat, lon) + args.agl.unwrap_or(450.0));
+        // (How high above the ground it starts, for the wind there.)
+        let spawn_agl = match args.alt {
+            Some(a) => a - ground_elev(&src, lat, lon),
+            None => args.agl.unwrap_or(450.0),
+        };
         let spec = args.aircraft.as_deref().and_then(aircraft::by_key).unwrap_or(aircraft::BUILTIN[0]);
         let mut plane = Plane::spawn(spec, lat.to_radians(), lon.to_radians(), alt, args.heading.to_radians(), args.speed.map(|kt| kt / 1.94384).unwrap_or(spec.cruise));
         if args.ship {
@@ -1363,7 +1378,7 @@ impl Game {
         wx.real_time = prefs.real_time && !set_time;
         // The spawn speed is through the air: start out moving with the wind,
         // or a headwind starts it off fast (and climbing it away).
-        plane.wind = wx.steady(plane.pos, 300.0);
+        plane.wind = wx.steady(plane.pos, spawn_agl.max(2.0));
         plane.vel += plane.wind;
         let egui_ctx = egui::Context::default();
         load_fonts(&egui_ctx);
@@ -1384,7 +1399,7 @@ impl Game {
             minimap: minimap::Minimap::new(&prefs),
             cam_yaw: cy.to_radians(), cam_pitch: cp, cam_dist: cd, cam_mode: if args.cockpit { 1 } else { prefs.cam_mode }, cam_pos, cam_dir: -plane.forward(), cam_look: plane.pos, orbit: 0.0, cam_rise: 0.0, cam_clear_t: 0.0, cam_ang: None, cam_hold: 0.0,
             utc: (args.hour - lon / 15.0).rem_euclid(24.0), doy: args.day.unwrap_or(doy), wx, time: 0.0, real: 0.0, last: Instant::now(), acc: 0.0, wave_off: DVec2::ZERO, shore: shore::Shore::default(), ocean_off: DVec2::ZERO, prev_cam: cam_pos, prev_vp: [[0.0; 4]; 4], gfx, gfx_applied: None, prev_plane: Mat4::IDENTITY, plane_box, lamps,
-            frame: 0, fps: 60.0, fps_log: (args.fps_log, Instant::now(), 0, 0.0), paused: false, show_help: false, show_hud: !args.no_hud && prefs.show_hud, hud_cockpit: prefs.hud_cockpit, arcade: args.arcade || prefs.arcade, goto_open: false, goto_text: String::new(), goto_rx: None,
+            frame: 0, fps: 60.0, fps_log: (args.fps_log, Instant::now(), 0, 0.0), paused: false, show_help: false, show_hud: !args.no_hud && prefs.show_hud, hud_cockpit: prefs.hud_cockpit, arcade: args.arcade || prefs.arcade, auto_trim: prefs.auto_trim, goto_open: false, goto_text: String::new(), goto_rx: None,
             status, status_until: 8.0, shots: args.shots.clone(), crash_at: args.crash_at, boost_at: args.boost_at, stage_at: args.stage_at, engines: args.engines, hold: args.hold, gilrs: open_gamepads(), pad: Controls::default(), pad_id: None, pad_fixed: Vec::new(), pad_events: Vec::new(), pad_move: None, pad_skip: None, pad_rep: None, pad_home: false, pad_y: false, pad_y_combo: false, pad_held: Vec::new(), pad_note: (String::new(), 0.0), pad_aim: false, ap: autopilot::Autopilot::default(), ap_off_t: -100.0, ap_script: args.ap_script.clone(), cam_home: (cy.to_radians(), cp), rng: crash::Rng(secs.to_bits() | 1),
             audio: if args.record.is_some() { Some(audio::Audio::offline()) } else if args.mute { None } else { audio::Audio::new() },
             record: args.record.clone(), rec_audio: Vec::new(), rec_n: 0, rec_t0: Instant::now(), sound_on: prefs.sound_on, volume: prefs.volume, snow: args.snow.unwrap_or(prefs.snow), info_open: false, radial: Default::default(), info_page: menu::Page::Flight, pause_open: false, pause_page: menu::Page::Game, pause_at: args.pause_menu, radial_at: args.flight_menu, settings_sec: args.settings.unwrap_or(settings_ui::Section::General), look_sens: prefs.look_sens, head: cockpit::Head::new(cy.to_radians(), cp), cockpit_fov: args.fov.unwrap_or(prefs.cockpit_fov).clamp(30.0, 90.0), head_live: false, warn: audio::Warn::default(), warn_t: [-10.0; 4],
@@ -1420,6 +1435,8 @@ impl Game {
             cockpit_controls,
             pit_blocks,
             livewx: livewx::LiveWx::new(),
+            oro: orographic::Orography::default(),
+            wakes: wake::Wakes::default(),
             gclouds: globeclouds::GlobeClouds::default(),
             menu_time_set: set_time,
             menu_time_seen: (f64::NAN, f64::NAN),
@@ -1813,7 +1830,9 @@ impl Game {
         self.plane.fuel = self.spec.fuel_kg * self.menu.fuel;
         self.plane.payload = self.start_payload();
         // The spawn speed is through the air, not over the ground.
-        self.plane.wind = self.wx.steady(self.plane.pos, 300.0);
+        let (la, lo, h) = geo::pos_to_lla(self.plane.pos);
+        let agl = self.world.ground(la, lo).map_or(300.0, |g| h - g.h);
+        self.plane.wind = self.wx.steady(self.plane.pos, agl.max(2.0));
         self.plane.vel += self.plane.wind;
         if let Some(spec) = &self.damage_spec {
             self.plane.dmg.apply_spec(spec);
@@ -2412,7 +2431,7 @@ impl Game {
             "flaps_up" if self.spec.lever.is_some() => self.spec.lever.as_ref()?.notch(p.flap_set).into(),
             "speedbrake" if self.spec.chute.is_some() => if p.chute_spent { "JETTISONED" } else if p.speedbrake > 0.0 { "DEPLOYED" } else { "PACKED" }.into(),
             "flaps_up" => format!("{:.0}°", self.spec.flaps.get(p.flap_set as usize).copied().unwrap_or(0.0)),
-            "trim_down" => format!("{:+.1}°", p.trim.to_degrees()),
+            "trim_down" => format!("{:+.1}°", p.trim_deg()),
             "obs_right" => format!("OBS {:03.0}°", self.radios.obs),
             "gear" => if p.gear_down { t!("down", "sorti") } else { t!("up", "rentré") }.into(),
             "prop_up" => format!("{:.0} RPM", 1800.0 + 900.0 * p.propeller),
@@ -2557,7 +2576,7 @@ impl Game {
         }
         let trim = ax(k(KeyCode::Numpad1), k(KeyCode::Numpad7));
         if trim != 0.0 && self.mode == Mode::Fly && !self.pause_open && !self.crashed {
-            self.plane.trim = (self.plane.trim + trim * 0.035 * dt).clamp(-0.05, 0.24);
+            self.plane.trim_by(trim * dt);
         }
         self.gamepad(dt, &mut c);
         self.joystick(&mut c);
@@ -3502,7 +3521,7 @@ impl Game {
         let adf = self.radios.adf.as_ref().and_then(|s| nav::adf_bearing(s, p.pos, hdg.to_degrees())).filter(|_| p.sys.powered());
         data[1] = [self.radios.nav.as_ref().map(|s| s.freq_khz as f32 / 1000.0).unwrap_or(0.0),
             self.radios.adf.as_ref().map(|s| s.freq_khz as f32).unwrap_or(0.0), adf.unwrap_or(0.0) as f32, if adf.is_some() { 1.0 } else { 0.0 }];
-        data[2] = [self.gauges.cylinder_head_f(), ((p.trim + 0.05) / 0.29) as f32, if p.sys.powered() { 1.0 } else { 0.0 }, p.engine_hours as f32];
+        data[2] = [self.gauges.cylinder_head_f(), p.trim_gauge() as f32, if p.sys.powered() { 1.0 } else { 0.0 }, p.engine_hours as f32];
         let plot = |pos: DVec3| { let v = pos - p.pos; [v.dot(east) as f32 / 18520.0, v.dot(north) as f32 / 18520.0, 1.0, 0.0] };
         if let Some(st) = &self.radios.nav { data[3] = plot(st.pos()); }
         for (dst, (st, _)) in data[4..8].iter_mut().zip(nav::near(lat.to_degrees(), lon.to_degrees(), 18520.0, nav::Kind::Vor).iter().take(4)) { *dst = plot(st.pos()); }
@@ -4758,7 +4777,7 @@ impl Game {
 
     /// The settings worth keeping, as they are now.
     fn live_settings(&self) -> settings::Settings {
-        settings::Settings { lang: self.prefs_lang, sound_on: self.sound_on, volume: self.volume, cam_mode: self.cam_mode, cockpit_fov: self.cockpit_fov, look_sens: self.look_sens, show_hud: self.show_hud, hud_cockpit: self.hud_cockpit, minimap: self.minimap.visible, landing_guidance: self.minimap.landing_guidance, arcade: self.arcade, minimap_plan: self.minimap.plan, minimap_heading_up: self.minimap.heading_up, minimap_zoom: self.minimap.zoom, minimap_size: self.minimap.size.x, minimap_height: self.minimap.size.y, taa: self.gfx.taa, live_traffic: self.live.enabled(), live_weather: self.wx.live, real_time: self.wx.real_time, snow: self.snow, last: self.last_start.clone(), multiplayer: self.mp_on, mp_server: self.mp_server.clone(), mp_name: self.mp_name.clone() }
+        settings::Settings { lang: self.prefs_lang, sound_on: self.sound_on, volume: self.volume, cam_mode: self.cam_mode, cockpit_fov: self.cockpit_fov, look_sens: self.look_sens, show_hud: self.show_hud, hud_cockpit: self.hud_cockpit, minimap: self.minimap.visible, landing_guidance: self.minimap.landing_guidance, arcade: self.arcade, auto_trim: self.auto_trim, minimap_plan: self.minimap.plan, minimap_heading_up: self.minimap.heading_up, minimap_zoom: self.minimap.zoom, minimap_size: self.minimap.size.x, minimap_height: self.minimap.size.y, taa: self.gfx.taa, live_traffic: self.live.enabled(), live_weather: self.wx.live, real_time: self.wx.real_time, snow: self.snow, last: self.last_start.clone(), multiplayer: self.mp_on, mp_server: self.mp_server.clone(), mp_name: self.mp_name.clone() }
     }
 
     /// Saves the settings when they have changed (looked at once a second,
@@ -4943,14 +4962,54 @@ impl Game {
             let water = g.map(|g| g.water).unwrap_or(false);
             self.wx.sun = self.sun_dir().dot(self.plane.pos.normalize());
             // Turbulence, thermals and storm drafts ride on top of the gusting wind.
-            let air = self.wx.air(self.plane.pos, agl, self.time, water);
+            let mut air = self.wx.air(self.plane.pos, agl, self.time, water);
+            // The ground's shape: ridge lift, lee waves, and the rotor under them.
+            let world = &self.world;
+            self.oro.update(&self.wx, self.plane.pos, self.time, |la, lo| world.ground(la, lo).map(|g| g.h));
+            let oro = self.oro.at(&self.wx, self.plane.pos, agl);
+            if oro.rotor > 0.0 {
+                air.sigma_w = air.sigma_w.hypot(oro.rotor);
+                air.sigma_h = air.sigma_h.hypot(oro.rotor);
+                // (A rotor's eddies are a few hundred metres across.)
+                let k = (oro.rotor / 2.0).min(1.0);
+                air.len_w += (air.len_w.min(250.0) - air.len_w) * k;
+                air.len_h += (air.len_h.min(250.0) - air.len_h) * k;
+            }
+            air.draft += oro.w;
             self.plane.air = air;
+            self.plane.auto_trim = self.auto_trim;
             self.plane.wind = self.wx.at(self.plane.pos, agl, self.time) + self.plane.pos.normalize() * air.draft + air.gust;
             // The rain on the windows: only under (or in) a cloud that rains, the
             // rain deck the slider sets or a storm cell.
             self.wx.step_deck(dt, self.plane.pos, gh);
             self.wx.rain = self.wx.rain_at(self.plane.pos, agl, self.time) as f32;
             self.wx.advance(dt, self.plane.pos);
+            // The wakes of the other aircraft about: airport traffic, live traffic and other players.
+            if dt > 0.0 {
+                let mut targets = self.live.targets();
+                targets.extend(self.world.air_targets(self.plane.pos));
+                let sources: Vec<wake::Source> = targets
+                    .iter()
+                    .filter(|t| t.pos.distance(self.plane.pos) < 20_000.0)
+                    .map(|t| {
+                        use std::hash::{Hash, Hasher};
+                        let mut hsh = std::collections::hash_map::DefaultHasher::new();
+                        t.key.hash(&mut hsh);
+                        let ty = &airmodels::TYPES[(t.size as usize).min(airmodels::TYPES.len() - 1)];
+                        wake::Source { id: hsh.finish(), pos: t.pos, vel: t.vel, span: ty.span as f64, mass: ty.mass as f64 }
+                    })
+                    .chain(self.mp_players.iter().filter(|r| r.pos.distance(self.plane.pos) < 20_000.0).map(|r| {
+                        // Other players: their own aircraft's span and mass.
+                        let spec = aircraft::nth(r.aircraft as usize);
+                        wake::Source { id: 0x6d70_0000_0000_0000 ^ r.id as u64, pos: r.pos, vel: r.vel, span: spec.b, mass: spec.mass }
+                    }))
+                    .collect();
+                let wx = &self.wx;
+                let ground_h = h - agl;
+                self.wakes.sigma = air.sigma_w;
+                self.wakes.step(dt, self.time, &sources, |p| { let a = p.length() - geo::R - ground_h; wx.steady(p, a.max(2.0)) }, ground_h, self.plane.pos);
+                self.plane.wake = self.wakes.near(self.plane.pos, 150.0 + self.plane.spec.b, self.time);
+            }
             // (Snow does not wet the glass or streak across it: only the liquid rain share does.)
             let fz = match (self.snow, self.wx.freezing) {
                 (snow::Mode::Always, _) | (_, None) => snow::freezing_guess(self.snow, la.to_degrees(), self.doy),
@@ -5707,7 +5766,7 @@ impl Game {
             plane_prev: [[0.0; 4]; 4],
             plane_box: self.plane_box,
             weather: { let o = self.wx.cloud_off; [o.x as f32, o.y as f32, o.z as f32, if in_menu { 1.0 } else { self.wx.haze }] },
-            storm: { let w = self.wx.steady(cam, 2000.0); let d = if w.length() > 0.1 { w.normalize() } else { east }; v4(d, 0.0) },
+            storm: { let w = self.wx.cloud_drift(cam); let d = if w.length() > 0.1 { w.normalize() } else { east }; v4(d, 0.0) },
             storm_cells: [[0.0; 4]; 2 * weather::MAX_STORMS],
             det: [[0.0; 4]; 16],
             photo_vp: [[0.0; 4]; 4],

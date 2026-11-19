@@ -816,6 +816,7 @@ pub static SPEC: Spec = Spec {
         stall_drop: 0.6,
         stall_yaw: 0.8,
     },
+    rig: None,
     cruise: 128.6,
     // Vref + 5 kt at `mass` with flaps 39.
     approach: (69.0, 3),

@@ -41,6 +41,9 @@ pub struct Weather {
     pub wind_from: f64,
     /// gustiness, 0..1
     pub gusts: f64,
+    /// the winds aloft a weather model reports (live weather), lowest first;
+    /// empty: made up from the surface wind (see `profile`)
+    pub aloft: Vec<Aloft>,
     /// game seconds per real second for the clock (0 stops it)
     pub time_rate: f64,
     /// days since new moon
@@ -148,6 +151,15 @@ pub fn storm_top_share(age: f64) -> f64 {
 fn shower_anvil(base: f64, top: f64, age: f64) -> f32 {
     let top = top.max(base + 2200.0);
     (base + (top - base) / storm_top_share(age)) as f32
+}
+
+/// A wind aloft: height above sea level (m), speed (m/s) and the compass
+/// direction it blows from.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Aloft {
+    pub alt: f64,
+    pub speed: f64,
+    pub from: f64,
 }
 
 /// What the air around the aircraft is doing beyond the mean wind.
@@ -326,7 +338,7 @@ fn sites(q: DVec3, grid: f64, range: f64, mut f: impl FnMut(DVec3, f64, u32)) {
 impl Weather {
     pub fn new(clouds: f32) -> Self {
         // A light west-south-westerly, as the smoke always drifted before there was a slider for it.
-        Self { clouds, cloud_base: 1500.0, cloud_depth: 4500.0, storms: 0.2, alto: 0.25, haze: 1.0, rain: 0.0, rain_set: None, deck: 0.0, deck_at: None, deck_ground: None, deck_place: None, deck_prev: None, deck_fade: 0.0, wind: 4.0, wind_from: 248.0, gusts: 0.15, time_rate: 1.0, moon_age: 11.5, cloud_off: DVec3::ZERO, open: false, sun: 0.5, thermal_off: DVec3::ZERO, cells: Vec::new(), placed: Vec::new(), live_cells: Vec::new(), radar_cover: None, deck_goal: None, deck_tau: 6.0, live: false, live_station: String::new(), live_raw: String::new(), real_time: false, showers_only: false, qnh: 1013.25, freezing: None, blowing: 0.0 }
+        Self { clouds, cloud_base: 1500.0, cloud_depth: 4500.0, storms: 0.2, alto: 0.25, haze: 1.0, rain: 0.0, rain_set: None, deck: 0.0, deck_at: None, deck_ground: None, deck_place: None, deck_prev: None, deck_fade: 0.0, wind: 4.0, wind_from: 248.0, gusts: 0.15, aloft: Vec::new(), time_rate: 1.0, moon_age: 11.5, cloud_off: DVec3::ZERO, open: false, sun: 0.5, thermal_off: DVec3::ZERO, cells: Vec::new(), placed: Vec::new(), live_cells: Vec::new(), radar_cover: None, deck_goal: None, deck_tau: 6.0, live: false, live_station: String::new(), live_raw: String::new(), real_time: false, showers_only: false, qnh: 1013.25, freezing: None, blowing: 0.0 }
     }
 
     /// The rain deck's mean base and top, metres above sea level: the heavier
@@ -779,12 +791,101 @@ impl Weather {
         3.912 / (13.558e-6 + (3.996e-6 + 4.4e-6) * self.haze as f64) / 1000.0
     }
 
-    /// The steady wind (where the air moves to) at a point, in the planet frame,
-    /// stronger with height above the ground (a 1/7 power law from 10 m).
+    /// The steady wind (where the air moves to) at a point, in the planet
+    /// frame, `agl` metres above the ground: see `profile`.
     pub fn steady(&self, pos: DVec3, agl: f64) -> DVec3 {
         let (e, n, _) = geo::enu(pos);
+        let (lat, _, alt) = geo::pos_to_lla(pos);
+        // (Some callers ask for a height above the ground near the ground:
+        // the sea-level height is then at least that.)
+        let (speed, from) = self.profile(lat, alt.max(agl), agl);
+        let to = (from + 180.0).to_radians();
+        (e * to.sin() + n * to.cos()) * speed
+    }
+
+    /// The wind the cloud field (and the storm cells in it) drift with and
+    /// lean their anvils along: twice the surface wind, in its direction. The
+    /// visible sky keeps this simple rule; the aircraft flies in `profile`.
+    pub fn cloud_drift(&self, pos: DVec3) -> DVec3 {
+        let (e, n, _) = geo::enu(pos);
         let to = (self.wind_from + 180.0).to_radians();
-        (e * to.sin() + n * to.cos()) * self.wind * (agl.max(2.0) / 10.0).powf(1.0 / 7.0).min(2.0)
+        (e * to.sin() + n * to.cos()) * (self.wind * 2.0)
+    }
+
+    /// How stable the lower air is, 0 (a sunny afternoon: convection mixes
+    /// it, the wind is much the same all the way up) to 1 (a clear calm
+    /// night: the ground cools the air above it, the wind near the ground
+    /// drops away from the wind above, and the shear is strong). A strong
+    /// wind stirs it towards neutral.
+    pub fn stability(&self) -> f64 {
+        (1.0 - self.convection()) * (1.0 - 0.7 * smoothstep(6.0, 15.0, self.wind))
+    }
+
+    /// Top of the boundary layer, metres above the ground: the convective
+    /// mixed layer by day, a few hundred metres on a stable night.
+    pub fn bl_top(&self) -> f64 {
+        let s = self.stability();
+        (self.mixed_top() * (1.0 - s) + (200.0 + 50.0 * self.wind).min(900.0) * s).max(150.0)
+    }
+
+    /// The wind's speed (m/s) and the direction it blows from (degrees) at
+    /// latitude `lat` (rad), `alt` metres above sea level, `agl` above the ground.
+    ///
+    /// - Up to the top of the boundary layer it grows from the 10 m wind as a
+    ///   power law, its exponent from about 0.11 (convective) to 0.38 (stable),
+    ///   to 1.4 (convective) .. 2.3 (stable) times the 10 m wind (Stull, An
+    ///   Introduction to Boundary Layer Meteorology, ch. 9; Garratt, The
+    ///   Atmospheric Boundary Layer, 1992).
+    /// - It veers with height through the layer (backs in the southern
+    ///   hemisphere), 12° to 35° from the surface to its top as it gets more
+    ///   stable (the Ekman spiral as observed over land), and a stable night
+    ///   has a low-level jet in the middle of the layer.
+    /// - Above it: the winds aloft a weather model reports (live weather),
+    ///   or else the layer-top wind growing with height (the thermal wind,
+    ///   about 2 m/s per km at mid latitudes, less in the tropics, half as
+    ///   much on a calm day) to the tropopause near 11 km and falling off above it.
+    pub fn profile(&self, lat: f64, alt: f64, agl: f64) -> (f64, f64) {
+        let s = self.stability();
+        let z = agl.max(2.0);
+        let zi = self.bl_top();
+        let expo = 0.11 + 0.27 * s;
+        let ratio = 1.4 + 0.9 * s;
+        let v_top = self.wind * ratio;
+        let hemi = lat.signum() * smoothstep(0.03, 0.15, lat.abs());
+        let veer = (12.0 + 23.0 * s) * hemi;
+        let from_top = self.wind_from + veer;
+        if z <= zi {
+            let mut v = self.wind * (z / 10.0).powf(expo).min(ratio);
+            // The nocturnal low-level jet: above the layer-top wind in the middle of a stable layer.
+            v += v_top * 0.4 * smoothstep(0.5, 1.0, s) * (std::f64::consts::PI * z / zi).sin().powi(2);
+            let frac = ((z / 10.0).ln() / (zi / 10.0).ln()).clamp(0.0, 1.0);
+            return (v, (self.wind_from + veer * frac).rem_euclid(360.0));
+        }
+        // Above the boundary layer, from its top (sea-level height `a0`).
+        let a0 = alt - agl + zi;
+        let vec = |speed: f64, from: f64| {
+            let r = from.to_radians();
+            DVec2::new(r.sin(), r.cos()) * speed
+        };
+        let back = |w: DVec2| (w.length(), w.x.atan2(w.y).to_degrees().rem_euclid(360.0));
+        let top = vec(v_top, from_top);
+        if !self.aloft.is_empty() {
+            // Between the layer top and the reported levels, in components.
+            let mut lo = (a0, top);
+            for l in self.aloft.iter().filter(|l| l.alt > a0) {
+                let w = vec(l.speed, l.from);
+                if alt <= l.alt {
+                    let t = ((alt - lo.0) / (l.alt - lo.0).max(1.0)).clamp(0.0, 1.0);
+                    return back(lo.1 + (w - lo.1) * t);
+                }
+                lo = (l.alt, w);
+            }
+            return back(lo.1);
+        }
+        let shear = (0.5 + 1.5 * smoothstep(0.17, 0.5, lat.abs())) * (0.5 + 0.5 * smoothstep(0.0, 8.0, self.wind));
+        let up = (alt.min(11000.0) - a0).max(0.0) / 1000.0;
+        let v = (v_top + shear * up) * (1.0 - 0.4 * smoothstep(11000.0, 16000.0, alt));
+        (v, from_top.rem_euclid(360.0))
     }
 
     /// Wind with gusts at a point and time: a few incommensurate swells per
@@ -806,7 +907,7 @@ impl Weather {
     /// and the thermals with the wind in the mixed layer below them.
     pub fn advance(&mut self, dt: f64, cam: DVec3) {
         // The cloud field is sampled at (position + offset), so it moves against the offset.
-        self.cloud_off -= self.steady(cam, 2000.0) * dt * 1.6;
+        self.cloud_off -= self.cloud_drift(cam) * dt * 1.6;
         self.thermal_off -= self.steady(cam, 300.0) * dt;
         // Keep the offset small so it never costs precision (the thermal lattice repeats nowhere, so a jump is harmless).
         if self.thermal_off.length() > 2.0e5 {
@@ -1235,6 +1336,52 @@ fn compass(deg: f64) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_wind_profile_is_continuous_veers_and_shears_with_stability() {
+        let lat = 45f64.to_radians();
+        for (sun, wind) in [(0.9, 5.0), (-0.3, 5.0), (0.5, 14.0), (-0.3, 0.0)] {
+            let mut wx = Weather::new(0.1);
+            (wx.sun, wx.wind, wx.wind_from) = (sun, wind, 200.0);
+            let zi = wx.bl_top();
+            let mut prev = wx.profile(lat, 10.0, 10.0);
+            let mut z = 10.0;
+            while z < 14000.0 {
+                let n = wx.profile(lat, z + 1.0, z + 1.0);
+                assert!((n.0 - prev.0).abs() < 0.3 && (n.0 < 0.5 || ((n.1 - prev.1 + 540.0).rem_euclid(360.0) - 180.0).abs() < 1.0), "sun {sun} wind {wind}: jump at {z} m: {prev:?} -> {n:?} (zi {zi})");
+                prev = n;
+                z += 1.0;
+            }
+            // The 10 m wind is what was set.
+            let (v10, d10) = wx.profile(lat, 10.0, 10.0);
+            assert!((v10 - wind).abs() < 0.05 * wind + 1e-9 && (d10 - 200.0).abs() < 8.0, "{v10} {d10}");
+            println!("sun {sun:4} wind {wind:4}: s {:.2} zi {zi:4.0}  100 m {:?}  zi {:?}  3 km {:?}  10 km {:?}", wx.stability(), wx.profile(lat, 100.0, 100.0), wx.profile(lat, zi, zi), wx.profile(lat, 3000.0, 3000.0), wx.profile(lat, 10000.0, 10000.0));
+        }
+        // Stable air: more shear near the ground than in the afternoon.
+        let mut wx = Weather::new(0.1);
+        (wx.wind, wx.sun, wx.wind_from) = (5.0, 0.9, 200.0);
+        let day = wx.profile(lat, 80.0, 80.0).0;
+        wx.sun = -0.3;
+        let night = wx.profile(lat, 80.0, 80.0).0;
+        assert!(night > day * 1.15, "{day} {night}");
+        // Veering in the north, backing in the south.
+        let top = wx.bl_top();
+        assert!(wx.profile(lat, top, top).1 > 210.0);
+        assert!(wx.profile(-lat, top, top).1 < 190.0);
+    }
+
+    #[test]
+    fn the_winds_aloft_follow_the_report() {
+        let mut wx = Weather::new(0.1);
+        (wx.wind, wx.wind_from, wx.sun) = (6.0, 240.0, 0.6);
+        wx.aloft = vec![Aloft { alt: 1500.0, speed: 12.0, from: 250.0 }, Aloft { alt: 5500.0, speed: 30.0, from: 290.0 }, Aloft { alt: 9300.0, speed: 50.0, from: 300.0 }];
+        let lat = 50f64.to_radians();
+        let at = |a: f64| wx.profile(lat, a, a - 200.0);
+        assert!((at(5500.0).0 - 30.0).abs() < 1e-6 && (at(5500.0).1 - 290.0).abs() < 1e-6);
+        assert!((at(12000.0).0 - 50.0).abs() < 1e-6);
+        let mid = at(7400.0);
+        assert!(mid.0 > 30.0 && mid.0 < 50.0 && mid.1 > 290.0 && mid.1 < 300.0, "{mid:?}");
+    }
 
     #[test]
     fn labels() {

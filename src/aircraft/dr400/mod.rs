@@ -235,6 +235,7 @@ pub static SPEC: Spec = Spec {
         stall_yaw: 2.4,
     },
     // About 120 kt in the cruise; a 65 kt final with full flaps.
+    rig: None,
     cruise: 62.0,
     approach: (34.0, 2),
     cam_dist: 13.0,
