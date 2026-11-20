@@ -72,7 +72,8 @@ const NAVY = vec3f(0.010, 0.024, 0.075);
 const ACCENT = vec3f(0.34, 0.018, 0.012);
 
 struct VOut {
-  @builtin(position) clip: vec4f,
+  // invariant so prepass and shading depth match
+  @builtin(position) @invariant clip: vec4f,
   @location(0) P: vec3f,
   @location(1) N: vec3f,
   @location(2) col: vec4f,
@@ -1837,6 +1838,10 @@ struct Shaded { c: vec4f, n: vec4f, kill: f32, amb: f32 };
   let s = surface(in);
   if (s.kill > 0.5) { discard; }
   return GOut(s.c, s.n, s.amb);
+}
+// depth prepass, writes depth only
+@fragment fn fs_pre(in: VOut) -> GOut {
+  return GOut(vec4f(0.0), vec4f(0.0), 0.0);
 }
 @fragment fn fs_solid(in: VOut) -> GOut {
   let s = surface(in);

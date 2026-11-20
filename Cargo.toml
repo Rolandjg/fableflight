@@ -6,6 +6,10 @@ rust-version = "1.85"
 license = "MIT"
 default-run = "fablegame"
 
+[features]
+# gpu memory use in the --fps-log lines, for profiling
+mem-stats = ["wgpu/counters"]
+
 [dependencies]
 anyhow = "1.0.104"
 bytemuck = { version = "1.25.2", features = ["derive"] }
@@ -50,8 +54,14 @@ libloading = "0.8"
 # Keep in step with wgpu's naga version when upgrading wgpu.
 naga = { version = "=30.0.1", features = ["wgsl-in", "msl-out"] }
 
-# full lto and one codegen unit for faster release builds.
+# everyday optimised build, thin lto on all cores builds much faster than fat
 [profile.release]
+lto = "thin"
+codegen-units = 16
+
+# published downloads, cargo build --profile dist
+[profile.dist]
+inherits = "release"
 lto = "fat"
 codegen-units = 1
 

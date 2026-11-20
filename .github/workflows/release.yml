@@ -87,13 +87,13 @@ jobs:
           key: ${{ matrix.target }}
       - name: Build
         shell: bash
-        run: cargo build --release --locked --target ${{ matrix.target }} --bins
+        run: cargo build --profile dist --locked --target ${{ matrix.target }} --bins
       - name: Package
         shell: bash
         run: |
           dir="fableflight-$TAG-${{ matrix.name }}"
           mkdir "$dir"
-          bin="target/${{ matrix.target }}/release"
+          bin="target/${{ matrix.target }}/dist"
           if [ "$RUNNER_OS" = "Windows" ]; then
             cp "$bin/fablegame.exe" "$bin/fableflight-mcp.exe" "$dir/"
             cp README.md LICENSE "$dir/"

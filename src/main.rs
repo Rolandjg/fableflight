@@ -288,6 +288,8 @@ struct Args {
     find_storms: bool,
     vsync: bool,
     taa: bool,
+    /// no dynamic resolution, for profiling
+    fixed_res: bool,
     /// graphics preset and render resolution for this run (not saved; the
     /// resolution defaults to INTEGRATED_SCALE on a GPU without memory of its
     /// own until the graphics settings are saved)
@@ -394,7 +396,7 @@ struct Args {
     mcp_port: u16,
 }
 
-const CLI_USAGE: &str = "fablegame [--menu | --no-menu] [--menu-screen main|fly|aircraft|settings] [--menu-view LAT,LON,ALT_M] [--hangar mine|download[:FOLDER]] [--place \"city or address\"] [--lat D --lon D] [--alt M | --agl M] [--heading DEG] [--speed KT] [--time HOURS] [--time-rate X] [--day 0..364] [--clouds 0..1] [--storms 0..1] [--alto 0..1] [--wind KT,FROM_DEG] [--haze 0.2..40] [--rain 0..1] [--rain-at KM,BEARING] [--wet 0..1] [--birds off|low|medium|high] [--flock gull|crow|starling|buzzard|goose,KM[,BEARING[,AGL_M]]] [--snow auto|off|always] [--weather [clear|fair|hazy|overcast|windy|storm]] [--storm-at KM,BEARING[,RADIUS_KM][,shower|thunder|severe|supercell]] [--squall-at KM,BEARING[,LENGTH_KM]] [--strike cg|ic,KM,BEARING@SECONDS] [--flight-menu SECONDS] [--pause-menu flight|places|radio|weather|game|settings[:SECTION]|controls|failures[@SECONDS]] [--settings general|graphics|sound|camera|controls|map] [--airport CODE [--runway 28L] [--approach]] [--aircraft KEY] [--max-zoom 8..19] [--cockpit | --tail-view] [--fov DEG] [--no-vsync] [--no-taa] [--graphics low|medium|high|ultra] [--storm-quality low|medium|high|ultra] [--render-scale 0.5..2] [--headless] [--minimap plan|satellite] [--minimap-up north|heading] [--fps-log] [--mute] [--lang en|fr|ko] [--fuel 0..1] [--cold] [--arcade] [--mcp | --no-mcp] [--mcp-port PORT] [--offline] [--imagery URL_TEMPLATE] [--google | --no-google] [--photoreal | --no-photoreal] [--photo-detail low|medium|high|ultra] [--no-pave] [--google-key KEY] [--hold SECONDS] [--boost-at SECONDS] [--stage-at SECONDS] [--engines GROUP] [--ship] [--damage ...]";
+const CLI_USAGE: &str = "fablegame [--menu | --no-menu] [--menu-screen main|fly|aircraft|settings] [--menu-view LAT,LON,ALT_M] [--hangar mine|download[:FOLDER]] [--place \"city or address\"] [--lat D --lon D] [--alt M | --agl M] [--heading DEG] [--speed KT] [--time HOURS] [--time-rate X] [--day 0..364] [--clouds 0..1] [--storms 0..1] [--alto 0..1] [--wind KT,FROM_DEG] [--haze 0.2..40] [--rain 0..1] [--rain-at KM,BEARING] [--wet 0..1] [--birds off|low|medium|high] [--flock gull|crow|starling|buzzard|goose,KM[,BEARING[,AGL_M]]] [--snow auto|off|always] [--weather [clear|fair|hazy|overcast|windy|storm]] [--storm-at KM,BEARING[,RADIUS_KM][,shower|thunder|severe|supercell]] [--squall-at KM,BEARING[,LENGTH_KM]] [--strike cg|ic,KM,BEARING@SECONDS] [--flight-menu SECONDS] [--pause-menu flight|places|radio|weather|game|settings[:SECTION]|controls|failures[@SECONDS]] [--settings general|graphics|sound|camera|controls|map] [--airport CODE [--runway 28L] [--approach]] [--aircraft KEY] [--max-zoom 8..19] [--cockpit | --tail-view] [--fov DEG] [--no-vsync] [--no-taa] [--fixed-res] [--graphics low|medium|high|ultra] [--storm-quality low|medium|high|ultra] [--render-scale 0.5..2] [--headless] [--minimap plan|satellite] [--minimap-up north|heading] [--fps-log] [--mute] [--lang en|fr|ko] [--fuel 0..1] [--cold] [--arcade] [--mcp | --no-mcp] [--mcp-port PORT] [--offline] [--imagery URL_TEMPLATE] [--google | --no-google] [--photoreal | --no-photoreal] [--photo-detail low|medium|high|ultra] [--no-pave] [--google-key KEY] [--hold SECONDS] [--boost-at SECONDS] [--stage-at SECONDS] [--engines GROUP] [--ship] [--damage ...]";
 
 fn parse_args() -> Args {
     let v: Vec<String> = std::env::args().skip(1).collect();
@@ -438,6 +440,7 @@ fn parse_args_from(v: &[String]) -> Result<Args, String> {
         find_storms: false,
         vsync: true,
         taa: true,
+        fixed_res: false,
         graphics: None,
         storm_quality: None,
         render_scale: None,
@@ -847,6 +850,10 @@ fn parse_args_from(v: &[String]) -> Result<Args, String> {
                 a.taa = false;
                 used = 1;
             }
+            "--fixed-res" => {
+                a.fixed_res = true;
+                used = 1;
+            }
             "--rain" => a.rain = Some(req_num(flag, i)? as f32),
             "--wet" => a.wet = Some(req_num(flag, i)? as f32),
             "--speed" => a.speed = Some(req_num(flag, i)?),
@@ -1114,6 +1121,17 @@ struct Game {
     /// and what was last handed to the renderer and world
     gfx: graphics::Graphics,
     gfx_applied: Option<graphics::Graphics>,
+    /// dynamic resolution state, see dyn_res
+    /// outer shadow cascades as last drawn (matrix, camera), which are reusable, and the map size
+    casc_keep: [([[f32; 4]; 4], DVec3); 2],
+    casc_ok: u8,
+    casc_res: u32,
+    dyn_off: bool,
+    dyn_k: f32,
+    dyn_ms: f64,
+    dyn_seen: u64,
+    dyn_skip: u32,
+    dyn_t: f64,
     /// where the aircraft was drawn last frame, relative to that frame's camera
     prev_plane: Mat4,
     /// centre and half size of the aircraft in its body frame
@@ -1550,7 +1568,7 @@ impl Game {
             gkey: src.google.key(), gkey_show: false, gm_logo: None, stills: std::collections::HashMap::new(), window, r, world, src, spec, model, piece_mesh, group_mesh, piece_cut, piece_inner, group_pivots, hangar: Vec::new(), building: Vec::new(), crashed: false, crash: None, crash_real: 0.0, egui_ctx, egui_state, keys: HashSet::new(), drag: false, lean_drag: None, last_cursor: None,
             minimap: minimap::Minimap::new(&prefs),
             cam_yaw: cy.to_radians(), cam_pitch: cp, cam_dist: cd, cam_mode: args.start_view.unwrap_or(prefs.cam_mode), view_before_tail: 0, cam_pos, cam_dir: -plane.forward(), cam_look: plane.pos, orbit: 0.0, cam_rise: 0.0, cam_clear_t: 0.0, cam_ang: None, cam_hold: 0.0,
-            utc: (args.hour - lon / 15.0).rem_euclid(24.0), doy: args.day.unwrap_or(doy), wx, time: 0.0, real: 0.0, last: Instant::now(), acc: 0.0, wave_off: DVec2::ZERO, shore: shore::Shore::default(), ocean_off: DVec2::ZERO, prev_cam: cam_pos, prev_vp: [[0.0; 4]; 4], gfx, gfx_applied: None, prev_plane: Mat4::IDENTITY, plane_box, lamps,
+            utc: (args.hour - lon / 15.0).rem_euclid(24.0), doy: args.day.unwrap_or(doy), wx, time: 0.0, real: 0.0, last: Instant::now(), acc: 0.0, wave_off: DVec2::ZERO, shore: shore::Shore::default(), ocean_off: DVec2::ZERO, prev_cam: cam_pos, prev_vp: [[0.0; 4]; 4], gfx, gfx_applied: None, casc_keep: [([[0.0; 4]; 4], DVec3::ZERO); 2], casc_ok: 0, casc_res: 0, dyn_off: args.fixed_res, dyn_k: 1.0, dyn_ms: 0.0, dyn_seen: 0, dyn_skip: 0, dyn_t: 0.0, prev_plane: Mat4::IDENTITY, plane_box, lamps,
             frame: 0, fps: 60.0, fps_log: (args.fps_log, Instant::now(), 0, 0.0), paused: false, show_help: false, show_hud: !args.no_hud && prefs.show_hud, hud_cockpit: prefs.hud_cockpit, path_marker: prefs.path_marker, arcade: args.arcade || prefs.arcade, goto_open: false, goto_text: String::new(), goto_rx: None,
             status, status_until: 8.0, shots: args.shots.clone(), crash_at: args.crash_at, boost_at: args.boost_at, stage_at: args.stage_at, engines: args.engines, hold: args.hold, gilrs: open_gamepads(), pad: Controls::default(), pad_id: None, pad_fixed: Vec::new(), pad_events: Vec::new(), pad_move: None, pad_skip: None, pad_rep: None, pad_home: false, pad_y: false, pad_y_combo: false, pad_held: Vec::new(), pad_note: (String::new(), 0.0), pad_aim: false, ap: autopilot::Autopilot::default(), ap_off_t: -100.0, ap_script: args.ap_script.clone(), cam_home: (cy.to_radians(), cp), rng: crash::Rng(secs.to_bits() | 1),
             audio: if args.record.is_some() { Some(audio::Audio::offline()) } else if args.mute { None } else { audio::Audio::new() },
@@ -5040,8 +5058,17 @@ impl Game {
             if el >= 1.0 {
                 let n = l.2 as f64;
                 let st = std::mem::take(&mut self.r.stats);
-                log::info!("{:.1} fps avg ({:.1} ms), slowest frame {:.1} ms | game {:.1}  wait-gpu {:.1}  encode {:.1}  submit {:.1} ms", n / el, el / n * 1000.0, l.3 * 1000.0, st[0] / n * 1000.0, st[1] / n * 1000.0, st[2] / n * 1000.0, st[3] / n * 1000.0);
+                let gpu = self.r.frame_timer.as_ref().and_then(|t| t.last_ms).unwrap_or(0.0);
+                let (rw, rh) = self.r.render_size();
+                log::info!("{:.1} fps avg ({:.1} ms), slowest frame {:.1} ms | game {:.1}  wait-gpu {:.1}  encode {:.1}  submit {:.1} ms | gpu frame {gpu:.1} ms at {rw}x{rh}", n / el, el / n * 1000.0, l.3 * 1000.0, st[0] / n * 1000.0, st[1] / n * 1000.0, st[2] / n * 1000.0, st[3] / n * 1000.0);
                 (l.1, l.2, l.3) = (now, 0, 0.0);
+                #[cfg(feature = "mem-stats")]
+                {
+                    let c = self.r.device.get_internal_counters().hal;
+                    let mb = |v: isize| v as f64 / (1 << 20) as f64;
+                    let ((nt, bt), (nb, bb)) = self.world.gpu_usage();
+                    log::info!("gpu memory: buffers {:.0} MB ({}), textures {:.0} MB ({}) | terrain {nt} tiles {:.0} MB, buildings {nb} tiles {:.0} MB", mb(c.buffer_memory.read()), c.buffers.read(), mb(c.texture_memory.read()), c.textures.read(), mb(bt as isize), mb(bb as isize));
+                }
             }
         }
         if self.record.is_some() {
@@ -5577,6 +5604,7 @@ impl Game {
 
         // ---- camera
         self.apply_graphics();
+        self.dyn_res();
         let size = self.window.inner_size();
         let (w, h) = (size.width.max(1) as f32, size.height.max(1) as f32);
         // the size the scene is drawn at (graphics settings: render resolution)
@@ -5916,6 +5944,24 @@ impl Game {
             let (pr, pb) = (self.plane.shadow_r(), PSHADOW_BACK * self.plane.shadow_r() / PSHADOW_R);
             let lview = look_to(centre + sun.as_vec3() * pb, -sun.as_vec3(), upl.as_vec3());
             casc_vp[3] = (ortho(-pr, pr, -pr, pr, 0.0, PSHADOW_DEPTH) * lview).to_cols_array_2d();
+        }
+        // outer cascades take turns, the skipped one keeps last frame's map moved by the camera delta
+        let mut casc_skip = 0u8;
+        let sres_now = self.r.shadow_res();
+        if !shadow_on || sres_now != self.casc_res {
+            self.casc_ok = 0;
+            self.casc_res = sres_now;
+        }
+        let turn = 1 + (self.frame % 2) as usize;
+        for i in 1..3 {
+            let (vp, at) = self.casc_keep[i - 1];
+            if i != turn && self.casc_ok & (1 << i) != 0 && (cam - at).length() < 300.0 {
+                casc_vp[i] = (Mat4::from_cols_array_2d(&vp) * Mat4::from_translation((cam - at).as_vec3())).to_cols_array_2d();
+                casc_skip |= 1 << i;
+            } else if shadow_on {
+                self.casc_keep[i - 1] = (casc_vp[i], cam);
+                self.casc_ok |= 1 << i;
+            }
         }
         let mut shadow_vp = [[[0f32; 4]; 4]; 3];
         shadow_vp.copy_from_slice(&casc_vp[..3]);
@@ -6355,7 +6401,7 @@ impl Game {
             self.lightning.segments(cam, dt, &mut bolts);
         }
         let rain_drops = if in_menu || (self.cam_rain < 0.002 && self.cam_blow < 0.01) { 0 } else { render::RAIN_DROPS };
-        self.r.render(Frame { rain_drops, bolts, g, tiles, tess, details, photo, skins, skin_slots, fields, lights: air_lights, objs, insts, fall, near, casc_vp, shore: sf.step, shore_c, shore_tiles, psim, sim_steps: dt > 0.0, fluid, ocean: self.world.water_in_view().then(|| self.world.ocean.uniform()), egui: Some(ui), shot, cover, glow: glow_px, snow: snow_px, snow_tracks: snow_tr_uploads });
+        self.r.render(Frame { rain_drops, bolts, g, tiles, tess, details, photo, skins, skin_slots, fields, lights: air_lights, objs, insts, fall, near, casc_vp, casc_skip, shore: sf.step, shore_c, shore_tiles, psim, sim_steps: dt > 0.0, fluid, ocean: self.world.water_in_view().then(|| self.world.ocean.uniform()), egui: Some(ui), shot, cover, glow: glow_px, snow: snow_px, snow_tracks: snow_tr_uploads });
         self.finish_mcp_shots();
         if (had_shots && std::env::args().any(|a| a == "--shot") && self.record.is_none()) || rec_done {
             self.quit = true;
@@ -6937,13 +6983,64 @@ impl Game {
         self.src.google.enabled() || self.world.photo().stats.0 > 0
     }
 
+    /// steers render resolution by gpu frame time to hold 60 fps. drops fast, climbs in small steps,
+    /// changes rarely since each one remakes the targets and resets taa.
+    fn dyn_res(&mut self) {
+        let g = self.gfx;
+        let Some(ft) = self.r.frame_timer.as_ref() else { return };
+        if !g.dynamic_res || self.dyn_off || self.record.is_some() {
+            return;
+        }
+        if ft.frames == self.dyn_seen {
+            return;
+        }
+        let new = (ft.frames - self.dyn_seen) as u32;
+        self.dyn_seen = ft.frames;
+        let Some(ms) = ft.last_ms else { return };
+        // skip frames right after a change
+        if self.dyn_skip > 0 {
+            self.dyn_skip = self.dyn_skip.saturating_sub(new);
+            self.dyn_ms = 0.0;
+            return;
+        }
+        let fps = if g.fps_cap > 0 { (g.fps_cap as f64).min(60.0) } else { 60.0 };
+        // gpu time only, the cpu runs alongside it
+        let target = 1000.0 / fps * 0.92;
+        // loading spikes count for little
+        let ms = ms.min(target * 2.0);
+        self.dyn_ms = if self.dyn_ms <= 0.0 { ms } else { self.dyn_ms * 0.92 + ms * 0.08 };
+        let since = self.real - self.dyn_t;
+        let k = self.dyn_k;
+        // pixels cost about in proportion to k squared, the rest stays
+        let next = self.dyn_ms * ((k + 0.05) / k).powi(2) as f64;
+        let want = if self.dyn_ms > target * 1.05 && since > 1.0 && k > graphics::DYN_MIN {
+            let k2 = k * (target / self.dyn_ms).sqrt() as f32;
+            ((k2 * 20.0).floor() / 20.0).clamp(k - 0.15, k - 0.05).max(graphics::DYN_MIN)
+        } else if next < target * 0.97 && since > 2.0 && k < 1.0 {
+            (k + 0.05).min(1.0)
+        } else {
+            k
+        };
+        if (want - k).abs() > 1e-3 {
+            log::info!("dynamic resolution: {:.0}% of {:.0}% (GPU {:.1} ms a frame)", want * 100.0, g.scale * 100.0, self.dyn_ms);
+            self.dyn_k = want;
+            self.r.set_scale(g.scale * want);
+            self.dyn_t = self.real;
+            self.dyn_skip = 8;
+            self.dyn_ms = 0.0;
+        }
+    }
+
     /// Hands changed graphics settings to the renderer and the world.
     fn apply_graphics(&mut self) {
         let g = self.gfx;
         if self.gfx_applied == Some(g) {
             return;
         }
-        self.r.set_scale(g.scale);
+        if !g.dynamic_res {
+            self.dyn_k = 1.0;
+        }
+        self.r.set_scale(g.scale * self.dyn_k);
         self.r.set_shadow_res(g.shadow_res());
         self.r.set_vsync(g.vsync);
         self.r.ao = g.ao;
@@ -6954,6 +7051,8 @@ impl Game {
         self.world.tree_far = g.tree_far();
         self.world.tree_imp_k = g.tree_imp_k();
         self.world.cars = g.car_density();
+        // sized for full res, dynamic res can go back up
+        self.world.set_vram(self.r.vram, self.r.fixed_bytes(g.scale));
         if self.gfx_applied.is_some() {
             log::info!("graphics: {} at {:.0}%, shadows {}, clouds {}, storms {}, terrain {}, scenery {}, city {}, trees {}, traffic {}, AO {}", g.matches().map(graphics::Level::name).unwrap_or("custom"), g.scale * 100.0, g.shadows.name(), g.clouds.name(), g.storms.name(), g.terrain.name(), g.scenery.name(), g.city.name(), g.trees.name(), g.cars.name(), g.ao);
         }

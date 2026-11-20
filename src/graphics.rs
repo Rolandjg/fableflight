@@ -77,7 +77,12 @@ pub struct Graphics {
     pub vsync: bool,
     /// Optional frame limit (0 means no software limit).
     pub fps_cap: u16,
+    /// lower the render resolution while the gpu cant hold 60 fps (main.rs dyn_res)
+    pub dynamic_res: bool,
 }
+
+/// lowest share of the render resolution dynamic resolution goes to.
+pub const DYN_MIN: f32 = 0.6;
 
 impl Default for Graphics {
     fn default() -> Self {
@@ -91,7 +96,7 @@ pub const SCALE_MAX: f32 = 2.0;
 impl Graphics {
     /// One of the presets (taa and vsync on).
     pub fn preset(l: Level) -> Self {
-        let mut g = Graphics { scale: 1.0, shadows: Level::High, clouds: Level::High, storms: Level::High, terrain: Level::High, scenery: Level::High, city: Level::High, trees: Level::High, cars: Level::High, birds: Level::High, ao: true, taa: true, vsync: true, fps_cap: 0 };
+        let mut g = Graphics { scale: 1.0, shadows: Level::High, clouds: Level::High, storms: Level::High, terrain: Level::High, scenery: Level::High, city: Level::High, trees: Level::High, cars: Level::High, birds: Level::High, ao: true, taa: true, vsync: true, fps_cap: 0, dynamic_res: false };
         g.apply(l);
         g
     }
@@ -126,9 +131,9 @@ impl Graphics {
         })
     }
 
-    /// msaa samples, 2 on low, applied on next start.
+    /// msaa samples, applied on next start. 4 on ultra, 2 otherwise since taa does most of the work.
     pub fn samples(&self) -> u32 {
-        if self.matches() == Some(Level::Low) { 2 } else { 4 }
+        if self.matches() == Some(Level::Ultra) { 4 } else { 2 }
     }
 
     /// Side of the sun's shadow map (texels; Off keeps a small unused one).
@@ -222,6 +227,7 @@ impl Graphics {
         let j: serde_json::Value = Self::path().and_then(|p| std::fs::read(p).ok()).and_then(|d| serde_json::from_slice(&d).ok()).unwrap_or_default();
         let mut g = Self::default();
         g.fps_cap = j["fps_cap"].as_u64().map(|v| v as u16).filter(|v| [0, 30, 60, 90, 120, 144, 165, 240].contains(v)).unwrap_or(0);
+        g.dynamic_res = j["dynamic_res"].as_bool().unwrap_or(g.dynamic_res);
         // a saved preset follows the code, so retuned presets reach old saves.
         if let Some(l) = j["preset"].as_str().and_then(Level::parse) {
             g.apply(l);
@@ -266,6 +272,7 @@ impl Graphics {
             "taa": self.taa,
             "vsync": self.vsync,
             "fps_cap": self.fps_cap,
+            "dynamic_res": self.dynamic_res,
         });
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -384,6 +391,9 @@ impl Graphics {
             ui.add(egui::Slider::new(&mut self.scale, SCALE_MIN..=SCALE_MAX).step_by(0.05).custom_formatter(|v, _| format!("{:.0}%", v * 100.0)));
             let what = if self.scale > 1.001 { "supersampled" } else if self.scale < 0.999 { "upscaled" } else { "native" };
             ui.label(RichText::new(format!("{rw}×{rh}, {what}")).font(menu::caption()).color(DIM));
+        });
+        row(ui, "Dynamic resolution", "holds 60 fps by lowering the resolution a little when the GPU falls behind", |ui| {
+            menu::switch(ui, &mut self.dynamic_res);
         });
         row(ui, "Anti-aliasing", "temporal (TAA) · F2 in flight", |ui| {
             menu::switch(ui, &mut self.taa);
