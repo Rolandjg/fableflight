@@ -60,6 +60,36 @@ struct Bury {
     cause: &'static str,
 }
 
+/// Where the gust field is sampled on an airframe (body frame), from its
+/// geometry alone: the CG, the wing's quarter chord at stations along each
+/// half, the nose and the tail. Any aircraft has these.
+fn gust_probes(spec: &Spec) -> [DVec3; PROBES] {
+    let wing = |x: f32| {
+        let s = (spec.wing_sect)(x);
+        (s.le + s.cdir * (0.25 * s.c)).as_dvec3()
+    };
+    let mut out = [DVec3::ZERO; PROBES];
+    // Stations along each half (left, then right), at the middle of equal
+    // bits of span.
+    for k in 0..WING_STATIONS {
+        let at = wing(spec.span * (k as f32 + 0.5) / WING_STATIONS as f32);
+        out[1 + k] = DVec3::new(-at.x, at.y, at.z);
+        out[1 + WING_STATIONS + k] = at;
+    }
+    let nose = spec.contacts.iter().map(|c| c.0[2]).fold(0.0f64, f64::min).min(-1.0);
+    let mut tail = spec.tail.fin_base;
+    if tail.z < 1.0 {
+        tail = DVec3::new(0.0, 0.0, -nose);
+    }
+    out[PROBES - 2] = DVec3::new(0.0, 0.0, nose);
+    out[PROBES - 1] = DVec3::new(0.0, tail.y, tail.z);
+    out
+}
+
+/// Gust probes along each wing half, and in all (the CG, both wings, nose and tail).
+const WING_STATIONS: usize = 4;
+const PROBES: usize = 1 + 2 * WING_STATIONS + 2;
+
 pub struct Impact {
     pub pos: DVec3,
     pub vel: DVec3,
@@ -104,15 +134,17 @@ pub struct Plane {
     pub gust: DVec3,
     /// rotational gusts (body frame, rad/s): the air rolling, pitching and yawing across the airframe
     pub gust_rot: DVec3,
-    /// turbulence filter states: translational in the flight-path frame (along, across, up), and rotational
-    gust_a: DVec3,
-    gust_b: DVec3,
-    rot_a: DVec3,
-    rot_b: DVec3,
-    /// small eddies (sharp jolts), and the slow level that gathers the
-    /// turbulence into bursts
-    gust_s: DVec3,
+    /// the turbulence as a field in space (gust.rs), which the aircraft flies through
+    pub gusts: crate::gust::GustField,
+    /// where on the airframe it is sampled (body frame): the CG, the wing
+    /// (stations along each half), then the nose and the tail (see `gust_probes`)
+    probes: [DVec3; PROBES],
+    /// the gust at each probe this step (planet frame)
+    pub probe_gust: [DVec3; PROBES],
+    /// the slow level that gathers the turbulence into bursts
     burst: f64,
+    /// other aircraft's wakes near it (wake.rs), set by the caller each frame
+    pub wake: Vec<crate::wake::Seg>,
     /// the pilot's head swaying on its neck as the airframe is shaken (body frame, m)
     pub head: DVec3,
     /// specific force (what an accelerometer reads: everything but gravity), body frame, m/s²
@@ -297,11 +329,10 @@ impl Plane {
             air: Air::default(),
             gust: DVec3::ZERO,
             gust_rot: DVec3::ZERO,
-            gust_a: DVec3::ZERO,
-            gust_b: DVec3::ZERO,
-            rot_a: DVec3::ZERO,
-            rot_b: DVec3::ZERO,
-            gust_s: DVec3::ZERO,
+            gusts: crate::gust::GustField::for_chord(pos.x.to_bits() ^ pos.z.to_bits().rotate_left(17), spec.wing_area / spec.b.max(1.0)),
+            probes: gust_probes(spec),
+            probe_gust: [DVec3::ZERO; PROBES],
+            wake: Vec::new(),
             burst: 0.0,
             head: DVec3::ZERO,
             sf: DVec3::new(0.0, 9.81, 0.0),
@@ -1314,10 +1345,10 @@ impl Plane {
         (self.rng.range(-1.0, 1.0) + self.rng.range(-1.0, 1.0) + self.rng.range(-1.0, 1.0)) as f64
     }
 
-    /// Turbulence: white noise through two first-order lags in series (a
-    /// smoothed Dryden spectrum), the length scales turned into time by the
-    /// airspeed. `a` is the coarse state, `b` the smoothed one; the second lag
-    /// takes a fifth of the variance, which the output scale gives back.
+    /// Turbulence: the gust field (gust.rs) sampled where the airframe is.
+    /// The mean over the wing is the gust the whole aircraft feels (`gust`);
+    /// how it differs across the airframe is the air rolling, pitching and
+    /// yawing it (`gust_rot`, the gradient's rotational part: Etkin's p_g, q_g, r_g).
     fn turbulence(&mut self, dt: f64, v: f64, upw: DVec3) {
         let air = self.air;
         let vt = v.max(12.0);
@@ -1329,49 +1360,44 @@ impl Plane {
         self.burst = self.burst * eb + (1.0 - eb * eb).sqrt() * nb;
         let a = 0.3 + 0.2 * smooth(1.0, 5.0, air.sigma_w);
         let m = (a * self.burst - a * a).exp().min(3.0);
-        // Two scales of eddy: the big ones (hundreds of metres: slow heaves
-        // the aircraft rides up and down) and small ones a few tens of metres
-        // across that it cannot follow (sharp jolts). The small ones carry a
-        // third of the variance and come and go with the bursts the most.
-        let len = DVec3::new(air.len_h, air.len_h, air.len_w);
-        let sig = DVec3::new(air.sigma_h, air.sigma_h, air.sigma_w);
-        let one = DVec3::ONE;
-        let n = DVec3::new(self.gauss(), self.gauss(), self.gauss());
-        let e1 = (-vt * dt / len).exp();
-        let e2 = (-vt * dt * 4.0 / len).exp();
-        let big = sig * (0.8 * (0.4 + 0.6 * m));
-        self.gust_a = self.gust_a * e1 + big * (one - e1 * e1).max(DVec3::ZERO).sqrt() * n;
-        self.gust_b = self.gust_b * e2 + self.gust_a * (one - e2);
-        let ls = (len / 10.0).clamp(DVec3::splat(6.0), DVec3::splat(45.0));
-        let es = (-vt * dt / ls).exp();
-        let n = DVec3::new(self.gauss(), self.gauss(), self.gauss());
-        self.gust_s = self.gust_s * es + sig * (0.6 * m) * (one - es * es).max(DVec3::ZERO).sqrt() * n;
-        // (A big airframe spans many of the small ones and averages them out.)
-        let span = (ls / (ls + DVec3::splat(0.5 * self.spec.b))).powf(0.5);
-        let g = self.gust_b * 1.118 + self.gust_s * span;
-        // Along and across the flight path, and up.
-        let air_v = self.vel - self.wind;
-        let mut along = air_v - upw * air_v.dot(upw);
-        if along.length_squared() < 1.0 {
-            along = self.forward() - upw * self.forward().dot(upw);
+        self.gusts.set(air.sigma_h * m, air.len_h, air.sigma_w * m, air.len_w);
+        // The field drifts with the air (the mean wind, not its gusts).
+        self.gusts.advance(dt, self.wind, air.sigma_h.max(air.sigma_w));
+        if self.gusts.calm() && self.wake.is_empty() {
+            self.gust = DVec3::ZERO;
+            self.gust_rot = DVec3::ZERO;
+            self.probe_gust = [DVec3::ZERO; PROBES];
+            return;
         }
-        let along = along.normalize_or_zero();
-        let across = along.cross(upw);
-        self.gust = along * g.x + across * g.y + upw * g.z;
-        // Rotational gusts: the vertical gust differs from one wing tip to the
-        // other (roll), from the nose to the tail (pitch), and the side gust
-        // from the nose to the fin (yaw). Eddies about the size of the airframe;
-        // a big aircraft averages more of them out.
-        let lr = self.spec.b * 2.5;
-        let big = (11.0 / self.spec.b).sqrt();
-        // (In bursts, roll upsets too.)
-        let sr = DVec3::new(0.018 * air.sigma_w, 0.020 * air.sigma_h, 0.03 * air.sigma_w) * big * m;
-        let n = DVec3::new(self.gauss(), self.gauss(), self.gauss());
-        let e1 = (-vt * dt / lr).exp();
-        let e2 = (-vt * dt * 4.0 / lr).exp();
-        self.rot_a = self.rot_a * e1 + sr * (1.0 - e1 * e1).max(0.0).sqrt() * n;
-        self.rot_b = self.rot_b * e2 + self.rot_a * (1.0 - e2);
-        self.gust_rot = self.rot_b * 1.118 * smooth(5.0, 25.0, v);
+        let calm = self.gusts.calm();
+        for i in 0..PROBES {
+            let at = self.pos + self.rot * self.probes[i];
+            // The eddies, and any other aircraft's wake vortices.
+            let g = if calm { DVec3::ZERO } else { self.gusts.at(at, upw) };
+            self.probe_gust[i] = g + crate::wake::induced(&self.wake, at);
+        }
+        let g = &self.probe_gust;
+        // The wing's probes: the CG and the stations along each half.
+        const WING: usize = PROBES - 2;
+        self.gust = g[..WING].iter().copied().sum::<DVec3>() / WING as f64;
+        let inv = self.rot.inverse();
+        let d: [DVec3; PROBES] = std::array::from_fn(|i| inv * (g[i] - self.gust));
+        let p = &self.probes;
+        // u(r) - u0 ≈ ω_air × r: across the span (x) the vertical gust gives
+        // ω_z = ∂u_y/∂x (fitted along the whole wing, as its lift spreads
+        // the gust's push); along the fuselage (z) the vertical gust gives
+        // ω_x = -∂u_y/∂z and the side gust ω_y = ∂u_x/∂z.
+        let (mut sxy, mut sxx) = (0.0, 0.0);
+        for i in 0..WING {
+            sxy += p[i].x * d[i].y;
+            sxx += p[i].x * p[i].x;
+        }
+        let (nose, tail) = (WING, WING + 1);
+        let dz = p[tail].z - p[nose].z;
+        let wz = sxy / sxx.max(1e-6);
+        let wx = -(d[tail].y - d[nose].y) / dz;
+        let wy = (d[tail].x - d[nose].x) / dz;
+        self.gust_rot = DVec3::new(wx, wy, wz) * smooth(5.0, 25.0, v);
     }
 
     /// Points on the airframe that meet the ground (body frame), as it is now:
@@ -2729,6 +2755,10 @@ mod tests {
         }
     }
 
+    fn wake_right_vortex(s: &crate::wake::Seg) -> DVec3 {
+        s.right_vortex()
+    }
+
     fn empty_world() -> World {
         let dir = std::env::temp_dir().join("fablegame-test-cache");
         let src = Arc::new(crate::sources::Sources::new(crate::fetch::Fetcher::new(dir, true), String::new()));
@@ -4078,6 +4108,105 @@ mod tests {
         println!("approach: throttle {thr:.2}, {:.0} kt, {:.0} fpm, {:.0} rpm", v * KT, vs * 196.85, rpm(&p));
         assert!((v - 36.0).abs() < 3.0, "{v}");
         assert!((vs + sink).abs() < 1.0, "{vs}");
+    }
+
+    /// The gust field's rotational gusts across each airframe against the
+    /// MIL-F-8785C roll gust: its spectrum Φ_p(ω) = σ_w² 0.8 (πL/4b)^(1/3) /
+    /// (V L (1 + (4bω/πV)²)) integrates to σ_p² = σ_w² 0.8 π² (πL/4b)^(1/3) / (8 b L),
+    /// for every built-in aircraft: in that ballpark, smaller for a bigger
+    /// airframe, and finite everywhere.
+    #[test]
+    fn gust_gradients_follow_the_airframe() {
+        let mut rows = Vec::new();
+        for spec in crate::aircraft::BUILTIN {
+            let v = spec.cruise.clamp(40.0, 120.0);
+            let mut p = Plane::spawn(spec, 0.6, -2.1, 1500.0, 0.0, v);
+            let (sw, len) = (1.5, 300.0);
+            p.air = Air { sigma_w: sw, sigma_h: sw, len_w: len, len_h: len, draft: 0.0, ..Default::default() };
+            let up = p.pos.normalize();
+            let dt = 1.0 / 180.0;
+            let (mut r2, mut q2, mut y2, mut w2, mut n) = (0.0, 0.0, 0.0, 0.0, 0.0);
+            for _ in 0..(600.0 / dt) as usize {
+                p.pos += p.forward() * (v * dt);
+                p.turbulence(dt, v, up);
+                assert!(p.gust.is_finite() && p.gust_rot.is_finite(), "{}", spec.keys[0]);
+                r2 += p.gust_rot.z * p.gust_rot.z;
+                q2 += p.gust_rot.x * p.gust_rot.x;
+                y2 += p.gust_rot.y * p.gust_rot.y;
+                w2 += p.gust.dot(up).powi(2);
+                n += 1.0;
+            }
+            let b = spec.b;
+            let pi = std::f64::consts::PI;
+            let mil = sw * (0.8 * pi * pi / (8.0 * b * len) * (pi * len / (4.0 * b)).powf(1.0 / 3.0)).sqrt();
+            let (sp, sq, sr, swm) = ((r2 / n).sqrt(), (q2 / n).sqrt(), (y2 / n).sqrt(), (w2 / n).sqrt());
+            println!("{:10} b {b:5.1} V {v:5.1}: roll {sp:.4} (MIL {mil:.4})  pitch {sq:.4}  yaw {sr:.4}  w {swm:.2}", spec.keys[0]);
+            rows.push((spec.keys[0], b, sp, mil));
+        }
+        for (k, _, sp, mil) in &rows {
+            // (A delta's long chord averages out more than the formula, which
+            // knows only the span, allows for: the Sears taper.)
+            assert!(*sp > 0.4 * mil && *sp < 1.6 * mil, "{k}: roll gust {sp} vs {mil}");
+        }
+        let roll = |k: &str| rows.iter().find(|r| r.0 == k).unwrap().2;
+        assert!(roll("747") < 0.5 * roll("c172"));
+    }
+
+    /// Into a heavy jet's wake, flying along it with one wing under a
+    /// vortex, hands off: it rolls hard, and a small aircraft far harder than
+    /// a big one, from geometry alone. Every built-in aircraft comes through
+    /// it with finite numbers.
+    #[test]
+    fn a_heavy_jets_wake_rolls_a_light_aircraft() {
+        use crate::wake::{Source, Wakes};
+        let w = empty_world();
+        let (lat, lon) = (0.6f64, -2.1f64);
+        let alt = 1500.0;
+        let mut worst = Vec::new();
+        for spec in crate::aircraft::BUILTIN {
+            let v = spec.cruise.clamp(40.0, 110.0);
+            // A wide-body passed this way along heading 0 (north) 40 s ago, 20 m higher.
+            let mut wk = Wakes::default();
+            let p0 = geo::lla_to_pos(lat, lon, alt + 20.0);
+            let (_, n, _) = geo::enu(p0);
+            let mut t = 0.0;
+            let mut sp = p0 - n * 1500.0;
+            while t < 40.0 {
+                let src = Source { id: 1, pos: sp, vel: n * 75.0, span: 64.4, mass: 230_000.0 };
+                wk.step(0.1, t, &[src], |_| DVec3::ZERO, 0.0, p0);
+                sp += n * 7.5;
+                t += 0.1;
+            }
+            // Put the aircraft's left wing tip into the right-hand vortex, heading north.
+            let mut p = Plane::spawn(spec, lat, lon, alt, 0.0, v);
+            let up = p.pos.normalize();
+            let segs = wk.near(p.pos, 400.0, t);
+            let mut best = (f64::MAX, DVec3::ZERO);
+            for s in &segs {
+                // (the vortex line's position, through the pair's middle and its right)
+                let c = wake_right_vortex(s);
+                let d = (c - p.pos) - n * (c - p.pos).dot(n);
+                if d.length() < best.0 {
+                    best = (d.length(), d);
+                }
+            }
+            p.pos += best.1 + p.right() * (0.7 * spec.span as f64);
+            let _ = up;
+            let (mut bank, mut rate) = (0.0f64, 0.0f64);
+            let dt = 1.0 / 180.0;
+            for _ in 0..(4.0 / dt) as usize {
+                p.wake = wk.near(p.pos, 150.0 + spec.b, t);
+                p.step(dt, &Controls::default(), &w);
+                assert!(p.pos.is_finite() && p.omega.is_finite(), "{}", spec.keys[0]);
+                bank = bank.max(p.right().dot(p.pos.normalize()).abs().asin().to_degrees());
+                rate = rate.max(p.omega.z.abs().to_degrees());
+            }
+            println!("{:10} span {:5.1}: bank {bank:5.1} deg, roll rate {rate:5.1} deg/s", spec.keys[0], spec.b);
+            worst.push((spec.keys[0], bank));
+        }
+        let bank = |k: &str| worst.iter().find(|r| r.0 == k).unwrap().1;
+        assert!(bank("c172") > 25.0, "{}", bank("c172"));
+        assert!(bank("747") < 0.5 * bank("c172"));
     }
 
     #[test]
