@@ -44,7 +44,18 @@ pub const WORLD_PER_PACKET: usize = 24;
 /// The aircraft by `PlayerState::aircraft` (`aircraft::Spec::id`), for the
 /// relay's status page; ids past the end are shown as unknown. (The game's
 /// tests check this list against its aircraft.)
-pub const AIRCRAFT: &[&str] = &["Cessna 172RG", "Boeing 747-400", "F/A-18C Hornet", "F-4E Phantom II", "F-22A Raptor", "SpaceX Starship", "Concorde", "SR-71A Blackbird", "Robin DR 400/180", "Gulfstream G650"];
+pub const AIRCRAFT: &[&str] = &[
+    "Cessna 172RG",
+    "Boeing 747-400",
+    "F/A-18C Hornet",
+    "F-4E Phantom II",
+    "F-22A Raptor",
+    "SpaceX Starship",
+    "Concorde",
+    "SR-71A Blackbird",
+    "Robin DR 400/180",
+    "Gulfstream G650",
+];
 /// the planet's radius (m), as the game uses it (geo.rs)
 #[allow(dead_code)] // (the relay's status page uses it)
 pub const PLANET_R: f64 = 6_371_008.8;
@@ -123,21 +134,46 @@ impl Spot {
         let [x, y, z] = s.pos;
         let r = (x * x + y * y + z * z).sqrt().max(1.0);
         let up = [x / r, y / r, z / r];
-        let (lat, lon) = (up[2].clamp(-1.0, 1.0).asin().to_degrees(), y.atan2(x).to_degrees());
+        let (lat, lon) = (
+            up[2].clamp(-1.0, 1.0).asin().to_degrees(),
+            y.atan2(x).to_degrees(),
+        );
         // Forward (body -Z) in the world, on the local east and north (as geo::enu).
         let [qx, qy, qz, qw] = s.rot.map(|v| v as f64);
-        let cross = |a: [f64; 3], b: [f64; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+        let cross = |a: [f64; 3], b: [f64; 3]| {
+            [
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0],
+            ]
+        };
         let v = [0.0, 0.0, -1.0];
         let t = cross([qx, qy, qz], v).map(|c| 2.0 * c);
         let u = cross([qx, qy, qz], t);
-        let fwd = [v[0] + qw * t[0] + u[0], v[1] + qw * t[1] + u[1], v[2] + qw * t[2] + u[2]];
+        let fwd = [
+            v[0] + qw * t[0] + u[0],
+            v[1] + qw * t[1] + u[1],
+            v[2] + qw * t[2] + u[2],
+        ];
         let e = [-up[1], up[0], 0.0];
         let el = (e[0] * e[0] + e[1] * e[1]).sqrt();
-        let east = if el < 1e-9 { [0.0, 1.0, 0.0] } else { [e[0] / el, e[1] / el, 0.0] };
+        let east = if el < 1e-9 {
+            [0.0, 1.0, 0.0]
+        } else {
+            [e[0] / el, e[1] / el, 0.0]
+        };
         let north = cross(up, east);
         let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-        let hdg = dot(fwd, east).atan2(dot(fwd, north)).to_degrees().rem_euclid(360.0);
-        let v = s.vel.iter().map(|c| (*c as f64).powi(2)).sum::<f64>().sqrt();
+        let hdg = dot(fwd, east)
+            .atan2(dot(fwd, north))
+            .to_degrees()
+            .rem_euclid(360.0);
+        let v = s
+            .vel
+            .iter()
+            .map(|c| (*c as f64).powi(2))
+            .sum::<f64>()
+            .sqrt();
         Spot {
             id,
             name: clean_name(name),
@@ -166,25 +202,55 @@ impl Spot {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Msg {
-    Hello { name: String },
-    Welcome { id: u32, cookie: u64 },
-    State { cookie: u64, state: PlayerState },
-    Peers { peers: Vec<(u32, String, PlayerState)> },
-    Bye { cookie: u64 },
+    Hello {
+        name: String,
+    },
+    Welcome {
+        id: u32,
+        cookie: u64,
+    },
+    State {
+        cookie: u64,
+        state: PlayerState,
+    },
+    Peers {
+        peers: Vec<(u32, String, PlayerState)>,
+    },
+    Bye {
+        cookie: u64,
+    },
     /// Relay → relay (federation, the game never sees one): the sending
     /// relay's own players. `relay` is that relay's id for this run, `ts`
     /// its clock (unix seconds), `seq` counts up; `tag` signs everything
     /// before it with the network's shared secret (see `fed_tag`).
-    Fed { relay: u32, relay_name: String, ts: u64, seq: u32, players: Vec<(u32, String, PlayerState)>, tag: u64 },
+    Fed {
+        relay: u32,
+        relay_name: String,
+        ts: u64,
+        seq: u32,
+        players: Vec<(u32, String, PlayerState)>,
+        tag: u64,
+    },
     /// Relay → relay: the other relays the sender knows (their id, address
     /// as it sees it, name), so that every relay of the network finds every
     /// other. Signed and numbered as a Fed.
-    Directory { relay: u32, ts: u64, seq: u32, members: Vec<(u32, std::net::SocketAddr, String)>, tag: u64 },
+    Directory {
+        relay: u32,
+        ts: u64,
+        seq: u32,
+        members: Vec<(u32, std::net::SocketAddr, String)>,
+        tag: u64,
+    },
     /// Client → relay: show me the world (see the module notes).
-    Watch { cookie: u64 },
+    Watch {
+        cookie: u64,
+    },
     /// Relay → client: some of the network's players (`total` in all; a
     /// round of several packets lists them all, up to the relay's limit).
-    World { total: u32, spots: Vec<Spot> },
+    World {
+        total: u32,
+        spots: Vec<Spot>,
+    },
 }
 
 /// A name as it may be shown: printable characters only, trimmed, at most
@@ -259,16 +325,22 @@ impl R<'_> {
         self.take(1).map(|b| b[0])
     }
     fn u32(&mut self) -> Option<u32> {
-        self.take(4).map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+        self.take(4)
+            .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
     }
     fn u64(&mut self) -> Option<u64> {
-        self.take(8).map(|b| u64::from_le_bytes(b.try_into().unwrap()))
+        self.take(8)
+            .map(|b| u64::from_le_bytes(b.try_into().unwrap()))
     }
     fn f32(&mut self) -> Option<f32> {
-        self.take(4).map(|b| f32::from_le_bytes(b.try_into().unwrap())).filter(|x| x.is_finite())
+        self.take(4)
+            .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+            .filter(|x| x.is_finite())
     }
     fn f64(&mut self) -> Option<f64> {
-        self.take(8).map(|b| f64::from_le_bytes(b.try_into().unwrap())).filter(|x| x.is_finite())
+        self.take(8)
+            .map(|b| f64::from_le_bytes(b.try_into().unwrap()))
+            .filter(|x| x.is_finite())
     }
     fn name(&mut self) -> Option<String> {
         let n = self.u8()? as usize;
@@ -279,7 +351,11 @@ impl R<'_> {
         Some(clean_name(s))
     }
     fn state(&mut self) -> Option<PlayerState> {
-        let mut s = PlayerState { seq: self.u32()?, aircraft: self.u8()?, ..Default::default() };
+        let mut s = PlayerState {
+            seq: self.u32()?,
+            aircraft: self.u8()?,
+            ..Default::default()
+        };
         for x in s.pos.iter_mut() {
             *x = self.f64()?;
         }
@@ -338,7 +414,14 @@ impl Msg {
                 w.u64(*cookie);
                 w.0
             }
-            Msg::Fed { relay, relay_name, ts, seq, players, tag } => {
+            Msg::Fed {
+                relay,
+                relay_name,
+                ts,
+                seq,
+                players,
+                tag,
+            } => {
                 let mut w = W::new(K_FED);
                 w.u32(*relay);
                 w.name(relay_name);
@@ -354,7 +437,13 @@ impl Msg {
                 w.u64(*tag);
                 w.0
             }
-            Msg::Directory { relay, ts, seq, members, tag } => {
+            Msg::Directory {
+                relay,
+                ts,
+                seq,
+                members,
+                tag,
+            } => {
                 let mut w = W::new(K_DIRECTORY);
                 w.u32(*relay);
                 w.u64(*ts);
@@ -419,8 +508,14 @@ impl Msg {
                 }
                 Msg::Hello { name: r.name()? }
             }
-            K_WELCOME => Msg::Welcome { id: r.u32()?, cookie: r.u64()? },
-            K_STATE => Msg::State { cookie: r.u64()?, state: r.state()? },
+            K_WELCOME => Msg::Welcome {
+                id: r.u32()?,
+                cookie: r.u64()?,
+            },
+            K_STATE => Msg::State {
+                cookie: r.u64()?,
+                state: r.state()?,
+            },
             K_PEERS => {
                 let n = r.u8()? as usize;
                 if n > PEERS_PER_PACKET {
@@ -443,7 +538,14 @@ impl Msg {
                 for _ in 0..n {
                     players.push((r.u32()?, r.name()?, r.state()?));
                 }
-                Msg::Fed { relay, relay_name, ts, seq, players, tag: r.u64()? }
+                Msg::Fed {
+                    relay,
+                    relay_name,
+                    ts,
+                    seq,
+                    players,
+                    tag: r.u64()?,
+                }
             }
             K_DIRECTORY => {
                 let (relay, ts, seq) = (r.u32()?, r.u64()?, r.u32()?);
@@ -462,7 +564,13 @@ impl Msg {
                     let port = u16::from_le_bytes(r.take(2)?.try_into().ok()?);
                     members.push((id, std::net::SocketAddr::new(ip, port), r.name()?));
                 }
-                Msg::Directory { relay, ts, seq, members, tag: r.u64()? }
+                Msg::Directory {
+                    relay,
+                    ts,
+                    seq,
+                    members,
+                    tag: r.u64()?,
+                }
             }
             K_WATCH => Msg::Watch { cookie: r.u64()? },
             K_WORLD => {
@@ -476,11 +584,28 @@ impl Msg {
                 let u16 = |r: &mut R| r.take(2).map(|b| u16::from_le_bytes([b[0], b[1]]));
                 for _ in 0..n {
                     let (id, name, aircraft) = (r.u32()?, r.name()?, r.u8()?);
-                    let (lat, lon, alt, heading, speed, flags) = (i16(&mut r)?, i16(&mut r)?, u16(&mut r)?, r.u8()?, u16(&mut r)?, r.u8()?);
+                    let (lat, lon, alt, heading, speed, flags) = (
+                        i16(&mut r)?,
+                        i16(&mut r)?,
+                        u16(&mut r)?,
+                        r.u8()?,
+                        u16(&mut r)?,
+                        r.u8()?,
+                    );
                     if lat == i16::MIN || lon == i16::MIN {
                         return None;
                     }
-                    spots.push(Spot { id, name, aircraft, lat, lon, alt, heading, speed, flags });
+                    spots.push(Spot {
+                        id,
+                        name,
+                        aircraft,
+                        lat,
+                        lon,
+                        alt,
+                        heading,
+                        speed,
+                        flags,
+                    });
                 }
                 Msg::World { total, spots }
             }
@@ -510,33 +635,109 @@ mod tests {
     use super::*;
 
     fn state() -> PlayerState {
-        PlayerState { seq: 7, aircraft: 8, pos: [4_000_000.0, 300_000.0, 4_950_000.0], rot: [0.0, 0.0, 0.0, 1.0], vel: [10.0, -2.0, 55.0], flaps: 128, gear: 255, throttle: 200, canopy: 0, pitch: -40, roll: 12, yaw: 0, flags: F_NAV | F_BEACON }
+        PlayerState {
+            seq: 7,
+            aircraft: 8,
+            pos: [4_000_000.0, 300_000.0, 4_950_000.0],
+            rot: [0.0, 0.0, 0.0, 1.0],
+            vel: [10.0, -2.0, 55.0],
+            flaps: 128,
+            gear: 255,
+            throttle: 200,
+            canopy: 0,
+            pitch: -40,
+            roll: 12,
+            yaw: 0,
+            flags: F_NAV | F_BEACON,
+        }
     }
 
     #[test]
     fn every_message_comes_back_the_same() {
         for m in [
-            Msg::Hello { name: "F-GXYZ".into() },
-            Msg::Welcome { id: 3, cookie: 0xdead_beef_1234 },
-            Msg::State { cookie: 99, state: state() },
-            Msg::Peers { peers: vec![(1, "Dany".into(), state()), (2, "Roland".into(), state())] },
+            Msg::Hello {
+                name: "F-GXYZ".into(),
+            },
+            Msg::Welcome {
+                id: 3,
+                cookie: 0xdead_beef_1234,
+            },
+            Msg::State {
+                cookie: 99,
+                state: state(),
+            },
+            Msg::Peers {
+                peers: vec![(1, "Dany".into(), state()), (2, "Roland".into(), state())],
+            },
             Msg::Bye { cookie: 5 },
-            Msg::Fed { relay: 77, relay_name: "danux.be".into(), ts: 1_800_000_000, seq: 4, players: vec![(1, "Dany".into(), state())], tag: 9 },
-            Msg::Directory { relay: 77, ts: 1_800_000_000, seq: 5, members: vec![(3, "203.0.113.7:7480".parse().unwrap(), "Asia".into()), (4, "[2001:db8::1]:7480".parse().unwrap(), "US".into())], tag: 11 },
-            Msg::Watch { cookie: 0x1234_5678_9abc },
-            Msg::World { total: 40, spots: vec![Spot::of(1, "Dany", &state()), Spot { id: 2 << 24 | 5, name: "Roland".into(), aircraft: 1, lat: -32767, lon: 32767, alt: 1100, heading: 255, speed: 480, flags: F_GROUND }] },
-            Msg::World { total: 0, spots: Vec::new() },
+            Msg::Fed {
+                relay: 77,
+                relay_name: "danux.be".into(),
+                ts: 1_800_000_000,
+                seq: 4,
+                players: vec![(1, "Dany".into(), state())],
+                tag: 9,
+            },
+            Msg::Directory {
+                relay: 77,
+                ts: 1_800_000_000,
+                seq: 5,
+                members: vec![
+                    (3, "203.0.113.7:7480".parse().unwrap(), "Asia".into()),
+                    (4, "[2001:db8::1]:7480".parse().unwrap(), "US".into()),
+                ],
+                tag: 11,
+            },
+            Msg::Watch {
+                cookie: 0x1234_5678_9abc,
+            },
+            Msg::World {
+                total: 40,
+                spots: vec![
+                    Spot::of(1, "Dany", &state()),
+                    Spot {
+                        id: 2 << 24 | 5,
+                        name: "Roland".into(),
+                        aircraft: 1,
+                        lat: -32767,
+                        lon: 32767,
+                        alt: 1100,
+                        heading: 255,
+                        speed: 480,
+                        flags: F_GROUND,
+                    },
+                ],
+            },
+            Msg::World {
+                total: 0,
+                spots: Vec::new(),
+            },
         ] {
             let b = m.encode();
             assert_eq!(Msg::decode(&b), Some(m.clone()), "{m:?}");
         }
-        assert_eq!(Msg::State { cookie: 1, state: state() }.encode().len(), 6 + 8 + STATE_LEN);
+        assert_eq!(
+            Msg::State {
+                cookie: 1,
+                state: state()
+            }
+            .encode()
+            .len(),
+            6 + 8 + STATE_LEN
+        );
     }
 
     #[test]
     fn the_answer_to_a_hello_is_never_bigger() {
-        let hello = Msg::Hello { name: String::new() }.encode();
-        let welcome = Msg::Welcome { id: u32::MAX, cookie: u64::MAX }.encode();
+        let hello = Msg::Hello {
+            name: String::new(),
+        }
+        .encode();
+        let welcome = Msg::Welcome {
+            id: u32::MAX,
+            cookie: u64::MAX,
+        }
+        .encode();
         assert!(hello.len() >= HELLO_MIN && welcome.len() <= hello.len());
         // A short Hello is not one.
         assert_eq!(Msg::decode(&hello[..HELLO_MIN - 1]), None);
@@ -544,7 +745,11 @@ mod tests {
 
     #[test]
     fn junk_is_turned_away() {
-        let good = Msg::State { cookie: 1, state: state() }.encode();
+        let good = Msg::State {
+            cookie: 1,
+            state: state(),
+        }
+        .encode();
         for n in 0..good.len() {
             assert_eq!(Msg::decode(&good[..n]), None, "cut at {n}");
         }
@@ -553,26 +758,73 @@ mod tests {
         assert_eq!(Msg::decode(&v), None);
         let mut s = state();
         s.pos[0] = f64::NAN;
-        assert_eq!(Msg::decode(&Msg::State { cookie: 1, state: s }.encode()), None);
+        assert_eq!(
+            Msg::decode(
+                &Msg::State {
+                    cookie: 1,
+                    state: s
+                }
+                .encode()
+            ),
+            None
+        );
         s = state();
         s.pos = [1.0, 2.0, 3.0];
-        assert_eq!(Msg::decode(&Msg::State { cookie: 1, state: s }.encode()), None);
+        assert_eq!(
+            Msg::decode(
+                &Msg::State {
+                    cookie: 1,
+                    state: s
+                }
+                .encode()
+            ),
+            None
+        );
         s = state();
         s.rot = [0.0, 0.0, 0.0, 3.0];
-        assert_eq!(Msg::decode(&Msg::State { cookie: 1, state: s }.encode()), None);
+        assert_eq!(
+            Msg::decode(
+                &Msg::State {
+                    cookie: 1,
+                    state: s
+                }
+                .encode()
+            ),
+            None
+        );
     }
 
     #[test]
     fn names_are_cleaned() {
         assert_eq!(clean_name("  Dany\n\u{7}  "), "Dany");
         assert_eq!(clean_name(&"é".repeat(40)).len(), NAME_MAX);
-        let peers = (0..20).map(|i| (i, "x".repeat(NAME_MAX), state())).collect();
+        let peers = (0..20)
+            .map(|i| (i, "x".repeat(NAME_MAX), state()))
+            .collect();
         let b = Msg::Peers { peers }.encode();
         assert!(b.len() < 1200, "{}", b.len());
-        let spots = (0..40).map(|i| Spot { id: i, name: "x".repeat(NAME_MAX), ..Default::default() }).collect();
+        let spots = (0..40)
+            .map(|i| Spot {
+                id: i,
+                name: "x".repeat(NAME_MAX),
+                ..Default::default()
+            })
+            .collect();
         let b = Msg::World { total: 40, spots }.encode();
         assert!(b.len() < 1200, "{}", b.len());
-        assert_eq!(Msg::decode(&b), Some(Msg::World { total: 40, spots: (0..WORLD_PER_PACKET as u32).map(|i| Spot { id: i, name: "x".repeat(NAME_MAX), ..Default::default() }).collect() }));
+        assert_eq!(
+            Msg::decode(&b),
+            Some(Msg::World {
+                total: 40,
+                spots: (0..WORLD_PER_PACKET as u32)
+                    .map(|i| Spot {
+                        id: i,
+                        name: "x".repeat(NAME_MAX),
+                        ..Default::default()
+                    })
+                    .collect()
+            })
+        );
     }
 
     #[test]
@@ -584,23 +836,59 @@ mod tests {
         let east = [-lo.sin(), lo.cos(), 0.0];
         let north = [-la.sin() * lo.cos(), -la.sin() * lo.sin(), la.cos()];
         let h = 45f64.to_radians();
-        let fwd: Vec<f64> = (0..3).map(|i| north[i] * h.cos() + east[i] * h.sin()).collect();
+        let fwd: Vec<f64> = (0..3)
+            .map(|i| north[i] * h.cos() + east[i] * h.sin())
+            .collect();
         // body axes in the world: +X right, +Y up, -Z forward
-        let right: Vec<f64> = (0..3).map(|i| east[i] * h.cos() - north[i] * h.sin()).collect();
+        let right: Vec<f64> = (0..3)
+            .map(|i| east[i] * h.cos() - north[i] * h.sin())
+            .collect();
         let back: Vec<f64> = fwd.iter().map(|x| -x).collect();
         // (rotation matrix columns right, up, back to a quaternion)
-        let m = [[right[0], up[0], back[0]], [right[1], up[1], back[1]], [right[2], up[2], back[2]]];
+        let m = [
+            [right[0], up[0], back[0]],
+            [right[1], up[1], back[1]],
+            [right[2], up[2], back[2]],
+        ];
         let w = (1.0 + m[0][0] + m[1][1] + m[2][2]).max(0.0).sqrt() / 2.0;
         let q = if w > 0.1 {
-            [(m[2][1] - m[1][2]) / (4.0 * w), (m[0][2] - m[2][0]) / (4.0 * w), (m[1][0] - m[0][1]) / (4.0 * w), w]
+            [
+                (m[2][1] - m[1][2]) / (4.0 * w),
+                (m[0][2] - m[2][0]) / (4.0 * w),
+                (m[1][0] - m[0][1]) / (4.0 * w),
+                w,
+            ]
         } else {
             let x = (1.0 + m[0][0] - m[1][1] - m[2][2]).max(0.0).sqrt() / 2.0;
-            [x, (m[0][1] + m[1][0]) / (4.0 * x), (m[0][2] + m[2][0]) / (4.0 * x), (m[2][1] - m[1][2]) / (4.0 * x)]
+            [
+                x,
+                (m[0][1] + m[1][0]) / (4.0 * x),
+                (m[0][2] + m[2][0]) / (4.0 * x),
+                (m[2][1] - m[1][2]) / (4.0 * x),
+            ]
         };
-        let s = PlayerState { pos: up.map(|c| c * r), rot: q.map(|c| c as f32), vel: [fwd[0] as f32 * 100.0, fwd[1] as f32 * 100.0, fwd[2] as f32 * 100.0], flags: F_NAV | F_GROUND, ..state() };
+        let s = PlayerState {
+            pos: up.map(|c| c * r),
+            rot: q.map(|c| c as f32),
+            vel: [
+                fwd[0] as f32 * 100.0,
+                fwd[1] as f32 * 100.0,
+                fwd[2] as f32 * 100.0,
+            ],
+            flags: F_NAV | F_GROUND,
+            ..state()
+        };
         let p = Spot::of(3, "  Dany ", &s);
-        assert!((p.lat_deg() - 45.0).abs() < 0.01 && (p.lon_deg() - 10.0).abs() < 0.01, "{} {}", p.lat_deg(), p.lon_deg());
-        assert_eq!((p.alt_m(), p.speed, p.flags, p.name.as_str()), (1000.0, 194, F_GROUND, "Dany"));
+        assert!(
+            (p.lat_deg() - 45.0).abs() < 0.01 && (p.lon_deg() - 10.0).abs() < 0.01,
+            "{} {}",
+            p.lat_deg(),
+            p.lon_deg()
+        );
+        assert_eq!(
+            (p.alt_m(), p.speed, p.flags, p.name.as_str()),
+            (1000.0, 194, F_GROUND, "Dany")
+        );
         assert!((p.heading_deg() - 45.0).abs() < 1.5, "{}", p.heading_deg());
     }
 }
