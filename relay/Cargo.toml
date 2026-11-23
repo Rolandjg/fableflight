@@ -7,6 +7,10 @@ description = "Multiplayer relay for FableFlight: passes each player's position 
 # (Not part of the game's build: its own crate, built on its own or in Docker.)
 
 [dependencies]
+log        = "0.4"
+env_logger = "0.11"
+anyhow     = "1"
+chrono     = "0.4"
 
 [profile.release]
 opt-level = 3
