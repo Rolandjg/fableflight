@@ -129,6 +129,33 @@ impl Game {
             if qr.clicked() {
                 quit = true;
             }
+
+            // OpenXR headset mode (the launcher enables the runtime at startup).
+            let vr_rect = Rect::from_min_size(pos2(q.right() + 16.0, foot_y - 17.0), vec2(170.0, 34.0));
+            let vrr = ui.interact(vr_rect, ui.scope_id().with("vr_toggle"), Sense::click());
+            let vr_label = if self.vr.enabled { "VR headset [ON]" } else { "VR headset [OFF]" };
+            vrr.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, vr_label));
+            let vr_lit = menu::ease(ctx, vrr.id, vrr.hovered() || vrr.has_focus());
+            let vr_bg = if self.vr.enabled {
+                Color32::from_rgba_premultiplied(0, 150, 180, (60.0 + 40.0 * vr_lit) as u8)
+            } else if vr_lit > 0.0 {
+                Color32::from_white_alpha((14.0 * vr_lit) as u8)
+            } else {
+                Color32::TRANSPARENT
+            };
+            p.rect_filled(vr_rect, menu::R_WIDGET, vr_bg);
+            let vr_col = if self.vr.enabled { ACCENT } else { menu::mix(DIM, Color32::WHITE, vr_lit) };
+            p.text(pos2(vr_rect.center().x, vr_rect.center().y), Align2::CENTER_CENTER, vr_label, menu::medium(13.5), vr_col);
+            if vrr.clicked() {
+                self.vr.enabled = !self.vr.enabled;
+                if self.vr.enabled {
+                    self.cam_mode = 1;
+                }
+            }
+
+            if self.vr.enabled {
+                p.text(pos2(screen.center().x, top - 24.0), Align2::CENTER_CENTER, "◆ OPENXR VR · STEREO COCKPIT ◆", FontId::proportional(13.0), ACCENT);
+            }
             if padui::active() {
                 let mut f = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_center_size(pos2(screen.center().x, foot_y), vec2(360.0, 28.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
                 padui::prompts(&mut f, &[("Dpad", tr_en("move")), ("A", tr_en("press"))], 20.0, 12.5, DIM);

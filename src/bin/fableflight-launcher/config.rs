@@ -11,6 +11,8 @@ pub struct Config {
     pub stage_ms: Vec<(String, u64)>,
     /// minimise the launcher once the game's window is drawing
     pub minimize_on_ready: bool,
+    /// start the game in the experimental VR cockpit mode
+    pub vr_mode: bool,
     /// look for a new release when the launcher opens
     pub check_updates: bool,
     /// the release this launcher last installed into its folder
@@ -21,7 +23,7 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Config { stage_ms: Vec::new(), minimize_on_ready: true, check_updates: true, installed_tag: None, bench: Vec::new() }
+        Config { stage_ms: Vec::new(), minimize_on_ready: true, vr_mode: false, check_updates: true, installed_tag: None, bench: Vec::new() }
     }
 }
 

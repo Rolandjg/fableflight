@@ -605,7 +605,7 @@ pub struct TileGpu {
 /// The cells of the terrain tiles' tessellated blocks (world.rs `tess_cells`),
 /// each `cell | k << 16` for a 2^k x 2^k patch (terrain.wgsl `vs_tess`), in
 /// groups of (tile index in `Frame::tiles`, k, first, count).
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct TessCells {
     pub cells: Vec<u32>,
     pub groups: Vec<(u32, u32, u32, u32)>,
@@ -736,6 +736,7 @@ pub fn tile_bytes(t: &crate::sources::TileData) -> usize {
 /// Distance rings used to sort tree impostor chunks front-to-back for Early-Z occlusion.
 pub const IMP_RINGS: u8 = 6;
 /// One model drawn for a run of the frame's near instances.
+#[derive(Clone)]
 pub struct NearDraw {
     pub mesh: u32,
     pub first: u32,
@@ -745,6 +746,7 @@ pub struct NearDraw {
     /// standing tree (already casts into cascade 0 via `dd.trees`), vs undergrowth
     pub tree: bool,
 }
+#[derive(Clone)]
 pub struct TreeDraw {
     pub mesh: u32,
     pub first: u32,
@@ -762,6 +764,7 @@ pub struct TreeDraw {
     pub ring: u8,
 }
 /// Everything drawn for one detail tile this frame.
+#[derive(Clone)]
 pub struct DetailDraw<'a> {
     pub gpu: &'a BuildGpu,
     /// tile offset, roof atlas mapping, and how far each level of detail has
@@ -999,6 +1002,7 @@ fn obj_pipeline(d: &wgpu::Device, layout: &wgpu::PipelineLayout, m: &wgpu::Shade
         cache: None,
     })
 }
+#[derive(Clone)]
 pub struct DrawObj {
     pub mesh: usize,
     pub model: Mat4,
@@ -1034,6 +1038,7 @@ impl DrawObj {
     pub const DEFAULT: DrawObj = DrawObj { mesh: 0, model: Mat4::IDENTITY, tint: [0.0; 4], glow: [0.0; 4], params: [[0.0; 4]; 6], cast: 0, glass: false, cut: false, tear: [[0.0; 4]; 2], dmg: [0.0; 4], dmg2: [0.0; 4], crumple: [0.0; 4], crumple_dir: [0.0; 4], pose: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]], flex: 0.0 };
 }
 
+#[derive(Clone)]
 pub struct Frame<'a> {
     pub g: Globals,
     /// terrain tile and its uniform: offset, info, tessellated cell block (see terrain.wgsl)
@@ -1177,6 +1182,12 @@ pub struct Renderer {
     device_lost: Arc<std::sync::atomic::AtomicBool>,
     surface: wgpu::Surface<'static>,
     pub config: wgpu::SurfaceConfiguration,
+    #[cfg(windows)]
+    xr: Option<crate::vr::OpenXrRuntime>,
+    #[cfg(windows)]
+    xr_error: Option<String>,
+    #[cfg(windows)]
+    xr_eye: Option<usize>,
     globals_ub: wgpu::Buffer,
     bg0: wgpu::BindGroup,
     bg0_pre: wgpu::BindGroup,
@@ -1967,8 +1978,13 @@ fn wave_texture() -> Vec<u8> {
 impl Renderer {
     /// `samples`: the g-buffer's MSAA samples (1, 2 or 4), or None to suit
     /// the GPU (fewer on integrated graphics).
-    pub async fn new(window: Arc<winit::window::Window>, vsync: bool, samples: Option<u32>) -> anyhow::Result<Self> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    pub async fn new(window: Arc<winit::window::Window>, vsync: bool, samples: Option<u32>, vr_requested: bool) -> anyhow::Result<Self> {
+        let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle();
+        if vr_requested {
+            #[cfg(windows)]
+            { instance_desc.backends = wgpu::Backends::DX12; }
+        }
+        let instance = wgpu::Instance::new(instance_desc);
         let surface = instance.create_surface(window.clone())?;
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, force_fallback_adapter: false, compatible_surface: Some(&surface), ..Default::default() })
@@ -3010,6 +3026,17 @@ impl Renderer {
         if let Some(err) = gpu_error.lock().clone() {
             anyhow::bail!("GPU initialisation error: {err}");
         }
+        #[cfg(windows)]
+        let (xr, xr_error) = if vr_requested {
+            match crate::vr::OpenXrRuntime::new(&adapter, &device, config.format) {
+                Ok(xr) => (Some(xr), None),
+                Err(e) => {
+                    let message = e.to_string();
+                    log::error!("VR startup failed: {message}");
+                    (None, Some(message))
+                }
+            }
+        } else { (None, None) };
         Ok(Self {
             ground_mats,
             casc_ub, bg_casc, bg_tileu, l_dres, l_ao, p_gtao, p_ao_blur, p_dres, p_road, p_field, p_lights, dyn_lights, p_rain, p_veil, p_bolt, bolt_buf, p_contrails, bg_contrails, contrail_nodes, contrail_segs, p_tree, p_tree_near, imp, p_tree_shadow, p_tree_shadow_fixed, p_card, near_buf, p_inst, p_inst_shadow, inst_buf, fall_buf, tree_lib: None, inst_lib: None,
@@ -3019,13 +3046,24 @@ impl Renderer {
             globals_ub, bg0, bg0_pre, bg0_shadow, lut_sky, shadow, shadow_res: SHADOW_RES, bg0_src, scale: 1.0, ao: true, cloud_step: 1.0, l_tile, l_build, l_comp_cls, l_comp_main, l_comp_edge, l_comp_globe, l_hiz, ap_l, ap_t, cloud_refl, bg_atmlut, bg_comp_sky, p_hiz_build, p_ap_build, p_sky_build, p_cloud_refl, p_cloud_refl_plain, l_cloud, l_cloud_storm, l_cloud_rain, l_cloud_apply, l_cloud_temporal, l_post, l_pdraw, l_glass,
             tile_ub, l_photo, photo_ub, p_photo, p_photo_mask, p_photo_shadow, p_photo_shadow_fast, l_skin, p_skin, skin_slots, p_water_top, p_lamp_top, photo_mask, photo_mask_dirty: true, light_cover, light_cover_view, glow_tex, gclouds_tex, snow_tex, snow_track_tex, build_ub, obj_ub, bg_obj, l_obj, paint_ub, font_ub, tile_ibuf, tile_nidx: ix.len() as u32,
             p_sky, p_terrain, p_terrain_far, p_terrain_water, p_terrain_tess, p_terrain_cells, p_terrain_photo, p_terrain_tess_photo, p_terrain_cells_photo, tess_ibuf, tess_idx, tess_buf, tess_cap, cell_ibuf, p_build, p_build_whole, p_build_shadow, obj_gen: None, obj_gen_rx: Some(obj_gen_rx), wait_objs: false, obj_wait: None, obj_src, pl_obj, obj_fast: None, obj_fast_rx: None, p_comp_cls, p_comp_sky, p_comp_opaque, p_comp_glass, p_comp_water, p_comp_edge, p_composite, p_composite_edge, p_cloud, p_cloud_plain, p_cloud_classify, p_cloud_plain_cls, p_cloud_storm_cls, p_cloud_rain, p_cloud_apply, p_cloud_temporal, p_particles, p_taa, p_psim, p_down, p_up, p_final, p_final_taa, p_blit,
-            psim_ub, pbuf, bg_psim, phead: 0, p_vol, bg_vol_a, bg_vol_b, vol_acc, fluid, fluid_t, ocean, shore, p_shore_cover, smoke_until: 0.0, parts_until: 0.0, now: 0.0, black, targets, cloud_flip: 0, cloud_hist_ok: false, clouds: true, cloud_shadows: true, vendor: info.vendor, cshadow, lut_bake, lut_haze: 1.0, taa_flip: 0, taa_hist_ok: false, up, gpu: info.clone(), meshes: Vec::new(), egui, instance, window, gpu_error, device_lost, surface, config, queue, device, stats: [0.0; 4], headless: false, integrated,
+            psim_ub, pbuf, bg_psim, phead: 0, p_vol, bg_vol_a, bg_vol_b, vol_acc, fluid, fluid_t, ocean, shore, p_shore_cover, smoke_until: 0.0, parts_until: 0.0, now: 0.0, black, targets, cloud_flip: 0, cloud_hist_ok: false, clouds: true, cloud_shadows: true, vendor: info.vendor, cshadow, lut_bake, lut_haze: 1.0, taa_flip: 0, taa_hist_ok: false, up, gpu: info.clone(), meshes: Vec::new(), egui, instance, window, gpu_error, device_lost, surface, config, #[cfg(windows)] xr, #[cfg(windows)] xr_error, #[cfg(windows)] xr_eye: None, queue, device, stats: [0.0; 4], headless: false, integrated,
         })
     }
 
     /// Takes the latest uncaptured GPU or device-lost error message, if any.
     pub fn take_gpu_error(&self) -> Option<String> {
         self.gpu_error.lock().take()
+    }
+
+    pub fn vr_status(&self) -> Option<String> {
+        #[cfg(windows)]
+        {
+            if let Some(error) = &self.xr_error { return Some(format!("OpenXR unavailable: {error}")); }
+            if self.xr.is_some() { return Some("OpenXR headset connected".to_string()); }
+            return None;
+        }
+        #[cfg(not(windows))]
+        { Some("Headset VR is supported on Windows only".to_string()) }
     }
 
     /// True if the GPU device was lost.
@@ -3543,7 +3581,65 @@ impl Renderer {
         self.ground_mats.photos = Some(crate::materials::spawn(fetch));
     }
 
-    pub fn render(&mut self, mut f: Frame) {
+    pub fn render(&mut self, f: Frame) {
+        #[cfg(windows)]
+        if self.xr.is_some() {
+            let begin = self.xr.as_mut().and_then(|xr| match xr.poll_begin() {
+                Ok(frame) => frame,
+                Err(e) => { self.xr_error = Some(e.to_string()); log::error!("OpenXR frame failed: {e}"); None }
+            });
+            if let Some(xr_frame) = begin {
+                if xr_frame.should_render && xr_frame.views.len() == 2 {
+                    for eye in 0..2 {
+                        let mut eye_frame = f.clone();
+                        let v = &xr_frame.views[eye];
+                        let tan_l = v.fov.angle_left.tan();
+                        let tan_r = v.fov.angle_right.tan();
+                        let tan_d = v.fov.angle_down.tan();
+                        let tan_u = v.fov.angle_up.tan();
+                        let n = eye_frame.g.misc[0].max(0.01);
+                        let p = glam::Mat4::from_cols_array(&[
+                            2.0/(tan_r-tan_l),0.0,0.0,0.0,
+                            0.0,2.0/(tan_u-tan_d),0.0,0.0,
+                            (tan_r+tan_l)/(tan_r-tan_l),(tan_u+tan_d)/(tan_u-tan_d),0.0,-1.0,
+                            0.0,0.0,n,0.0,
+                        ]);
+                        let h = self.config.height.max(1) as f32;
+                        let render_h = self.render_size().1.max(1) as f32;
+                        let tan_y = eye_frame.g.misc[3] * render_h * 0.5;
+                        let base = glam::Mat4::from_cols_array(&[
+                            1.0/(tan_y*self.config.width.max(1) as f32/h),0.0,0.0,0.0,
+                            0.0,1.0/tan_y,0.0,0.0,
+                            0.0,0.0,0.0,-1.0,
+                            0.0,0.0,n,0.0,
+                        ]);
+                        let center_view = base.inverse() * glam::Mat4::from_cols_array_2d(&eye_frame.g.view_proj);
+                        let pose = v.pose;
+                        let eye_offset = glam::Vec3::new(pose.position.x, pose.position.y, pose.position.z);
+                        let q = glam::Quat::from_xyzw(pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w);
+                        let eye_view = glam::Mat4::from_rotation_translation(q.conjugate(), -eye_offset) * center_view;
+                        let vp = p * eye_view;
+                        eye_frame.g.view_proj = vp.to_cols_array_2d();
+                        eye_frame.g.inv_view_proj = vp.inverse().to_cols_array_2d();
+                        if eye == 1 {
+                            if let Some((_, delta, _)) = &mut eye_frame.egui { *delta = egui::TexturesDelta::default(); }
+                        }
+                        eye_frame.g.cam_delta[3] = 0.0;
+                        self.xr_eye = Some(eye);
+                        self.render_one(eye_frame);
+                    }
+                }
+                self.xr_eye = None;
+                if let Some(xr) = self.xr.as_mut() {
+                    if let Err(e) = xr.finish() { self.xr_error = Some(e.to_string()); log::error!("OpenXR frame end failed: {e}"); }
+                }
+                return;
+            }
+        }
+        self.render_one(f);
+    }
+
+    fn render_one(&mut self, mut f: Frame) {
         if self.up.stale {
             // (AMD's runtime failed last frame: FSR 3.1 takes over)
             self.rebuild_upscale();
@@ -3565,7 +3661,10 @@ impl Renderer {
         let t_acq = std::time::Instant::now();
         // Headless: everything is drawn but nothing is shown, so no frame of the
         // window's is needed (and a hidden or locked screen does not stop it).
-        let frame = if self.headless {
+        let frame = if self.headless || {
+            #[cfg(windows)] { self.xr_eye.is_some() }
+            #[cfg(not(windows))] { false }
+        } {
             None
         } else {
             match self.surface.get_current_texture() {
@@ -3590,7 +3689,10 @@ impl Renderer {
                 }
             }
         };
-        if frame.is_none() && !self.headless {
+        if frame.is_none() && !self.headless && {
+            #[cfg(windows)] { self.xr_eye.is_none() }
+            #[cfg(not(windows))] { true }
+        } {
             if let Some((_, delta, _)) = &mut f.egui {
                 for id in delta.free.drain() {
                     self.egui.free_texture(&id);
@@ -3625,6 +3727,9 @@ impl Renderer {
             }
         }
         self.update_obj_wait(kind);
+        #[cfg(windows)]
+        let sview = self.xr_eye.and_then(|eye| self.xr.as_ref()?.target(eye)).or_else(|| frame.as_ref().map(|f| f.texture.create_view(&Default::default())));
+        #[cfg(not(windows))]
         let sview = frame.as_ref().map(|f| f.texture.create_view(&Default::default()));
         let q = &self.queue;
         self.cloud_flip ^= 1;

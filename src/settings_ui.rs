@@ -458,6 +458,19 @@ impl Game {
                 menu::switch(ui, &mut self.invert_look_outside_y);
             });
         });
+        card(ui, "Virtual Reality", |ui| {
+            row(ui, "OpenXR Headset Mode", "Stereo rendering and tracked cockpit view; enable before launch in the launcher", |ui| {
+                if menu::switch(ui, &mut self.vr.enabled).changed() {
+                    if self.vr.enabled {
+                        self.cam_mode = 1;
+                    }
+                }
+            });
+            if self.vr.enabled {
+                let status = self.r.vr_status().unwrap_or_else(|| "Enable VR in the launcher and restart the game to connect a headset".to_string());
+                row(ui, "Headset status", &status, |_ui| {});
+            }
+        });
     }
 
     fn set_controls(&mut self, ui: &mut Ui) {

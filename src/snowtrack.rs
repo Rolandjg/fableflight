@@ -46,6 +46,7 @@ pub struct Mark {
 }
 
 /// A non-wrapping sub-rectangle of `t_snowtrack` to upload this frame (Rg8Unorm).
+#[derive(Clone)]
 pub struct Upload {
     pub x: u32,
     pub y: u32,
