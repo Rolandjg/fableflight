@@ -83,6 +83,7 @@ pub struct FluidSrc {
 }
 
 /// What the simulation does this frame.
+#[derive(Clone)]
 pub struct FluidFrame {
     pub u: FU,
     pub srcs: Vec<GpuSrc>,

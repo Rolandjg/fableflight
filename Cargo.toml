@@ -35,6 +35,7 @@ ureq = "3.5.1"
 ring = "0.17"
 wgpu = "30"
 winit = "0.30"
+openxr = "0.22"
 roxmltree = "0.20"
 rustc-hash = "2"
 zip = { version = "9.6.0", default-features = false, features = ["deflate"] }
@@ -46,6 +47,7 @@ zip = { version = "9.6.0", default-features = false, features = ["deflate"] }
 # compiler choice (Auto) uses the built-in DXC when it is there. x86-64 MSVC only.
 [target.'cfg(windows)'.dependencies]
 wgpu = { version = "30", features = ["static-dxc"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Direct3D12", "Win32_Graphics_Dxgi"] }
 
 [target.'cfg(any(windows, target_os = "linux"))'.dependencies]
 # opens Feral GameMode's client library (gamemode.rs, Linux) and AMD's FSR 4

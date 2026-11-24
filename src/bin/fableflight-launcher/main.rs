@@ -330,7 +330,8 @@ impl App {
         }
         self.ended = None;
         self.log.clear();
-        match run::spawn(&self.game, &[], &self.cfg.stage_ms, Some(ctx.clone())) {
+        let args = if self.cfg.vr_mode { vec!["--vr".to_string()] } else { Vec::new() };
+        match run::spawn(&self.game, &args, &self.cfg.stage_ms, Some(ctx.clone())) {
             Ok(r) => self.task = Task::Playing { run: r, ready: false },
             Err(e) => self.ended = Some((format!("Couldn't start {}: {e}", self.game.display()), true)),
         }
@@ -926,6 +927,11 @@ impl App {
             ui.add_space(2.0);
             style::row(ui, "Minimise when the game is ready", "Out of the way once the game's window is up; back when you quit", |ui| {
                 if style::switch(ui, &mut self.cfg.minimize_on_ready) {
+                    self.cfg.save();
+                }
+            });
+            style::row(ui, "Start in VR mode", "Start the game with OpenXR headset rendering and tracking", |ui| {
+                if style::switch(ui, &mut self.cfg.vr_mode) {
                     self.cfg.save();
                 }
             });
