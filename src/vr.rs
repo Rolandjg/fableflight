@@ -1090,12 +1090,24 @@ impl Default for HeadPose {
     }
 }
 
+/// Clamps the persistent VR cockpit seat offset (body frame, metres: +X right,
+/// +Y up, -Z forward) to a comfortable range inside the cabin.
+pub fn clamp_seat_offset(v: Vec3) -> Vec3 {
+    Vec3::new(
+        if v.x.is_finite() { v.x.clamp(-0.25, 0.25) } else { 0.0 },
+        if v.y.is_finite() { v.y.clamp(-0.25, 0.25) } else { 0.0 },
+        if v.z.is_finite() { v.z.clamp(-0.35, 0.35) } else { 0.0 },
+    )
+}
+
 /// State for VR settings and desktop preview fallback when no OpenXR headset is active.
 #[derive(Clone, Debug)]
 pub struct VrSystem {
     pub enabled: bool,
     /// Interpupillary distance in metres (typically 0.058 - 0.068 m).
     pub ipd: f32,
+    /// Persistent cockpit seat position offset in aircraft body frame (metres: +X right, +Y up, -Z forward).
+    pub seat_offset: Vec3,
     /// Vertical field of view in degrees.
     pub fov_v: f32,
     /// Horizontal field of view in degrees.
@@ -1124,6 +1136,7 @@ impl VrSystem {
         Self {
             enabled,
             ipd: QUEST_2_IPD_PRESET_2,
+            seat_offset: Vec3::ZERO,
             fov_v: QUEST_2_DEFAULT_FOV_V,
             fov_h: QUEST_2_DEFAULT_FOV_H,
             runtime_detected: detected,
@@ -1132,6 +1145,16 @@ impl VrSystem {
             center_yaw: 0.0,
             center_pos: DVec3::ZERO,
         }
+    }
+
+    /// Shifts the persistent VR cockpit seat position by `delta` (body frame, metres).
+    pub fn nudge_seat(&mut self, delta: Vec3) {
+        self.seat_offset = clamp_seat_offset(self.seat_offset + delta);
+    }
+
+    /// Resets the persistent VR cockpit seat offset back to the aircraft's default eye point.
+    pub fn reset_seat(&mut self) {
+        self.seat_offset = Vec3::ZERO;
     }
 
     /// Recenter the headset view to the current physical forward orientation and position.
@@ -1369,5 +1392,23 @@ mod tests {
         let rr = { let p = inv_r * glam::Vec4::new(0.0, 0.0, 1.0, 1.0); (p.truncate() / p.w).normalize() };
         assert!((rl - Vec3::X).length() < 1e-5, "left view_ray skewed: {rl:?}");
         assert!((rr - Vec3::X).length() < 1e-5, "right view_ray skewed: {rr:?}");
+    }
+
+    #[test]
+    fn test_vr_seat_offset_nudge_clamp_and_reset() {
+        let mut vr = VrSystem::new(true);
+        assert_eq!(vr.seat_offset, Vec3::ZERO);
+
+        // Moving back (+Z) shifts seat rearward; moving forward (-Z) shifts toward the panel.
+        vr.nudge_seat(Vec3::new(0.0, 0.025, 0.06));
+        assert!((vr.seat_offset - Vec3::new(0.0, 0.025, 0.06)).length() < 1e-6);
+
+        // Extreme values and non-finite inputs clamp cleanly.
+        vr.nudge_seat(Vec3::new(1.0, -1.0, 1.0));
+        assert_eq!(vr.seat_offset, Vec3::new(0.25, -0.25, 0.35));
+        assert_eq!(clamp_seat_offset(Vec3::new(f32::NAN, f32::INFINITY, -0.10)), Vec3::new(0.0, 0.0, -0.10));
+
+        vr.reset_seat();
+        assert_eq!(vr.seat_offset, Vec3::ZERO);
     }
 }

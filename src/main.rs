@@ -1858,6 +1858,7 @@ impl Game {
         let pit_blocks = cockpit::blockers(&model.pieces);
         let mut vr = vr::VrSystem::new(vr_requested);
         vr.ipd = prefs.vr_ipd;
+        vr.seat_offset = vr::clamp_seat_offset(Vec3::from(prefs.vr_seat_offset));
         let start_cam_mode = if vr.enabled { 1 } else { args.start_view.unwrap_or(prefs.cam_mode) };
         let mut g = Self {
             gkey: src.google.key(), gkey_show: false, gm_logo: None, stills: std::collections::HashMap::new(), window, r, world, src, spec, model, piece_mesh, group_mesh, piece_cut, piece_inner, piece_cockpit_glass, group_pivots, hangar: Vec::new(), building: Vec::new(), crashed: false, crash: None, crash_real: 0.0, egui_ctx, egui_state, keys: HashSet::new(), drag: false, lean_drag: None, last_cursor: None,
@@ -3686,6 +3687,49 @@ impl Game {
     /// the stations around, the OBS, and the altimeter setting.
     /// The autopilot flies, if engaged: its stick and throttle replace the
     /// pilot's (whose small inputs add to them; a firm one disconnects it).
+    /// Effective VR cockpit eye origin in aircraft body frame (`+X` right, `+Y` up, `-Z` forward),
+    /// combining the aircraft's nominal seated eye point with the persistent VR seat offset.
+    pub(crate) fn vr_seat_eye(&self) -> Vec3 {
+        let base = self.spec.eye2.filter(|_| self.head.rear).unwrap_or(self.spec.eye);
+        base + self.vr.seat_offset
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn nudge_vr_seat(&mut self, delta: Vec3) {
+        self.vr.nudge_seat(delta);
+        self.show_vr_seat_status();
+    }
+
+    pub(crate) fn reset_vr_seat(&mut self) {
+        self.vr.reset_seat();
+        self.status = "VR seat reset".into();
+        self.status_until = self.real + 3.0;
+    }
+
+    #[allow(dead_code)]
+    fn show_vr_seat_status(&mut self) {
+        let o = self.vr.seat_offset;
+        let fwd_cm = (-o.z * 100.0).round() as i32;
+        let up_cm = (o.y * 100.0).round() as i32;
+        let right_cm = (o.x * 100.0).round() as i32;
+        let mut parts = Vec::new();
+        if fwd_cm != 0 {
+            parts.push(if fwd_cm > 0 { format!("{} cm fwd", fwd_cm) } else { format!("{} cm back", -fwd_cm) });
+        }
+        if up_cm != 0 {
+            parts.push(if up_cm > 0 { format!("{} cm up", up_cm) } else { format!("{} cm down", -up_cm) });
+        }
+        if right_cm != 0 {
+            parts.push(if right_cm > 0 { format!("{} cm right", right_cm) } else { format!("{} cm left", -right_cm) });
+        }
+        self.status = if parts.is_empty() {
+            "VR seat: default".into()
+        } else {
+            format!("VR seat: {}", parts.join(", "))
+        };
+        self.status_until = self.real + 3.0;
+    }
+
     fn autopilot(&mut self, dt: f64, c: &mut Controls) {
         // (Scripted presses: --ap.)
         while let Some(k) = self.ap_script.iter().position(|(t, _)| self.real >= *t) {
@@ -5445,7 +5489,7 @@ impl Game {
 
     /// The settings worth keeping, as they are now.
     fn live_settings(&self) -> settings::Settings {
-        settings::Settings { lang: self.prefs_lang, sound_on: self.sound_on, volume: self.volume, cam_mode: self.cam_mode, cockpit_fov: self.cockpit_fov, look_sens: self.look_sens, invert_look_cockpit: self.invert_look_cockpit, invert_look_outside_x: self.invert_look_outside_x, invert_look_outside_y: self.invert_look_outside_y, show_hud: self.show_hud, hud_cockpit: self.hud_cockpit, path_marker: self.path_marker, minimap: self.minimap.visible, landing_guidance: self.minimap.landing_guidance, arcade: self.arcade, minimap_plan: self.minimap.plan, minimap_heading_up: self.minimap.heading_up, minimap_zoom: self.minimap.zoom, minimap_size: self.minimap.size.x, minimap_height: self.minimap.size.y, map_airports: self.minimap.layers.airports, map_navaids: self.minimap.layers.navaids, taa: self.gfx.taa, live_traffic: self.live.enabled(), live_weather: self.wx.live, real_time: self.wx.real_time, snow: self.snow, last: self.last_start.clone(), multiplayer: self.mp_on || self.mp_held, mp_server: self.mp_server.clone(), mp_name: self.mp_name.clone(), vr_mode: self.vr.enabled, vr_ipd: self.vr.ipd }
+        settings::Settings { lang: self.prefs_lang, sound_on: self.sound_on, volume: self.volume, cam_mode: self.cam_mode, cockpit_fov: self.cockpit_fov, look_sens: self.look_sens, invert_look_cockpit: self.invert_look_cockpit, invert_look_outside_x: self.invert_look_outside_x, invert_look_outside_y: self.invert_look_outside_y, show_hud: self.show_hud, hud_cockpit: self.hud_cockpit, path_marker: self.path_marker, minimap: self.minimap.visible, landing_guidance: self.minimap.landing_guidance, arcade: self.arcade, minimap_plan: self.minimap.plan, minimap_heading_up: self.minimap.heading_up, minimap_zoom: self.minimap.zoom, minimap_size: self.minimap.size.x, minimap_height: self.minimap.size.y, map_airports: self.minimap.layers.airports, map_navaids: self.minimap.layers.navaids, taa: self.gfx.taa, live_traffic: self.live.enabled(), live_weather: self.wx.live, real_time: self.wx.real_time, snow: self.snow, last: self.last_start.clone(), multiplayer: self.mp_on || self.mp_held, mp_server: self.mp_server.clone(), mp_name: self.mp_name.clone(), vr_mode: self.vr.enabled, vr_ipd: self.vr.ipd, vr_seat_offset: self.vr.seat_offset.to_array() }
     }
 
     /// Saves the settings when they have changed (looked at once a second,
@@ -6218,7 +6262,7 @@ impl Game {
                 let (xr_pos, xr_rot) = self.r.xr_head_pose().unwrap_or((Vec3::ZERO, glam::Quat::IDENTITY));
                 self.head.update_adapt(self.spec, dt_real, xr_rot.as_dquat(), self.vr.fov_v.to_radians(), 1.0, day);
                 fov = self.vr.fov_v.to_radians();
-                let seat_eye = self.spec.eye2.filter(|_| self.head.rear).unwrap_or(self.spec.eye).as_dvec3();
+                let seat_eye = self.vr_seat_eye().as_dvec3();
                 let cockpit_rot = self.plane.rot * wob;
                 let r = cockpit_rot * xr_rot.as_dquat();
                 cam = self.plane.model_pos() + self.plane.rot * (seat_eye + shake + xr_pos.as_dvec3());

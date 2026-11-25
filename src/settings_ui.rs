@@ -475,8 +475,52 @@ impl Game {
                     }
                 });
                 row(ui, "Headset status", &status, |ui| {
-                    if self.r.xr_active() && ui.button("Recenter").clicked() {
-                        self.r.recenter_vr();
+                    ui.horizontal(|ui| {
+                        if self.r.xr_active() && ui.button("Recenter").clicked() {
+                            self.r.recenter_vr();
+                        }
+                        if self.vr.seat_offset != glam::Vec3::ZERO && ui.button("Reset Seat").clicked() {
+                            self.reset_vr_seat();
+                        }
+                    });
+                });
+                let mut fwd_cm = -self.vr.seat_offset.z * 100.0;
+                row(ui, "Seat Fore / Aft", "Shift your seated VR cockpit position forward toward the panel or back toward the tail", |ui| {
+                    if ui
+                        .add(egui::Slider::new(&mut fwd_cm, -35.0..=35.0).step_by(1.0).custom_formatter(|v, _| {
+                            let n = v.round() as i32;
+                            if n > 0 { format!("+{n} cm fwd") } else if n < 0 { format!("{} cm back", -n) } else { "0 cm".into() }
+                        }))
+                        .changed()
+                    {
+                        self.vr.seat_offset.z = -fwd_cm / 100.0;
+                        self.vr.seat_offset = crate::vr::clamp_seat_offset(self.vr.seat_offset);
+                    }
+                });
+                let mut up_cm = self.vr.seat_offset.y * 100.0;
+                row(ui, "Seat Height", "Raise or lower your seated VR eye height inside the cockpit", |ui| {
+                    if ui
+                        .add(egui::Slider::new(&mut up_cm, -25.0..=25.0).step_by(1.0).custom_formatter(|v, _| {
+                            let n = v.round() as i32;
+                            if n > 0 { format!("+{n} cm up") } else if n < 0 { format!("{} cm down", -n) } else { "0 cm".into() }
+                        }))
+                        .changed()
+                    {
+                        self.vr.seat_offset.y = up_cm / 100.0;
+                        self.vr.seat_offset = crate::vr::clamp_seat_offset(self.vr.seat_offset);
+                    }
+                });
+                let mut right_cm = self.vr.seat_offset.x * 100.0;
+                row(ui, "Seat Left / Right", "Shift your seated VR position left or right across the cockpit", |ui| {
+                    if ui
+                        .add(egui::Slider::new(&mut right_cm, -25.0..=25.0).step_by(1.0).custom_formatter(|v, _| {
+                            let n = v.round() as i32;
+                            if n > 0 { format!("+{n} cm right") } else if n < 0 { format!("{} cm left", -n) } else { "0 cm".into() }
+                        }))
+                        .changed()
+                    {
+                        self.vr.seat_offset.x = right_cm / 100.0;
+                        self.vr.seat_offset = crate::vr::clamp_seat_offset(self.vr.seat_offset);
                     }
                 });
             }
