@@ -83,6 +83,7 @@ mod snowtrack;
 mod world;
 mod yasim;
 pub mod vr;
+mod vr_cockpit;
 
 #[derive(Copy, Clone, PartialEq)]
 enum Mode {
@@ -1255,6 +1256,9 @@ struct Game {
     hot_keys: HashSet<KeyCode>,
     cockpit_controls: Vec<(aircraft::Hotspot, Option<usize>)>,
     pit_blocks: Vec<(usize, Vec3, Vec3)>,
+    vr_cockpit: vr_cockpit::VrCockpit,
+    vr_hand_orbs: [Option<vr_cockpit::VrHandOrbInfo>; 2],
+    vr_impact_shock: f32,
     cam_yaw: f64,
     cam_pitch: f64,
     cam_dist: f64,
@@ -1856,6 +1860,7 @@ impl Game {
         let (cy, cp, cd) = args.cam.unwrap_or((0.0, 0.2, spec.cam_dist));
         let cockpit_controls = aircraft::cockpit_controls(spec, &model.pieces);
         let pit_blocks = cockpit::blockers(&model.pieces);
+        let vr_cockpit = vr_cockpit::VrCockpit::new(spec, &model.pieces);
         let mut vr = vr::VrSystem::new(vr_requested);
         vr.ipd = prefs.vr_ipd;
         vr.seat_offset = vr::clamp_seat_offset(Vec3::from(prefs.vr_seat_offset));
@@ -1902,6 +1907,9 @@ impl Game {
             hot_keys: HashSet::new(),
             cockpit_controls,
             pit_blocks,
+            vr_cockpit,
+            vr_hand_orbs: [None; 2],
+            vr_impact_shock: 0.0,
             livewx: livewx::LiveWx::new(),
             gclouds: globeclouds::GlobeClouds::default(),
             menu_time_set: set_time,
@@ -2076,6 +2084,8 @@ impl Game {
         self.cancel_cockpit_input();
         self.cockpit_controls = aircraft::cockpit_controls(spec, &self.model.pieces);
         self.pit_blocks = cockpit::blockers(&self.model.pieces);
+        self.vr_cockpit = vr_cockpit::VrCockpit::new(spec, &self.model.pieces);
+        self.vr_hand_orbs = [None; 2];
         self.weapons.reset(spec, &self.model.pieces);
         self.cam_dist = spec.cam_dist;
         self.menu.aircraft = aircraft::index_of(spec);
@@ -2971,6 +2981,156 @@ impl Game {
             _ => return None,
         })
     }
+    /// Human-readable action name for a cockpit hotspot action id.
+    fn hotspot_action_label(&self, id: &'static str) -> &'static str {
+        match id {
+            "flaps_up" if self.spec.lever.is_some() => t!("game.raise_nose_visor"),
+            "flaps_down" if self.spec.lever.is_some() => t!("game.lower_nose_visor"),
+            "speedbrake" if self.spec.chute.is_some() => t!("game.drag_chute"),
+            _ => bind::ACTIONS.iter().find(|a| a.id == id).map(|a| a.label()).unwrap_or_else(|| aircraft::c172::cabin::action_label(id)),
+        }
+    }
+
+    /// Title and optional live setting text for a control under a VR hand.
+    fn vr_target_label(&self, target: vr_cockpit::VrHandTarget) -> Option<(String, Option<String>)> {
+        match target {
+            vr_cockpit::VrHandTarget::Yoke => Some((t!("game.vr_yoke").into(), None)),
+            vr_cockpit::VrHandTarget::Stick => Some((t!("game.vr_stick").into(), None)),
+            vr_cockpit::VrHandTarget::Hotspot(i) => {
+                let h = self.cockpit_controls.get(i)?.0;
+                let title = if let Some((up, _)) = h.wheel {
+                    match up {
+                        "throttle_up" => t!("game.vr_throttle"),
+                        "mixture_rich" => t!("game.vr_mixture"),
+                        "prop_up" => t!("game.vr_propeller"),
+                        "cowl_open" => t!("game.vr_cowl_flaps"),
+                        "flaps_up" if self.spec.lever.is_some() => t!("game.vr_nose_visor"),
+                        "flaps_up" => t!("game.vr_flaps"),
+                        "trim_down" => t!("game.vr_pitch_trim"),
+                        "obs_right" => t!("game.vr_obs"),
+                        "ap_hdg_right" => t!("game.vr_heading_bug"),
+                        "ap_alt_up" => t!("game.vr_altitude_preselect"),
+                        "ap_vs_up" => t!("game.vr_vertical_speed"),
+                        "ap_spd_up" => t!("game.vr_speed_target"),
+                        "nav_next" => t!("game.vr_nav_radio"),
+                        "adf_next" => t!("game.vr_adf_radio"),
+                        "fuel_next" => t!("game.vr_fuel_selector"),
+                        _ => self.hotspot_action_label(up),
+                    }
+                    .to_string()
+                } else if let Some(id) = h.click {
+                    if id == "ignition" && self.spec.is_jet() {
+                        t!("game.vr_fuel_control").to_string()
+                    } else if id == "ignition" && h.hold == Some("starter") {
+                        t!("game.vr_magnetos_starter").to_string()
+                    } else {
+                        self.hotspot_action_label(id).to_string()
+                    }
+                } else if let Some(id) = h.hold {
+                    self.hotspot_action_label(id).to_string()
+                } else {
+                    return None;
+                };
+                let state = h.click.or(h.wheel.map(|w| w.0)).or(h.hold).and_then(|id| self.hot_state(id));
+                Some((title, state))
+            }
+        }
+    }
+
+    /// Builds stereoscopic 3D floating labels for whatever cockpit controls the
+    /// pilot's VR hands are hovering over or actively manipulating.
+    fn vr_cockpit_labels(&self, ctx: &egui::Context, cam: DVec3) -> Vec<(Vec3, Vec3, Vec3, f32, Vec<egui::Shape>)> {
+        use egui::{Align2, Color32, CornerRadius, Stroke};
+        if !self.r.xr_active() || self.cam_mode != 1 || self.crashed || self.pause_open || self.info_open || self.goto_open || self.radial.open || self.show_help || self.minimap.full {
+            return Vec::new();
+        }
+        // Collect targets from both hands, deduplicating when both hands touch the same control.
+        let mut items: Vec<(vr_cockpit::VrHandTarget, vr_cockpit::HandMode, Vec3, u32)> = Vec::new();
+        for orb in self.vr_hand_orbs.into_iter().flatten() {
+            let Some(target) = orb.target else { continue };
+            if orb.mode == vr_cockpit::HandMode::Idle {
+                continue;
+            }
+            // Keep the flight view unobstructed while actively steering the yoke or stick;
+            // still show the label on hover so the pilot knows what their hand is resting on.
+            if matches!(target, vr_cockpit::VrHandTarget::Yoke | vr_cockpit::VrHandTarget::Stick)
+                && orb.mode == vr_cockpit::HandMode::Active
+            {
+                continue;
+            }
+            let base = orb.target_pos.unwrap_or(orb.body_pos);
+            let anchor_body = Vec3::new(base.x, base.y.max(orb.body_pos.y) + 0.052, base.z);
+            if let Some(existing) = items.iter_mut().find(|e| e.0 == target) {
+                existing.2 = (existing.2 * existing.3 as f32 + anchor_body) / (existing.3 + 1) as f32;
+                existing.3 += 1;
+                if orb.mode == vr_cockpit::HandMode::Active {
+                    existing.1 = vr_cockpit::HandMode::Active;
+                }
+            } else {
+                items.push((target, orb.mode, anchor_body, 1));
+            }
+        }
+        if items.is_empty() {
+            return Vec::new();
+        }
+        let plane_base = Mat4::from_rotation_translation(self.plane.rot.as_quat(), (self.plane.model_pos() - cam).as_vec3());
+        let world_up = self.plane.up().as_vec3();
+        let fallback_right = self.plane.right().as_vec3();
+        let painter = ctx.layer_painter(egui::LayerId::background());
+        let mut out = Vec::with_capacity(items.len());
+
+        for (target, mode, anchor_body, _) in items {
+            let Some((title, state)) = self.vr_target_label(target) else { continue };
+            let rel_pos = plane_base.transform_point3(anchor_body);
+            let Some((right, up, scale)) = vr::cockpit_label_basis(rel_pos, world_up, fallback_right) else { continue };
+
+            let active = mode == vr_cockpit::HandMode::Active;
+            let accent = if active {
+                Color32::from_rgba_unmultiplied(45, 225, 255, 240)
+            } else {
+                Color32::from_rgba_unmultiplied(255, 212, 82, 235)
+            };
+            let bg = Color32::from_rgba_unmultiplied(12, 16, 22, 222);
+
+            let title_g = painter.layout_no_wrap(title, menu::semibold(15.0), Color32::WHITE);
+            let state_g = state.map(|s| painter.layout_no_wrap(s, menu::medium(13.5), accent));
+
+            let pad_x = 10.0f32;
+            let pad_y = 6.0f32;
+            let line_gap = 2.0f32;
+            let stem_h = 7.0f32;
+            let content_w = title_g.size().x.max(state_g.as_ref().map_or(0.0, |g| g.size().x));
+            let content_h = title_g.size().y + state_g.as_ref().map_or(0.0, |g| line_gap + g.size().y);
+            let box_w = content_w + pad_x * 2.0;
+            let box_h = content_h + pad_y * 2.0;
+
+            let rect = egui::Rect::from_min_max(
+                egui::pos2(-box_w * 0.5, -(stem_h + box_h)),
+                egui::pos2(box_w * 0.5, -stem_h),
+            );
+
+            let mut shapes = Vec::with_capacity(5);
+            shapes.push(egui::Shape::rect_filled(rect, CornerRadius::same(6), bg));
+            shapes.push(egui::Shape::rect_stroke(rect, CornerRadius::same(6), Stroke::new(1.3, accent), egui::StrokeKind::Inside));
+            shapes.push(egui::Shape::convex_polygon(
+                vec![egui::pos2(-5.5, -stem_h), egui::pos2(5.5, -stem_h), egui::pos2(0.0, 0.0)],
+                accent,
+                Stroke::NONE,
+            ));
+
+            let title_pos = Align2::CENTER_TOP.anchor_size(egui::pos2(0.0, rect.top() + pad_y), title_g.size()).min;
+            let title_h = title_g.size().y;
+            shapes.push(egui::Shape::galley(title_pos, title_g, Color32::WHITE));
+            if let Some(sg) = state_g {
+                let state_pos = Align2::CENTER_TOP.anchor_size(egui::pos2(0.0, rect.top() + pad_y + title_h + line_gap), sg.size()).min;
+                shapes.push(egui::Shape::galley(state_pos, sg, accent));
+            }
+
+            out.push((rel_pos, right, up, scale, shapes));
+        }
+        out
+    }
+
     /// The cockpit control under the mouse: a ring round it, what it is, how
     /// it is set, and the pointing hand.
     ///
@@ -3018,12 +3178,7 @@ impl Game {
         let painter = ctx.layer_painter(egui::LayerId::background());
         let ring = Color32::from_rgba_unmultiplied(255, 210, 90, 200);
         painter.circle_stroke(c, (e - c).length().max(6.0), egui::Stroke::new(1.5, ring));
-        let label = |id: &'static str| match id {
-            "flaps_up" if self.spec.lever.is_some() => t!("game.raise_nose_visor"),
-            "flaps_down" if self.spec.lever.is_some() => t!("game.lower_nose_visor"),
-            "speedbrake" if self.spec.chute.is_some() => t!("game.drag_chute"),
-            _ => bind::ACTIONS.iter().find(|a| a.id == id).map(|a| a.label()).unwrap_or_else(|| aircraft::c172::cabin::action_label(id)),
-        };
+        let label = |id: &'static str| self.hotspot_action_label(id);
         if aim.is_some() {
             // The pad: each action with the buttons that do it (none: not on the pad).
             let mut rows: Vec<(String, String)> = Vec::new();
@@ -3107,6 +3262,7 @@ impl Game {
         }
         self.gamepad(dt, &mut c);
         self.joystick(&mut c);
+        self.vr_controls(dt, &mut c);
         self.autopilot(dt, &mut c);
         c.brake |= self.plane.parking_brake;
         if let Some(t) = self.crash_at {
@@ -3730,6 +3886,122 @@ impl Game {
         self.status_until = self.real + 3.0;
     }
 
+    fn vr_controls(&mut self, dt: f64, c: &mut Controls) {
+        if !self.r.xr_active() {
+            self.vr_hand_orbs = [None; 2];
+            return;
+        }
+        let raw_hands = self.r.xr_hands();
+        if self.mode == Mode::Menu || self.pause_open || self.info_open || self.goto_open || self.loading.is_some() || self.radial.open || self.show_help || self.minimap.full || self.crashed || self.wreck_t > 2.0 {
+            self.vr_cockpit.cancel_grabs();
+            self.vr_cockpit.sync_buttons(raw_hands);
+            self.vr_hand_orbs = [None; 2];
+            return;
+        }
+        let seat_eye = self.vr_seat_eye();
+        let pose = self.plane.pose(&self.model.pieces);
+        let hs = self.cockpit_hotspots(&pose);
+        let can_interact = self.mode == Mode::Fly && self.cam_mode == 1 && !self.pause_open && !self.crashed;
+        let snap = vr_cockpit::AircraftSnapshot {
+            pitch: self.plane.stick.x,
+            roll: self.plane.stick.z,
+            throttle: self.plane.throttle,
+            mixture: self.plane.mixture,
+            propeller: self.plane.propeller,
+            cowl_flaps: self.plane.cowl_flaps,
+            flap_set: self.plane.flap_set,
+            max_flap_notch: self.spec.max_notch(),
+            real_boost: self.spec.real_boost(),
+        };
+        let out = self.vr_cockpit.step(
+            dt,
+            seat_eye,
+            raw_hands,
+            &self.model.pieces,
+            &pose,
+            &self.cockpit_controls,
+            &hs,
+            snap,
+            can_interact,
+        );
+        self.vr_hand_orbs = out.orbs;
+        if let Some(p) = out.pitch {
+            c.pitch = p;
+        }
+        if let Some(r) = out.roll {
+            c.roll = r;
+        }
+        if let Some(y) = out.yaw {
+            if c.yaw == 0.0 {
+                c.yaw = y;
+            }
+        }
+        if let Some(t) = out.throttle_set {
+            c.throttle_set = Some(t);
+            self.ap.at = false;
+        }
+        if out.boost && (self.arcade || self.spec.real_boost()) {
+            c.boost = true;
+        }
+        if out.brake {
+            c.brake = true;
+        }
+        if out.brake_left > 0.0 {
+            c.brake_left = c.brake_left.max(out.brake_left);
+        }
+        if out.brake_right > 0.0 {
+            c.brake_right = c.brake_right.max(out.brake_right);
+        }
+        if out.starter {
+            c.starter = true;
+        }
+        if out.reverse {
+            c.reverse = true;
+        }
+        if let Some(m) = out.mixture_set {
+            if !self.spec.is_jet() {
+                self.plane.mixture = m;
+            }
+        }
+        if let Some(p) = out.prop_set {
+            self.plane.propeller = p;
+        }
+        if let Some(cf) = out.cowl_set {
+            self.plane.cowl_flaps = cf;
+        }
+        if out.trim_delta != 0.0 && can_interact {
+            self.plane.trim = (self.plane.trim + out.trim_delta).clamp(-0.05, 0.24);
+        }
+        for ev in out.events {
+            match ev {
+                vr_cockpit::VrCockpitEvent::TriggerAction("obs_right") => {
+                    self.radios.obs = (self.radios.obs + 2.0).rem_euclid(360.0);
+                }
+                vr_cockpit::VrCockpitEvent::TriggerAction("obs_left") => {
+                    self.radios.obs = (self.radios.obs - 2.0).rem_euclid(360.0);
+                }
+                vr_cockpit::VrCockpitEvent::TriggerAction(id) => {
+                    if let Some(k) = Self::action_key(id) {
+                        self.key(k);
+                    } else {
+                        self.cockpit_action(id);
+                    }
+                }
+                vr_cockpit::VrCockpitEvent::RecenterVr => {
+                    self.r.recenter_vr();
+                    self.status = "VR view recentered".into();
+                    self.status_until = self.real + 3.0;
+                }
+                vr_cockpit::VrCockpitEvent::FlightMenu => {
+                    self.flight_menu_key();
+                }
+                vr_cockpit::VrCockpitEvent::PauseMenu => {
+                    self.key(KeyCode::Escape);
+                }
+            }
+        }
+    }
+
     fn autopilot(&mut self, dt: f64, c: &mut Controls) {
         // (Scripted presses: --ap.)
         while let Some(k) = self.ap_script.iter().position(|(t, _)| self.real >= *t) {
@@ -3763,7 +4035,7 @@ impl Game {
                 c.roll = o.roll;
                 if let Some(t) = o.throttle_set {
                     // The throttle keys take the power back from the autothrottle.
-                    if c.throttle != 0.0 {
+                    if c.throttle != 0.0 || c.throttle_set.is_some() {
                         self.ap.at = false;
                     } else {
                         c.throttle_set = Some(t);
@@ -4231,6 +4503,7 @@ impl Game {
         self.hot_keys.clear();
         self.wheel_hold.clear();
         self.wheel_acc = cockpit::WheelSteps::default();
+        self.vr_cockpit.cancel_grabs();
     }
 
     /// Keep the pointer at screen centre while mouse-look is active. The ray
@@ -5763,9 +6036,11 @@ impl Game {
                     if let Some(a) = &self.audio {
                         a.event(audio::Event::Crunch((self.plane.vel.length() / 50.0).clamp(0.4, 1.6) as f32));
                     }
+                    self.vr_impact_shock = self.vr_impact_shock.max(0.75);
                 }
                 // Parts that came off: let go of them where the aircraft is now.
                 if !self.plane.shed.is_empty() {
+                    self.vr_impact_shock = self.vr_impact_shock.max(0.85);
                     self.anchor_fx(self.plane.pos);
                     let pose = self.plane.pose(&self.model.pieces);
                     let reqs: Vec<_> = self.plane.shed.drain(..).collect();
@@ -5910,6 +6185,8 @@ impl Game {
                     }
                     self.crash = Some(crash);
                     self.crashed = true;
+                    self.vr_cockpit.cancel_grabs();
+                    self.vr_impact_shock = 1.0;
                     self.crash_real = self.real;
                     self.orbit = 0.0;
                     // Watch from back along the way it came in: that air is
@@ -5934,6 +6211,42 @@ impl Game {
             }
         }
         crate::gputime::cpu("sim.flight_physics+weapons");
+        if self.r.xr_active() && !in_menu {
+            let shock = std::mem::take(&mut self.vr_impact_shock);
+            let up_dir = self.plane.pos.normalize();
+            let sink_rate = (-self.plane.vel.dot(up_dir)).max(0.0) as f32;
+            let ground_speed = (self.plane.vel - up_dir * self.plane.vel.dot(up_dir)).length() as f32;
+            let stall_a = self.plane.stall_alpha().max(0.08);
+            let braking = if c.brake { 1.0 } else { c.brake_left.max(c.brake_right) as f32 };
+            let fb = vr_cockpit::FlightFeedback {
+                dt: dt_real,
+                gust_speed: self.plane.gust.length() as f32,
+                gust_rot: self.plane.gust_rot.length() as f32,
+                sigma_w: self.plane.air.sigma_w as f32,
+                sf: self.plane.sf.as_vec3(),
+                stalled: self.plane.stalled,
+                alpha_frac: (self.plane.alpha.abs() / stall_a) as f32,
+                g_load: self.plane.g_load as f32,
+                overspeed: self.plane.overspeed() as f32,
+                ias: self.plane.ias() as f32,
+                on_ground: self.plane.on_ground,
+                ground_speed,
+                sink_rate,
+                burner: self.plane.burner as f32,
+                running: self.plane.running,
+                power: self.plane.power as f32,
+                braking,
+                damage_vibe: self.plane.dmg.vibe,
+                impact_shock: shock,
+            };
+            for cmd in self.vr_cockpit.step_flight_haptics(fb).into_iter().flatten() {
+                if cmd.amplitude <= 0.005 {
+                    self.r.xr_stop_haptic(cmd.hand);
+                } else {
+                    self.r.xr_apply_haptic(cmd.hand, cmd.amplitude, cmd.frequency, cmd.duration_ns);
+                }
+            }
+        }
         if dt > 0.0 && !self.kills.is_empty() {
             self.step_kills(dt, &mut femit);
         }
@@ -6910,7 +7223,7 @@ impl Game {
         // The globe's labels are placed in the window's pixels, not the (maybe smaller) 3D scene's.
         let (ww, wh) = (self.r.config.width as f32, self.r.config.height as f32);
         crate::gputime::cpu("live_traffic+weather_fetch");
-        let ui = if in_menu { self.menu_ui(vp, cam, ww, wh) } else { self.ui(agl) };
+        let (ui, vr_globe) = if in_menu { (self.menu_ui(vp, cam, ww, wh), vr::VrGlobeLabels::default()) } else { self.ui(agl, cam) };
         crate::gputime::cpu("ui.build(egui)");
         // The smoke volume: a grid around the effects anchor, on its local east/north/up axes.
         {
@@ -7007,9 +7320,20 @@ impl Game {
             self.contrail_draw.segs.clear();
         }
         crate::gputime::cpu("sim.contrails");
+        let mut vr_orbs = Vec::new();
+        if self.r.xr_active() && self.cam_mode == 1 && !self.crashed && !in_menu {
+            let plane_base = Mat4::from_rotation_translation(self.plane.rot.as_quat(), (self.plane.model_pos() - cam).as_vec3());
+            for info in self.vr_hand_orbs.into_iter().flatten() {
+                let p = plane_base.transform_point3(info.body_pos);
+                vr_orbs.push(vr::VrOrb {
+                    pos_r: [p.x, p.y, p.z, info.radius],
+                    state: [info.mode.as_shader_mode(), info.pulse, info.grip, 0.0],
+                });
+            }
+        }
         let rain_drops = if in_menu || (self.cam_rain < 0.002 && self.cam_blow < 0.01) { 0 } else { render::RAIN_DROPS };
         crate::gputime::cpu("shore+fields+misc");
-        self.r.render(Frame { rain_drops, bolts, contrails: &self.contrail_draw, g, tiles, tess, details, photo, skins, skin_slots, fields, lights: air_lights, objs, insts, scenery, fall, near, casc_vp, shore: sf.step, shore_c, shore_tiles, psim, sim_steps: dt > 0.0, fluid, ocean: self.world.water_in_view().then(|| self.world.ocean.uniform()), egui: Some(ui), shot, cover, glow: glow_px, snow: snow_px, snow_tracks: snow_tr_uploads, xr_base });
+        self.r.render(Frame { rain_drops, bolts, contrails: &self.contrail_draw, g, tiles, tess, details, photo, skins, skin_slots, fields, lights: air_lights, objs, insts, scenery, fall, near, casc_vp, shore: sf.step, shore_c, shore_tiles, psim, sim_steps: dt > 0.0, fluid, ocean: self.world.water_in_view().then(|| self.world.ocean.uniform()), egui: Some(ui), shot, cover, glow: glow_px, snow: snow_px, snow_tracks: snow_tr_uploads, xr_base, vr_orbs, vr_globe });
         self.finish_mcp_shots();
         if (had_shots && std::env::args().any(|a| a == "--shot") && self.record.is_none()) || rec_done {
             self.quit = true;
@@ -8095,8 +8419,9 @@ impl Game {
         Some(out)
     }
 
-    fn ui(&mut self, agl: f64) -> (Vec<egui::ClippedPrimitive>, egui::TexturesDelta, f32) {
+    fn ui(&mut self, agl: f64, cam: DVec3) -> ((Vec<egui::ClippedPrimitive>, egui::TexturesDelta, f32), vr::VrGlobeLabels) {
         let raw = self.egui_input();
+        let mut vr_raw_labels: Vec<(Vec3, Vec3, Vec3, f32, Vec<egui::Shape>)> = Vec::new();
         let (lat, lon, alt) = geo::pos_to_lla(self.plane.pos);
         let (e, n, u) = geo::enu(self.plane.pos);
         let f = self.plane.forward();
@@ -8468,6 +8793,7 @@ impl Game {
                 });
             }
             padui::focus_ring(ctx, menu::ACCENT);
+            vr_raw_labels = self.vr_cockpit_labels(ctx, cam);
         });
         self.egui_state.handle_platform_output(&self.window, out.platform_output);
         if self.mouse_captured { self.window.set_cursor_visible(false); }
@@ -8530,7 +8856,23 @@ impl Game {
             None => {}
         }
         let jobs = self.egui_ctx.tessellate(out.shapes, out.pixels_per_point);
-        (jobs, out.textures_delta, out.pixels_per_point)
+        let vr_labels = if vr_raw_labels.is_empty() {
+            vr::VrGlobeLabels::default()
+        } else {
+            let labels = vr_raw_labels
+                .into_iter()
+                .map(|(rel_pos, right, up, scale, shapes)| {
+                    let clipped = shapes
+                        .into_iter()
+                        .map(|shape| egui::epaint::ClippedShape { clip_rect: egui::Rect::EVERYTHING, shape, transform_after_tessellation: egui::emath::TSTransform::IDENTITY })
+                        .collect();
+                    let primitives = self.egui_ctx.tessellate(clipped, out.pixels_per_point);
+                    vr::VrGlobeLabel { rel_pos, right, up, scale, primitives }
+                })
+                .collect();
+            vr::VrGlobeLabels { labels, pixels_per_point: out.pixels_per_point }
+        };
+        ((jobs, out.textures_delta, out.pixels_per_point), vr_labels)
     }
 }
 

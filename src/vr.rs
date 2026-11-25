@@ -37,6 +37,224 @@ pub struct XrViewBase {
     pub head_pos: Vec3,
 }
 
+/// GPU instance data for one translucent 3D VR hand indicator orb.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct VrOrb {
+    /// Camera-relative 3D position (m) and sphere radius (m) in `w`.
+    pub pos_r: [f32; 4],
+    /// `x`: visual mode (`0` = idle yellow, `1` = hover glowing yellow, `2` = active cyan);
+    /// `y`: pulse/activity strength `0..1`; `z`: grip/trigger amount `0..1`; `w`: reserved.
+    pub state: [f32; 4],
+}
+
+/// Angular size (radians per egui logical point) of 3D-anchored globe labels in VR.
+/// Gives ~0.98° tall city names (14 pt) across all headset FOVs and resolutions.
+pub const VR_GLOBE_RAD_PER_PT: f32 = 1.0 / 820.0;
+
+/// Angular size (radians per egui logical point) of 3D-anchored cockpit hand labels in VR.
+/// Gives ~1.26° tall control names (15 pt) at arm's length for effortless legibility.
+pub const VR_COCKPIT_RAD_PER_PT: f32 = 1.0 / 680.0;
+
+/// One 3D-anchored label or marker on the VR globe (city, airport, multiplayer plane,
+/// or start spot), pre-tessellated in local egui points around `(0, 0)` and projected
+/// stereoscopically through each eye's exact view-projection matrix.
+#[derive(Clone, Debug)]
+pub struct VrGlobeLabel {
+    /// Camera-relative 3D position on the Earth surface `(p_ecef - cam)` in metres.
+    pub rel_pos: Vec3,
+    /// Unit right axis of the viewer-facing billboard plane at `rel_pos` (camera-relative world space).
+    pub right: Vec3,
+    /// Unit up axis of the viewer-facing billboard plane at `rel_pos` (camera-relative world space).
+    pub up: Vec3,
+    /// World-space metres per egui logical point (`rel_pos.length() * VR_GLOBE_RAD_PER_PT`).
+    pub scale: f32,
+    /// Local-space tessellated egui primitives around `(0, 0)` (+X right, +Y down).
+    pub primitives: Vec<egui::ClippedPrimitive>,
+}
+
+/// Collection of 3D-anchored globe labels/markers projected per eye in VR so text stays
+/// locked to the curved 3D planet with exact stereoscopic depth and full headset FOV.
+#[derive(Clone, Debug, Default)]
+pub struct VrGlobeLabels {
+    pub labels: Vec<VrGlobeLabel>,
+    pub pixels_per_point: f32,
+}
+
+/// Computes a viewer-facing billboard basis `(right, up, scale)` at camera-relative Earth
+/// surface point `rel_pos`. Uses `world_up` (globe North / seated +Y) so both eyes share
+/// the exact same 3D plane and labels stay upright with the globe.
+pub fn globe_label_basis(rel_pos: Vec3, world_up: Vec3, fallback_right: Vec3) -> Option<(Vec3, Vec3, f32)> {
+    let dist = rel_pos.length();
+    if !dist.is_finite() || dist < 1.0 {
+        return None;
+    }
+    let to_cam = -rel_pos / dist;
+    let ref_up = if to_cam.dot(world_up).abs() > 0.98 {
+        fallback_right
+    } else {
+        world_up
+    };
+    let right = ref_up.cross(to_cam).normalize_or_zero();
+    if right.length_squared() < 0.5 {
+        return None;
+    }
+    let up = to_cam.cross(right).normalize_or_zero();
+    if up.length_squared() < 0.5 {
+        return None;
+    }
+    let scale = dist * VR_GLOBE_RAD_PER_PT;
+    Some((right, up, scale))
+}
+
+/// Computes a viewer-facing billboard basis `(right, up, scale)` for a 3D cockpit
+/// control tooltip at camera-relative position `rel_pos` (typically 0.25–1.0 m away).
+pub fn cockpit_label_basis(rel_pos: Vec3, world_up: Vec3, fallback_right: Vec3) -> Option<(Vec3, Vec3, f32)> {
+    let dist = rel_pos.length();
+    if !dist.is_finite() || dist < 0.08 {
+        return None;
+    }
+    let to_cam = -rel_pos / dist;
+    let ref_up = if to_cam.dot(world_up).abs() > 0.98 {
+        fallback_right
+    } else {
+        world_up
+    };
+    let right = ref_up.cross(to_cam).normalize_or_zero();
+    if right.length_squared() < 0.5 {
+        return None;
+    }
+    let up = to_cam.cross(right).normalize_or_zero();
+    if up.length_squared() < 0.5 {
+        return None;
+    }
+    let scale = dist.clamp(0.28, 1.2) * VR_COCKPIT_RAD_PER_PT;
+    Some((right, up, scale))
+}
+
+impl VrGlobeLabels {
+    pub fn is_empty(&self) -> bool {
+        self.labels.is_empty()
+    }
+
+    /// Projects all 3D-anchored globe labels through `eye_vp` into egui primitives sized
+    /// for a target framebuffer of `[eye_w, eye_h]` physical pixels.
+    pub fn project_for_eye(&self, eye_vp: Mat4, eye_w: u32, eye_h: u32) -> Vec<egui::ClippedPrimitive> {
+        if self.labels.is_empty() || eye_w == 0 || eye_h == 0 {
+            return Vec::new();
+        }
+        let ppp = self.pixels_per_point.max(0.5);
+        let sw = eye_w as f32 / ppp;
+        let sh = eye_h as f32 / ppp;
+        let clip_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(sw, sh));
+        let mut out = Vec::with_capacity(self.labels.len() * 2);
+
+        for lbl in &self.labels {
+            let ac = eye_vp * lbl.rel_pos.extend(1.0);
+            if ac.w <= 1e-3 {
+                continue;
+            }
+            let ax = ac.x / ac.w;
+            let ay = ac.y / ac.w;
+            // Generous left margin because text extends to the right (+X) of its anchor dot.
+            if !ax.is_finite() || !ay.is_finite() || ax < -1.65 || ax > 1.35 || ay < -1.35 || ay > 1.35 {
+                continue;
+            }
+
+            let sx_axis = lbl.right * lbl.scale;
+            let sy_axis = -lbl.up * lbl.scale;
+
+            for prim in &lbl.primitives {
+                let egui::epaint::Primitive::Mesh(src_mesh) = &prim.primitive else {
+                    continue;
+                };
+                if src_mesh.vertices.is_empty() || src_mesh.indices.is_empty() {
+                    continue;
+                }
+                let mut mesh = egui::epaint::Mesh {
+                    indices: src_mesh.indices.clone(),
+                    vertices: Vec::with_capacity(src_mesh.vertices.len()),
+                    texture_id: src_mesh.texture_id,
+                };
+                let mut ok = true;
+                let mut any_visible = false;
+                for v in &src_mesh.vertices {
+                    let p3d = lbl.rel_pos + sx_axis * v.pos.x + sy_axis * v.pos.y;
+                    let c = eye_vp * p3d.extend(1.0);
+                    if c.w <= 1e-3 {
+                        ok = false;
+                        break;
+                    }
+                    let nx = c.x / c.w;
+                    let ny = c.y / c.w;
+                    if !nx.is_finite() || !ny.is_finite() {
+                        ok = false;
+                        break;
+                    }
+                    if (-1.05..=1.05).contains(&nx) && (-1.05..=1.05).contains(&ny) {
+                        any_visible = true;
+                    }
+                    let px = (nx * 0.5 + 0.5) * sw;
+                    let py = (0.5 - ny * 0.5) * sh;
+                    mesh.vertices.push(egui::epaint::Vertex {
+                        pos: egui::pos2(px, py),
+                        uv: v.uv,
+                        color: v.color,
+                    });
+                }
+                if ok && any_visible {
+                    out.push(egui::ClippedPrimitive {
+                        clip_rect,
+                        primitive: egui::epaint::Primitive::Mesh(mesh),
+                    });
+                }
+            }
+        }
+        out
+    }
+}
+
+/// Tracked OpenXR hand controller state in the recentered seated cockpit frame
+/// (+X right, +Y up, -Z forward, origin at the recentered head midpoint).
+#[derive(Copy, Clone, Debug)]
+pub struct XrHandState {
+    pub tracked: bool,
+    pub pos: Vec3,
+    pub rot: Quat,
+    /// OpenXR aim pose (ergonomic pointing ray origin & orientation along `-Z`).
+    /// Falls back to `(pos, rot)` if the runtime does not provide a separate aim pose.
+    pub aim_tracked: bool,
+    pub aim_pos: Vec3,
+    pub aim_rot: Quat,
+    pub trigger: f32,
+    pub squeeze: f32,
+    pub thumbstick: [f32; 2],
+    pub thumbstick_click: bool,
+    pub primary_btn: bool,
+    pub secondary_btn: bool,
+    pub menu_btn: bool,
+}
+
+impl Default for XrHandState {
+    fn default() -> Self {
+        Self {
+            tracked: false,
+            pos: Vec3::ZERO,
+            rot: Quat::IDENTITY,
+            aim_tracked: false,
+            aim_pos: Vec3::ZERO,
+            aim_rot: Quat::IDENTITY,
+            trigger: 0.0,
+            squeeze: 0.0,
+            thumbstick: [0.0; 2],
+            thumbstick_click: false,
+            primary_btn: false,
+            secondary_btn: false,
+            menu_btn: false,
+        }
+    }
+}
+
 /// Normalizes a quaternion safely, falling back to `fallback` if zero/non-finite.
 fn safe_quat(q: Quat, fallback: Quat) -> Quat {
     let l2 = q.length_squared();
@@ -126,16 +344,164 @@ struct ActiveXrFrame {
     should_render: bool,
 }
 
+#[cfg(any(windows, target_os = "linux"))]
+struct XrInput {
+    /// Drop hand action spaces before actions, action_set, and session.
+    aim_spaces: [openxr::Space; 2],
+    hand_spaces: [openxr::Space; 2],
+    aim_pose: openxr::Action<openxr::Posef>,
+    hand_pose: openxr::Action<openxr::Posef>,
+    trigger: openxr::Action<f32>,
+    squeeze: openxr::Action<f32>,
+    thumbstick: openxr::Action<openxr::Vector2f>,
+    thumbstick_click: openxr::Action<bool>,
+    primary_btn: openxr::Action<bool>,
+    secondary_btn: openxr::Action<bool>,
+    menu_btn: openxr::Action<bool>,
+    haptic: openxr::Action<openxr::Haptic>,
+    action_set: openxr::ActionSet,
+    hand_paths: [openxr::Path; 2],
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+impl XrInput {
+    fn new(instance: &openxr::Instance, session: &openxr::Session<XrGfx>) -> anyhow::Result<Self> {
+        let left = instance.string_to_path("/user/hand/left")?;
+        let right = instance.string_to_path("/user/hand/right")?;
+        let hand_paths = [left, right];
+
+        let action_set = instance.create_action_set("flight_controls", "Flight Controls", 0)?;
+        let hand_pose = action_set.create_action::<openxr::Posef>("hand_pose", "Hand Pose", &hand_paths)?;
+        let aim_pose = action_set.create_action::<openxr::Posef>("aim_pose", "Aim Pose", &hand_paths)?;
+        let trigger = action_set.create_action::<f32>("trigger", "Trigger", &hand_paths)?;
+        let squeeze = action_set.create_action::<f32>("squeeze", "Grip Squeeze", &hand_paths)?;
+        let thumbstick = action_set.create_action::<openxr::Vector2f>("thumbstick", "Thumbstick", &hand_paths)?;
+        let thumbstick_click = action_set.create_action::<bool>("thumbstick_click", "Thumbstick Click", &hand_paths)?;
+        let primary_btn = action_set.create_action::<bool>("primary_btn", "Primary Button", &hand_paths)?;
+        let secondary_btn = action_set.create_action::<bool>("secondary_btn", "Secondary Button", &hand_paths)?;
+        let menu_btn = action_set.create_action::<bool>("menu_btn", "Menu Button", &[left])?;
+        let haptic = action_set.create_action::<openxr::Haptic>("haptic", "Haptic Feedback", &hand_paths)?;
+
+        let p = |s: &str| instance.string_to_path(s);
+
+        // Meta Quest / Oculus Touch controllers
+        if let Ok(profile) = p("/interaction_profiles/oculus/touch_controller") {
+            let mut b = Vec::new();
+            for (s, _) in [("left", left), ("right", right)] {
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/grip/pose")) { b.push(openxr::Binding::new(&hand_pose, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/aim/pose")) { b.push(openxr::Binding::new(&aim_pose, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/trigger/value")) { b.push(openxr::Binding::new(&trigger, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/squeeze/value")) { b.push(openxr::Binding::new(&squeeze, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/thumbstick")) { b.push(openxr::Binding::new(&thumbstick, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/thumbstick/click")) { b.push(openxr::Binding::new(&thumbstick_click, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/output/haptic")) { b.push(openxr::Binding::new(&haptic, path)); }
+            }
+            if let Ok(path) = p("/user/hand/left/input/x/click") { b.push(openxr::Binding::new(&primary_btn, path)); }
+            if let Ok(path) = p("/user/hand/right/input/a/click") { b.push(openxr::Binding::new(&primary_btn, path)); }
+            if let Ok(path) = p("/user/hand/left/input/y/click") { b.push(openxr::Binding::new(&secondary_btn, path)); }
+            if let Ok(path) = p("/user/hand/right/input/b/click") { b.push(openxr::Binding::new(&secondary_btn, path)); }
+            if let Ok(path) = p("/user/hand/left/input/menu/click") { b.push(openxr::Binding::new(&menu_btn, path)); }
+            let _ = instance.suggest_interaction_profile_bindings(profile, &b);
+        }
+
+        // Valve Index controllers
+        if let Ok(profile) = p("/interaction_profiles/valve/index_controller") {
+            let mut b = Vec::new();
+            for s in ["left", "right"] {
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/grip/pose")) { b.push(openxr::Binding::new(&hand_pose, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/aim/pose")) { b.push(openxr::Binding::new(&aim_pose, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/trigger/value")) { b.push(openxr::Binding::new(&trigger, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/squeeze/value")) { b.push(openxr::Binding::new(&squeeze, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/thumbstick")) { b.push(openxr::Binding::new(&thumbstick, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/thumbstick/click")) { b.push(openxr::Binding::new(&thumbstick_click, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/a/click")) { b.push(openxr::Binding::new(&primary_btn, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/b/click")) { b.push(openxr::Binding::new(&secondary_btn, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/output/haptic")) { b.push(openxr::Binding::new(&haptic, path)); }
+            }
+            let _ = instance.suggest_interaction_profile_bindings(profile, &b);
+        }
+
+        // Windows Mixed Reality controllers
+        if let Ok(profile) = p("/interaction_profiles/microsoft/motion_controller") {
+            let mut b = Vec::new();
+            for s in ["left", "right"] {
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/grip/pose")) { b.push(openxr::Binding::new(&hand_pose, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/aim/pose")) { b.push(openxr::Binding::new(&aim_pose, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/trigger/value")) { b.push(openxr::Binding::new(&trigger, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/squeeze/click")) { b.push(openxr::Binding::new(&squeeze, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/thumbstick")) { b.push(openxr::Binding::new(&thumbstick, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/thumbstick/click")) { b.push(openxr::Binding::new(&thumbstick_click, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/output/haptic")) { b.push(openxr::Binding::new(&haptic, path)); }
+            }
+            if let Ok(path) = p("/user/hand/left/input/menu/click") { b.push(openxr::Binding::new(&menu_btn, path)); }
+            let _ = instance.suggest_interaction_profile_bindings(profile, &b);
+        }
+
+        // HTC Vive controllers
+        if let Ok(profile) = p("/interaction_profiles/htc/vive_controller") {
+            let mut b = Vec::new();
+            for s in ["left", "right"] {
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/grip/pose")) { b.push(openxr::Binding::new(&hand_pose, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/aim/pose")) { b.push(openxr::Binding::new(&aim_pose, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/trigger/value")) { b.push(openxr::Binding::new(&trigger, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/squeeze/click")) { b.push(openxr::Binding::new(&squeeze, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/trackpad")) { b.push(openxr::Binding::new(&thumbstick, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/trackpad/click")) { b.push(openxr::Binding::new(&primary_btn, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/output/haptic")) { b.push(openxr::Binding::new(&haptic, path)); }
+            }
+            if let Ok(path) = p("/user/hand/left/input/menu/click") { b.push(openxr::Binding::new(&menu_btn, path)); }
+            let _ = instance.suggest_interaction_profile_bindings(profile, &b);
+        }
+
+        // Khronos Simple Controller universal fallback
+        if let Ok(profile) = p("/interaction_profiles/khr/simple_controller") {
+            let mut b = Vec::new();
+            for s in ["left", "right"] {
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/grip/pose")) { b.push(openxr::Binding::new(&hand_pose, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/aim/pose")) { b.push(openxr::Binding::new(&aim_pose, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/input/select/click")) { b.push(openxr::Binding::new(&trigger, path)); }
+                if let Ok(path) = p(&format!("/user/hand/{s}/output/haptic")) { b.push(openxr::Binding::new(&haptic, path)); }
+            }
+            if let Ok(path) = p("/user/hand/left/input/menu/click") { b.push(openxr::Binding::new(&menu_btn, path)); }
+            let _ = instance.suggest_interaction_profile_bindings(profile, &b);
+        }
+
+        session.attach_action_sets(&[&action_set])?;
+        let left_space = hand_pose.create_space(session, left, openxr::Posef::IDENTITY)?;
+        let right_space = hand_pose.create_space(session, right, openxr::Posef::IDENTITY)?;
+        let left_aim = aim_pose.create_space(session, left, openxr::Posef::IDENTITY)?;
+        let right_aim = aim_pose.create_space(session, right, openxr::Posef::IDENTITY)?;
+
+        Ok(Self {
+            aim_spaces: [left_aim, right_aim],
+            hand_spaces: [left_space, right_space],
+            aim_pose,
+            hand_pose,
+            trigger,
+            squeeze,
+            thumbstick,
+            thumbstick_click,
+            primary_btn,
+            secondary_btn,
+            menu_btn,
+            haptic,
+            action_set,
+            hand_paths,
+        })
+    }
+}
+
 /// Active OpenXR headset session.
 ///
 /// Field drop order is critical: `views` and `textures` MUST drop before
-/// `swapchains`, and `swapchains` / `space` / `frame_stream` / `frame_wait` /
+/// `swapchains`, and `swapchains` / `input` / `space` / `frame_stream` / `frame_wait` /
 /// `session` MUST drop before `instance` and `_entry`.
 #[cfg(any(windows, target_os = "linux"))]
 pub struct OpenXrRuntime {
     views: [Vec<wgpu::TextureView>; 2],
     _textures: [Vec<wgpu::Texture>; 2],
     swapchains: [openxr::Swapchain<XrGfx>; 2],
+    input: Option<XrInput>,
     space: openxr::Space,
     frame_stream: openxr::FrameStream<XrGfx>,
     frame_wait: openxr::FrameWaiter,
@@ -154,6 +520,7 @@ pub struct OpenXrRuntime {
     active_frame: Option<ActiveXrFrame>,
     tracking_origin: Option<(Quat, Vec3)>,
     last_head_pose: Option<(Vec3, Quat)>,
+    last_hands: [XrHandState; 2],
 }
 
 /// Linux Vulkan bootstrap: creates the OpenXR instance, queries the runtime's
@@ -614,10 +981,22 @@ impl XrVulkanBootstrap {
             extent[1],
         );
 
+        let input = match XrInput::new(&self.instance, &session) {
+            Ok(i) => {
+                log::info!("OpenXR hand controllers & haptics attached");
+                Some(i)
+            }
+            Err(e) => {
+                log::warn!("OpenXR controller actions unavailable (head-tracking only): {e}");
+                None
+            }
+        };
+
         Ok(OpenXrRuntime {
             views: [view0, view1],
             _textures: [tex0, tex1],
             swapchains: [sc0, sc1],
+            input,
             space,
             frame_stream,
             frame_wait,
@@ -636,6 +1015,7 @@ impl XrVulkanBootstrap {
             active_frame: None,
             tracking_origin: None,
             last_head_pose: None,
+            last_hands: [XrHandState::default(); 2],
         })
     }
 }
@@ -821,10 +1201,22 @@ impl OpenXrRuntime {
             extent[1],
         );
 
+        let input = match XrInput::new(&instance, &session) {
+            Ok(i) => {
+                log::info!("OpenXR hand controllers & haptics attached");
+                Some(i)
+            }
+            Err(e) => {
+                log::warn!("OpenXR controller actions unavailable (head-tracking only): {e}");
+                None
+            }
+        };
+
         Ok(Self {
             views: [view0, view1],
             _textures: [tex0, tex1],
             swapchains: [sc0, sc1],
+            input,
             space,
             frame_stream,
             frame_wait,
@@ -843,6 +1235,7 @@ impl OpenXrRuntime {
             active_frame: None,
             tracking_origin: None,
             last_head_pose: None,
+            last_hands: [XrHandState::default(); 2],
         })
     }
 }
@@ -852,11 +1245,132 @@ impl OpenXrRuntime {
     pub fn extent(&self) -> [u32; 2] { self.extent }
     pub fn format(&self) -> wgpu::TextureFormat { self.format }
     pub fn head_pose(&self) -> Option<(Vec3, Quat)> { self.last_head_pose }
+    pub fn hands(&self) -> [XrHandState; 2] { self.last_hands }
     pub fn is_running(&self) -> bool { self.running }
     pub fn is_exiting(&self) -> bool { self.exiting }
 
     pub fn recenter(&mut self) {
         self.tracking_origin = None;
+    }
+
+    pub fn apply_haptic(&self, hand: usize, amplitude: f32, frequency: f32, duration_ns: i64) {
+        let Some(input) = &self.input else { return };
+        if !self.running || self.session_state != openxr::SessionState::FOCUSED || hand >= 2 {
+            return;
+        }
+        let amp = amplitude.clamp(0.0, 1.0);
+        if amp <= 0.005 {
+            return;
+        }
+        let event = openxr::HapticVibration::new()
+            .amplitude(amp)
+            .frequency(frequency.max(0.0))
+            .duration(openxr::Duration::from_nanos(duration_ns.max(1_000_000)));
+        let _ = input.haptic.apply_feedback(&self.session, input.hand_paths[hand], &event);
+    }
+
+    pub fn stop_haptic(&self, hand: usize) {
+        let Some(input) = &self.input else { return };
+        if !self.running || hand >= 2 {
+            return;
+        }
+        let _ = input.haptic.stop_feedback(&self.session, input.hand_paths[hand]);
+    }
+
+    fn poll_hands(&mut self, display_time: openxr::Time) {
+        let Some(input) = &self.input else {
+            self.last_hands = [XrHandState::default(); 2];
+            return;
+        };
+        if self.session_state != openxr::SessionState::FOCUSED {
+            self.last_hands = [XrHandState::default(); 2];
+            return;
+        }
+        if self.session.sync_actions(&[openxr::ActiveActionSet::new(&input.action_set)]).is_err() {
+            return;
+        }
+        let (origin_q, origin_p) = self.tracking_origin.unwrap_or((Quat::IDENTITY, Vec3::ZERO));
+        let inv_origin = origin_q.conjugate();
+
+        for i in 0..2 {
+            let sub = input.hand_paths[i];
+            let mut hs = XrHandState::default();
+            let pose_active = input.hand_pose.is_active(&self.session, sub).unwrap_or(false);
+            if pose_active {
+                if let Ok(loc) = input.hand_spaces[i].locate(&self.space, display_time) {
+                    let valid = loc.location_flags.contains(
+                        openxr::SpaceLocationFlags::POSITION_VALID | openxr::SpaceLocationFlags::ORIENTATION_VALID,
+                    );
+                    if valid {
+                        let raw_p = Vec3::new(loc.pose.position.x, loc.pose.position.y, loc.pose.position.z);
+                        let raw_q = safe_quat(
+                            Quat::from_xyzw(
+                                loc.pose.orientation.x,
+                                loc.pose.orientation.y,
+                                loc.pose.orientation.z,
+                                loc.pose.orientation.w,
+                            ),
+                            Quat::IDENTITY,
+                        );
+                        hs.tracked = true;
+                        hs.pos = inv_origin * (raw_p - origin_p);
+                        hs.rot = (inv_origin * raw_q).normalize();
+                    }
+                }
+            }
+            let aim_active = input.aim_pose.is_active(&self.session, sub).unwrap_or(false);
+            if aim_active {
+                if let Ok(loc) = input.aim_spaces[i].locate(&self.space, display_time) {
+                    let valid = loc.location_flags.contains(
+                        openxr::SpaceLocationFlags::POSITION_VALID | openxr::SpaceLocationFlags::ORIENTATION_VALID,
+                    );
+                    if valid {
+                        let raw_p = Vec3::new(loc.pose.position.x, loc.pose.position.y, loc.pose.position.z);
+                        let raw_q = safe_quat(
+                            Quat::from_xyzw(
+                                loc.pose.orientation.x,
+                                loc.pose.orientation.y,
+                                loc.pose.orientation.z,
+                                loc.pose.orientation.w,
+                            ),
+                            Quat::IDENTITY,
+                        );
+                        hs.aim_tracked = true;
+                        hs.aim_pos = inv_origin * (raw_p - origin_p);
+                        hs.aim_rot = (inv_origin * raw_q).normalize();
+                    }
+                }
+            }
+            if !hs.aim_tracked && hs.tracked {
+                hs.aim_tracked = true;
+                hs.aim_pos = hs.pos;
+                hs.aim_rot = hs.rot;
+            }
+            if let Ok(st) = input.trigger.state(&self.session, sub) {
+                if st.is_active { hs.trigger = st.current_state.clamp(0.0, 1.0); }
+            }
+            if let Ok(st) = input.squeeze.state(&self.session, sub) {
+                if st.is_active { hs.squeeze = st.current_state.clamp(0.0, 1.0); }
+            }
+            if let Ok(st) = input.thumbstick.state(&self.session, sub) {
+                if st.is_active { hs.thumbstick = [st.current_state.x.clamp(-1.0, 1.0), st.current_state.y.clamp(-1.0, 1.0)]; }
+            }
+            if let Ok(st) = input.thumbstick_click.state(&self.session, sub) {
+                if st.is_active { hs.thumbstick_click = st.current_state; }
+            }
+            if let Ok(st) = input.primary_btn.state(&self.session, sub) {
+                if st.is_active { hs.primary_btn = st.current_state; }
+            }
+            if let Ok(st) = input.secondary_btn.state(&self.session, sub) {
+                if st.is_active { hs.secondary_btn = st.current_state; }
+            }
+            if i == 0 {
+                if let Ok(st) = input.menu_btn.state(&self.session, sub) {
+                    if st.is_active { hs.menu_btn = st.current_state; }
+                }
+            }
+            self.last_hands[i] = hs;
+        }
     }
 
     pub fn status_text(&self) -> String {
@@ -992,6 +1506,8 @@ impl OpenXrRuntime {
             let head_q = if q0.dot(q1) < 0.0 { q0.slerp(-q1, 0.5) } else { q0.slerp(q1, 0.5) }.normalize();
             self.last_head_pose = Some(((p0 + p1) * 0.5, head_q));
         }
+
+        self.poll_hands(state.predicted_display_time);
 
         if let Some(af) = self.active_frame.as_mut() {
             af.views = raw_views;
@@ -1392,6 +1908,93 @@ mod tests {
         let rr = { let p = inv_r * glam::Vec4::new(0.0, 0.0, 1.0, 1.0); (p.truncate() / p.w).normalize() };
         assert!((rl - Vec3::X).length() < 1e-5, "left view_ray skewed: {rl:?}");
         assert!((rr - Vec3::X).length() < 1e-5, "right view_ray skewed: {rr:?}");
+    }
+
+    #[test]
+    fn test_vr_globe_labels_stereo_projection_matches_planet_and_wide_fov() {
+        let near = 20_000.0f32;
+        let fov_l = openxr::Fovf { angle_left: -0.95, angle_right: 0.78, angle_up: 0.85, angle_down: -0.85 };
+        let fov_r = openxr::Fovf { angle_left: -0.78, angle_right: 0.95, angle_up: 0.85, angle_down: -0.85 };
+        let base = XrViewBase { cockpit_rot: Quat::IDENTITY, head_pos: Vec3::ZERO };
+
+        // Simulate realistic 15 cm off-center head pose + 5 deg canted lenses (like Valve Index).
+        let head = Vec3::new(0.15, 0.08, -0.10);
+        let left_rot = Quat::from_rotation_y(5.0f32.to_radians());
+        let right_rot = Quat::from_rotation_y(-5.0f32.to_radians());
+        let (vp_l, _) = eye_matrices(base, head + Vec3::new(-0.0315, 0.0, 0.0), left_rot, fov_l, near);
+        let (vp_r, _) = eye_matrices(base, head + Vec3::new(0.0315, 0.0, 0.0), right_rot, fov_r, near);
+
+        // Label anchored 40 deg up-right on the orbital globe (outside desktop 60 deg FOV!).
+        let d = 1.1e7f32;
+        let rel = Vec3::new(d * 0.45, d * 0.65, -d * 0.61);
+        let (right, up, scale) = globe_label_basis(rel, Vec3::Y, Vec3::X).expect("valid basis");
+        assert!((right.length() - 1.0).abs() < 1e-5);
+        assert!((up.length() - 1.0).abs() < 1e-5);
+        assert!(right.dot(up).abs() < 1e-5);
+        assert!(right.dot(rel.normalize()).abs() < 1e-5);
+
+        let mut src = egui::epaint::Mesh::default();
+        src.vertices.push(egui::epaint::Vertex { pos: egui::pos2(0.0, 0.0), uv: egui::pos2(0.0, 0.0), color: egui::Color32::WHITE });
+        src.vertices.push(egui::epaint::Vertex { pos: egui::pos2(80.0, 0.0), uv: egui::pos2(1.0, 0.0), color: egui::Color32::WHITE });
+        src.vertices.push(egui::epaint::Vertex { pos: egui::pos2(80.0, 14.0), uv: egui::pos2(1.0, 1.0), color: egui::Color32::WHITE });
+        src.indices = vec![0, 1, 2];
+
+        let labels = VrGlobeLabels {
+            labels: vec![VrGlobeLabel {
+                rel_pos: rel,
+                right,
+                up,
+                scale,
+                primitives: vec![egui::ClippedPrimitive {
+                    clip_rect: egui::Rect::EVERYTHING,
+                    primitive: egui::epaint::Primitive::Mesh(src),
+                }],
+            }],
+            pixels_per_point: 1.5,
+        };
+
+        let (ew, eh) = (1832u32, 1920u32);
+        let out_l = labels.project_for_eye(vp_l, ew, eh);
+        let out_r = labels.project_for_eye(vp_r, ew, eh);
+        assert_eq!(out_l.len(), 1, "label outside 60 deg desktop FOV must still project in wide VR FOV");
+        assert_eq!(out_r.len(), 1);
+
+        let check_eye = |vp: Mat4, prim: &egui::ClippedPrimitive| {
+            let egui::epaint::Primitive::Mesh(m) = &prim.primitive else { panic!("expected mesh") };
+            // Anchor vertex (0, 0) must project to exact same pixel as `vp * rel`.
+            let c0 = vp * rel.extend(1.0);
+            let ex0 = (c0.x / c0.w * 0.5 + 0.5) * (ew as f32 / 1.5);
+            let ey0 = (0.5 - c0.y / c0.w * 0.5) * (eh as f32 / 1.5);
+            assert!((m.vertices[0].pos.x - ex0).abs() < 1e-3);
+            assert!((m.vertices[0].pos.y - ey0).abs() < 1e-3);
+
+            // Text endpoint (80, 14) must project to exact same pixel as `vp * (rel + 80*scale*right - 14*scale*up)`.
+            let p2 = rel + right * (80.0 * scale) - up * (14.0 * scale);
+            let c2 = vp * p2.extend(1.0);
+            let ex2 = (c2.x / c2.w * 0.5 + 0.5) * (ew as f32 / 1.5);
+            let ey2 = (0.5 - c2.y / c2.w * 0.5) * (eh as f32 / 1.5);
+            assert!((m.vertices[2].pos.x - ex2).abs() < 1e-3);
+            assert!((m.vertices[2].pos.y - ey2).abs() < 1e-3);
+        };
+        check_eye(vp_l, &out_l[0]);
+        check_eye(vp_r, &out_r[0]);
+
+        // Turning head 180 deg away from the planet must cleanly cull the label.
+        let (vp_back, _) = eye_matrices(base, head, Quat::from_rotation_y(std::f32::consts::PI), fov_l, near);
+        assert!(labels.project_for_eye(vp_back, ew, eh).is_empty());
+    }
+
+    #[test]
+    fn test_vr_cockpit_label_basis_works_at_arms_length() {
+        let rel = Vec3::new(0.18, -0.15, -0.48);
+        assert!(globe_label_basis(rel, Vec3::Y, Vec3::X).is_none());
+        let (right, up, scale) = cockpit_label_basis(rel, Vec3::Y, Vec3::X).expect("cockpit label basis at 0.53 m");
+        assert!((right.length() - 1.0).abs() < 1e-5);
+        assert!((up.length() - 1.0).abs() < 1e-5);
+        assert!(right.dot(up).abs() < 1e-5);
+        assert!(scale > 0.0005 && scale < 0.002);
+        // Too close (< 8 cm) is rejected cleanly.
+        assert!(cockpit_label_basis(Vec3::new(0.0, 0.0, -0.04), Vec3::Y, Vec3::X).is_none());
     }
 
     #[test]

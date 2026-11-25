@@ -159,6 +159,7 @@ fn shaders_validate() {
         ("precip", include_str!("../src/shaders/precip.wgsl")),
         ("contrails", include_str!("../src/shaders/contrails.wgsl")),
         ("scenery", include_str!("../src/shaders/scenery.wgsl")),
+        ("vr_hand", include_str!("../src/shaders/vr_hand.wgsl")),
     ] {
         ok &= check(name, &format!("{common}\n{src}"));
     }

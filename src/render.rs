@@ -1105,6 +1105,10 @@ pub struct Frame<'a> {
     pub snow_tracks: Vec<crate::snowtrack::Upload>,
     /// base cockpit/camera pose for per-eye OpenXR view math (vr.rs)
     pub xr_base: Option<crate::vr::XrViewBase>,
+    /// translucent 3D VR hand indicator orbs (camera-relative, vr.rs / vr_cockpit.rs)
+    pub vr_orbs: Vec<crate::vr::VrOrb>,
+    /// 3D-anchored labels/markers projected per VR eye
+    pub vr_globe: crate::vr::VrGlobeLabels,
 }
 
 struct Targets {
@@ -1225,6 +1229,13 @@ pub struct Renderer {
     p_field: wgpu::RenderPipeline,
     p_lights: wgpu::RenderPipeline,
     dyn_lights: wgpu::Buffer,
+    p_vr_hand: wgpu::RenderPipeline,
+    vr_orb_vbuf: wgpu::Buffer,
+    vr_orb_ibuf: wgpu::Buffer,
+    vr_orb_nidx: u32,
+    vr_orb_inst: wgpu::Buffer,
+    #[cfg(any(windows, target_os = "linux"))]
+    vr_globe_eye: Option<(Vec<egui::ClippedPrimitive>, f32)>,
     /// falling rain and lightning channels (precip.wgsl), over the clouds
     p_rain: wgpu::RenderPipeline,
     p_veil: wgpu::RenderPipeline,
@@ -3144,10 +3155,75 @@ impl Renderer {
         if let Some(err) = gpu_error.lock().clone() {
             anyhow::bail!("GPU initialisation error: {err}");
         }
+        let m_vr_hand = module("vr_hand", include_str!("shaders/vr_hand.wgsl"));
+        let p_vr_hand = {
+            const A_ORB_V: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![0 => Float32x3];
+            const A_ORB_I: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![1 => Float32x4, 2 => Float32x4];
+            let pl_vr = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("vr hand"),
+                bind_group_layouts: &[Some(&l0)],
+                immediate_size: 0,
+            });
+            d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("vr hand"),
+                layout: Some(&pl_vr),
+                vertex: wgpu::VertexState {
+                    module: &m_vr_hand,
+                    entry_point: Some("vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[
+                        Some(wgpu::VertexBufferLayout { array_stride: 12, step_mode: wgpu::VertexStepMode::Vertex, attributes: &A_ORB_V }),
+                        Some(wgpu::VertexBufferLayout { array_stride: std::mem::size_of::<crate::vr::VrOrb>() as u64, step_mode: wgpu::VertexStepMode::Instance, attributes: &A_ORB_I }),
+                    ],
+                },
+                primitive: wgpu::PrimitiveState { cull_mode: Some(wgpu::Face::Back), ..Default::default() },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(wgpu::CompareFunction::Greater),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &m_vr_hand,
+                    entry_point: Some("fs"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: HDR,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let (vr_orb_verts, vr_orb_idx) = unit_sphere_mesh(16, 24);
+        let vr_orb_vbuf = d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vr orb vbuf"),
+            contents: bytemuck::cast_slice(&vr_orb_verts),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let vr_orb_ibuf = d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vr orb ibuf"),
+            contents: bytemuck::cast_slice(&vr_orb_idx),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+        let vr_orb_nidx = vr_orb_idx.len() as u32;
+        let vr_orb_inst = d.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vr orb instances"),
+            size: (8 * std::mem::size_of::<crate::vr::VrOrb>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         Ok(Self {
             ground_mats,
-            casc_ub, bg_casc, bg_tileu, l_dres, l_ao, p_gtao, p_ao_blur, p_dres, p_road, p_field, p_lights, dyn_lights, p_rain, p_veil, p_bolt, bolt_buf, p_contrails, bg_contrails, contrail_nodes, contrail_segs, p_tree, p_tree_near, imp, p_tree_shadow, p_tree_shadow_fixed, p_card, near_buf, p_inst, p_inst_shadow, inst_buf, fall_buf, tree_lib: None, inst_lib: None,
+            casc_ub, bg_casc, bg_tileu, l_dres, l_ao, p_gtao, p_ao_blur, p_dres, p_road, p_field, p_lights, dyn_lights, p_vr_hand, vr_orb_vbuf, vr_orb_ibuf, vr_orb_nidx, vr_orb_inst,
+            #[cfg(any(windows, target_os = "linux"))]
+            vr_globe_eye: None,
+            p_rain, p_veil, p_bolt, bolt_buf, p_contrails, bg_contrails, contrail_nodes, contrail_segs, p_tree, p_tree_near, imp, p_tree_shadow, p_tree_shadow_fixed, p_card, near_buf, p_inst, p_inst_shadow, inst_buf, fall_buf, tree_lib: None, inst_lib: None,
             p_scenery, p_scenery_shadow, l_scenery, scenery_buf, scenery_lib: None, bg_scenery: None,
             gpu_timer: crate::gputime::GpuTimer::new(&device, &queue),
             frame_clock: crate::gputime::FrameClock::new(&device, &queue),
@@ -3192,6 +3268,31 @@ impl Renderer {
         { self.xr.as_ref()?.head_pose() }
         #[cfg(not(any(windows, target_os = "linux")))]
         { None }
+    }
+
+    pub fn xr_hands(&self) -> [crate::vr::XrHandState; 2] {
+        #[cfg(any(windows, target_os = "linux"))]
+        { self.xr.as_ref().map(|x| x.hands()).unwrap_or_default() }
+        #[cfg(not(any(windows, target_os = "linux")))]
+        { [crate::vr::XrHandState::default(); 2] }
+    }
+
+    pub fn xr_apply_haptic(&self, hand: usize, amplitude: f32, frequency: f32, duration_ns: i64) {
+        #[cfg(any(windows, target_os = "linux"))]
+        if let Some(xr) = &self.xr {
+            xr.apply_haptic(hand, amplitude, frequency, duration_ns);
+        }
+        #[cfg(not(any(windows, target_os = "linux")))]
+        { let _ = (hand, amplitude, frequency, duration_ns); }
+    }
+
+    pub fn xr_stop_haptic(&self, hand: usize) {
+        #[cfg(any(windows, target_os = "linux"))]
+        if let Some(xr) = &self.xr {
+            xr.stop_haptic(hand);
+        }
+        #[cfg(not(any(windows, target_os = "linux")))]
+        { let _ = hand; }
     }
 
     pub fn recenter_vr(&mut self) {
@@ -3743,14 +3844,24 @@ impl Renderer {
                 }
             });
             if let Some(xr_frame) = begin {
-                let ui = f.egui.take();
+                let mut ui = f.egui.take();
+                let vr_globe = std::mem::take(&mut f.vr_globe);
                 let mut drew_vr = false;
                 if xr_frame.should_render && xr_frame.views.len() == 2 {
+                    // Upload egui texture deltas once so 3D VR labels have up-to-date font glyphs.
+                    if let Some((_, delta, _)) = &mut ui {
+                        for (id, ds) in delta.set.drain() {
+                            for d in &ds {
+                                self.egui.update_texture(&self.device, &self.queue, id, d);
+                            }
+                        }
+                    }
                     let base = f.xr_base.unwrap_or(crate::vr::XrViewBase {
                         cockpit_rot: glam::Quat::IDENTITY,
                         head_pos: glam::Vec3::ZERO,
                     });
                     let near = f.g.misc[0].max(0.01);
+                    let (out_w, out_h) = self.target_out_size();
                     let render_h = self.render_size().1.max(1) as f32;
                     for eye in 0..2 {
                         let mut eye_frame = f.clone();
@@ -3760,6 +3871,7 @@ impl Renderer {
                         let eye_pos = glam::Vec3::new(v.pose.position.x, v.pose.position.y, v.pose.position.z);
                         let eye_rot = glam::Quat::from_xyzw(v.pose.orientation.x, v.pose.orientation.y, v.pose.orientation.z, v.pose.orientation.w);
                         let (vp, inv_vp) = crate::vr::eye_matrices(base, eye_pos, eye_rot, v.fov, near);
+                        self.vr_globe_eye = (!vr_globe.is_empty()).then(|| (vr_globe.project_for_eye(vp, out_w, out_h), vr_globe.pixels_per_point));
                         eye_frame.g.view_proj = vp.to_cols_array_2d();
                         eye_frame.g.inv_view_proj = inv_vp.to_cols_array_2d();
                         eye_frame.g.misc[3] = (v.fov.angle_up.tan() - v.fov.angle_down.tan()).abs().max(1e-3) / render_h;
@@ -3770,6 +3882,7 @@ impl Renderer {
                         self.xr_eye = Some(eye);
                         self.render_one(eye_frame);
                     }
+                    self.vr_globe_eye = None;
                     drew_vr = true;
                 }
                 self.xr_eye = None;
@@ -3783,6 +3896,7 @@ impl Renderer {
                     self.present_xr_mirror(ui);
                     return;
                 }
+                f.vr_globe = vr_globe;
                 f.egui = ui;
             }
         }
@@ -4143,6 +4257,10 @@ impl Renderer {
         let n_dyn = f.lights.len().min(MAX_DYN_LIGHTS);
         if n_dyn > 0 {
             q.write_buffer(&self.dyn_lights, 0, bytemuck::cast_slice(&f.lights[..n_dyn]));
+        }
+        let n_vr_orbs = f.vr_orbs.len().min(8);
+        if n_vr_orbs > 0 {
+            q.write_buffer(&self.vr_orb_inst, 0, bytemuck::cast_slice(&f.vr_orbs[..n_vr_orbs]));
         }
         blob[n_builds * 256 + 12..n_builds * 256 + 16].copy_from_slice(&1f32.to_ne_bytes());
         q.write_buffer(&self.build_ub, 0, &blob);
@@ -5236,6 +5354,17 @@ impl Renderer {
             }
         }
         mark(&mut enc, "glass");
+        if n_vr_orbs > 0 {
+            let ds = wgpu::RenderPassDepthStencilAttachment { view: &t.depth, depth_ops: None, stencil_ops: None };
+            let mut rp = enc.begin_render_pass(&pass_desc(&[Some(color_att(&t.hdr, false))], Some(ds)));
+            rp.set_pipeline(&self.p_vr_hand);
+            rp.set_bind_group(0, &self.bg0, &[]);
+            rp.set_vertex_buffer(0, self.vr_orb_vbuf.slice(..));
+            rp.set_vertex_buffer(1, self.vr_orb_inst.slice(..));
+            rp.set_index_buffer(self.vr_orb_ibuf.slice(..), wgpu::IndexFormat::Uint16);
+            rp.draw_indexed(0..self.vr_orb_nidx, 0, 0..n_vr_orbs as u32);
+        }
+        mark(&mut enc, "vr_hands");
         // The finished frame: `hdr` itself, or blended into the frames before
         // it (temporal AA), or upscaled from it by FSR 3.1 (upscale.rs).
         let mode = if in_xr && self.up.active().temporal() { crate::graphics::Upscaler::Bilinear } else { self.up.active() };
@@ -5306,6 +5435,26 @@ impl Renderer {
         }
 
         mark(&mut enc, "tonemap");
+        // Stereoscopic 3D-anchored globe labels projected with each eye's exact view_proj
+        // onto `t.ldr` BEFORE the floating 3D VR UI panels so menus cleanly occlude them.
+        #[cfg(any(windows, target_os = "linux"))]
+        if in_xr {
+            if let Some((globe_jobs, globe_ppp)) = self.vr_globe_eye.take() {
+                if !globe_jobs.is_empty() {
+                    let (ow, oh) = self.target_out_size();
+                    let sd = egui_wgpu::ScreenDescriptor {
+                        size_in_pixels: [ow, oh],
+                        pixels_per_point: globe_ppp.max(0.5),
+                    };
+                    self.egui.update_buffers(&self.device, &self.queue, &mut enc, &globe_jobs, &sd);
+                    {
+                        let mut rp = enc.begin_render_pass(&pass_desc(&[Some(color_att(out, false))], None)).forget_lifetime();
+                        self.egui.render(&mut rp, &globe_jobs, &sd);
+                    }
+                    mark(&mut enc, "vr_globe_labels");
+                }
+            }
+        }
         // In XR standby (headset connected, waiting for session READY / visible),
         // blit the XR-sized `t.ldr` to the desktop window first, then draw egui
         // at desktop window dimensions on top so menus stay crisp and uncropped.
@@ -5330,7 +5479,18 @@ impl Renderer {
             }
             None
         } else {
-            f.egui.map(|(jobs, delta, ppp)| {
+            let globe_standby = if !in_xr && !f.vr_globe.is_empty() {
+                let vp = glam::Mat4::from_cols_array_2d(&f.g.view_proj);
+                f.vr_globe.project_for_eye(vp, self.config.width, self.config.height)
+            } else {
+                Vec::new()
+            };
+            f.egui.map(|(mut jobs, delta, ppp)| {
+                if !globe_standby.is_empty() {
+                    let mut merged = globe_standby;
+                    merged.append(&mut jobs);
+                    jobs = merged;
+                }
                 let sd = egui_wgpu::ScreenDescriptor { size_in_pixels: [self.config.width, self.config.height], pixels_per_point: ppp };
                 self.egui.update_buffers(&self.device, &self.queue, &mut enc, &jobs, &sd);
                 (jobs, delta, sd)
@@ -5440,6 +5600,35 @@ fn out_format(config: &wgpu::SurfaceConfiguration) -> wgpu::TextureFormat {
 /// Whether the final passes can draw into the window's frame without the blit.
 fn direct_out(config: &wgpu::SurfaceConfiguration) -> bool {
     out_format(config) == config.format && config.usage.contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
+}
+
+/// Generates a smooth outward-facing unit sphere mesh (CCW triangles) for VR hand orbs.
+fn unit_sphere_mesh(rings: u16, segs: u16) -> (Vec<[f32; 3]>, Vec<u16>) {
+    let mut verts = Vec::with_capacity(((rings + 1) * (segs + 1)) as usize);
+    let mut idx = Vec::with_capacity((rings * segs * 6) as usize);
+    for r in 0..=rings {
+        let v = r as f32 / rings as f32;
+        let phi = v * std::f32::consts::PI;
+        let (sp, cp) = phi.sin_cos();
+        for s in 0..=segs {
+            let u = s as f32 / segs as f32;
+            let theta = u * std::f32::consts::TAU;
+            let (st, ct) = theta.sin_cos();
+            verts.push([sp * ct, cp, sp * st]);
+        }
+    }
+    let stride = segs + 1;
+    for r in 0..rings {
+        for s in 0..segs {
+            let a = r * stride + s;
+            let b = a + stride;
+            let c = b + 1;
+            let d = a + 1;
+            // Counter-clockwise winding viewed from outside (+Y north pole, theta CCW around -Y -> swap for outward +normal).
+            idx.extend_from_slice(&[a, c, b, a, d, c]);
+        }
+    }
+    (verts, idx)
 }
 
 fn color_att(view: &wgpu::TextureView, clear: bool) -> wgpu::RenderPassColorAttachment<'_> {
