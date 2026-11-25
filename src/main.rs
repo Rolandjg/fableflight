@@ -3515,6 +3515,9 @@ impl Game {
                     View::Right => (home_y + side * std::f64::consts::FRAC_PI_2, home_p.min(0.15)),
                     View::Reset => {
                         self.head.zoom = 1.0;
+                        if self.r.xr_active() {
+                            self.r.recenter_vr();
+                        }
                         (home_y, home_p)
                     }
                 };
@@ -4436,6 +4439,11 @@ impl Game {
             KeyCode::KeyR if self.arcade || self.crashed => self.respawn_here(),
             KeyCode::KeyR => self.arcade_only(t!("game.respawning_in_flight")),
             KeyCode::KeyC => self.next_view(),
+            KeyCode::Home if self.r.xr_active() => {
+                self.r.recenter_vr();
+                self.status = "VR view recentered".into();
+                self.status_until = self.real + 3.0;
+            }
             KeyCode::F6 if !self.crashed => self.toggle_tail_view(),
             KeyCode::KeyF if !self.crashed => self.plane.set_flaps(1),
             KeyCode::KeyV if !self.crashed => self.plane.set_flaps(-1),
@@ -6038,6 +6046,7 @@ impl Game {
         let (rw, rh) = { let (a, b) = self.r.render_size(); (a as f32, b as f32) };
         let mut fov = 60f32.to_radians();
         let (cam, dir, upv);
+        let mut xr_base: Option<vr::XrViewBase> = None;
         if !(self.cam_mode == 1 && !self.crashed && !in_menu) {
             self.head_live = false;
         }
@@ -6166,33 +6175,41 @@ impl Game {
             }
             let up = self.plane.pos.normalize();
             let day = ((up.dot(self.sun_dir()) as f32 + 0.2) / 0.4).clamp(0.0, 1.0);
-            // In VR, update the head pose from accumulated yaw/pitch each frame
-            if self.vr.enabled {
-                self.vr.update((self.cam_yaw, self.cam_pitch), dt_real);
-            }
-            let view = self.head.update(self.spec, dt_real, (self.cam_yaw, self.cam_pitch), self.cockpit_fov, self.plane.head, self.plane.rot, up, w / h, day);
-            // VR mode: override FOV with the headset's vertical FOV
-            fov = if self.vr.enabled {
-                self.vr.fov_v.to_radians()
-            } else {
-                view.fov.to_radians()
-            };
             // A rough engine or damage shakes the whole cabin.
             let vibe = self.plane.dmg.vibe.min(2.0) as f64;
             let mut jit = || self.rng.range(-1.0, 1.0) as f64 * vibe;
             let shake = DVec3::new(jit() * 0.006, jit() * 0.006, 0.0);
             let wob = DQuat::from_rotation_y(jit() * 0.004) * DQuat::from_rotation_x(jit() * 0.004);
-            // VR: compose the VR head orientation (yaw/pitch/roll from pose) on
-            // top of the cockpit's body-frame view rotation for 6DOF head tracking.
-            let vr_q = if self.vr.enabled {
-                self.vr.pose.orientation
+            if self.r.xr_active() {
+                // Live OpenXR headset: drive camera, frustum culling, and spatial audio
+                // directly from the tracked 6DOF head pose (no synthetic mouse-look or roll).
+                let (xr_pos, xr_rot) = self.r.xr_head_pose().unwrap_or((Vec3::ZERO, glam::Quat::IDENTITY));
+                fov = self.vr.fov_v.to_radians();
+                let seat_eye = self.spec.eye2.filter(|_| self.head.rear).unwrap_or(self.spec.eye).as_dvec3();
+                let cockpit_rot = self.plane.rot * wob;
+                let r = cockpit_rot * xr_rot.as_dquat();
+                cam = self.plane.model_pos() + self.plane.rot * (seat_eye + shake + xr_pos.as_dvec3());
+                dir = r * DVec3::NEG_Z;
+                upv = r * DVec3::Y;
+                xr_base = Some(vr::XrViewBase {
+                    cockpit_rot: cockpit_rot.as_quat(),
+                    head_pos: xr_pos,
+                });
             } else {
-                DQuat::IDENTITY
-            };
-            let r = self.plane.rot * wob * view.rot * vr_q;
-            cam = self.plane.model_pos() + self.plane.rot * (view.eye + shake);
-            dir = r * DVec3::NEG_Z;
-            upv = r * DVec3::Y;
+                if self.vr.enabled {
+                    self.vr.update((self.cam_yaw, self.cam_pitch), dt_real);
+                }
+                let view = self.head.update(self.spec, dt_real, (self.cam_yaw, self.cam_pitch), self.cockpit_fov, self.plane.head, self.plane.rot, up, w / h, day);
+                fov = if self.vr.enabled {
+                    self.vr.fov_v.to_radians()
+                } else {
+                    view.fov.to_radians()
+                };
+                let r = self.plane.rot * wob * view.rot;
+                cam = self.plane.model_pos() + self.plane.rot * (view.eye + shake);
+                dir = r * DVec3::NEG_Z;
+                upv = r * DVec3::Y;
+            }
             self.cam_pos = cam;
         } else if self.cam_mode == settings::TAIL_VIEW {
             let at = self.plane.centre();
@@ -6232,6 +6249,13 @@ impl Game {
             }
             self.cam_pos = cam;
             self.cam_look = self.plane.pos;
+        }
+        if self.r.xr_active() && xr_base.is_none() {
+            let f = dir.as_vec3().normalize_or_zero();
+            let right = f.cross(upv.as_vec3()).normalize_or_zero();
+            let up_o = right.cross(f).normalize_or_zero();
+            let cockpit_rot = glam::Quat::from_mat3(&glam::Mat3::from_cols(right, up_o, -f));
+            xr_base = Some(vr::XrViewBase { cockpit_rot, head_pos: Vec3::ZERO });
         }
         crate::gputime::cpu("audio+camera+misc");
         // Never let the camera sink into the ground.
@@ -6296,7 +6320,9 @@ impl Game {
         // frames back together. Everything else works from the centred `vp`.
         // (FSR 3.1/4.1 jitter whether or not the AA is on, through as many
         // phases as AMD asks for the upscale ratio: upscale.rs.)
-        let jitter = if self.r.up.active().temporal() {
+        let jitter = if self.r.xr_active() {
+            Vec2::ZERO
+        } else if self.r.up.active().temporal() {
             let [jx, jy] = fsr3::jitter_offset(self.frame, fsr3::jitter_phases(rw as u32, w as u32));
             // AMD's offsets are in pixels, y down
             Vec2::new(jx * 2.0 / rw, -jy * 2.0 / rh)
@@ -6899,7 +6925,7 @@ impl Game {
         crate::gputime::cpu("sim.contrails");
         let rain_drops = if in_menu || (self.cam_rain < 0.002 && self.cam_blow < 0.01) { 0 } else { render::RAIN_DROPS };
         crate::gputime::cpu("shore+fields+misc");
-        self.r.render(Frame { rain_drops, bolts, contrails: &self.contrail_draw, g, tiles, tess, details, photo, skins, skin_slots, fields, lights: air_lights, objs, insts, scenery, fall, near, casc_vp, shore: sf.step, shore_c, shore_tiles, psim, sim_steps: dt > 0.0, fluid, ocean: self.world.water_in_view().then(|| self.world.ocean.uniform()), egui: Some(ui), shot, cover, glow: glow_px, snow: snow_px, snow_tracks: snow_tr_uploads });
+        self.r.render(Frame { rain_drops, bolts, contrails: &self.contrail_draw, g, tiles, tess, details, photo, skins, skin_slots, fields, lights: air_lights, objs, insts, scenery, fall, near, casc_vp, shore: sf.step, shore_c, shore_tiles, psim, sim_steps: dt > 0.0, fluid, ocean: self.world.water_in_view().then(|| self.world.ocean.uniform()), egui: Some(ui), shot, cover, glow: glow_px, snow: snow_px, snow_tracks: snow_tr_uploads, xr_base });
         self.finish_mcp_shots();
         if (had_shots && std::env::args().any(|a| a == "--shot") && self.record.is_none()) || rec_done {
             self.quit = true;
@@ -8618,7 +8644,12 @@ impl ApplicationHandler for App {
                 if state == ElementState::Pressed {
                     g.lean_drag = g.last_cursor;
                 } else if let (Some((sx, sy)), Some((x, y))) = (g.lean_drag.take(), g.last_cursor) {
-                    if (sx - x).hypot(sy - y) < 3.0 { g.head.center_seat(); }
+                    if (sx - x).hypot(sy - y) < 3.0 {
+                        g.head.center_seat();
+                        if g.r.xr_active() {
+                            g.r.recenter_vr();
+                        }
+                    }
                 }
             }
             // In the cockpit, a click on a control works it (see `hot_click`).

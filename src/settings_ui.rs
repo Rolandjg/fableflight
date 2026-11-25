@@ -459,16 +459,26 @@ impl Game {
             });
         });
         card(ui, "Virtual Reality", |ui| {
-            row(ui, "OpenXR Headset Mode", "Stereo rendering and tracked cockpit view; enable before launch in the launcher", |ui| {
+            row(ui, "OpenXR Headset Mode", "Stereo rendering and 6DOF cockpit tracking (launch with --vr or enable in the launcher; press Home to recenter)", |ui| {
                 if menu::switch(ui, &mut self.vr.enabled).changed() {
                     if self.vr.enabled {
                         self.cam_mode = 1;
                     }
                 }
             });
-            if self.vr.enabled {
-                let status = self.r.vr_status().unwrap_or_else(|| "Enable VR in the launcher and restart the game to connect a headset".to_string());
-                row(ui, "Headset status", &status, |_ui| {});
+            if self.vr.enabled || self.r.vr_status().is_some() {
+                let status = self.r.vr_status().unwrap_or_else(|| {
+                    if self.vr.runtime_detected {
+                        format!("{} detected — restart with --vr to connect", self.vr.runtime_name)
+                    } else {
+                        "Restart with --vr (or enable VR in the launcher) with WiVRn / SteamVR / Monado running".to_string()
+                    }
+                });
+                row(ui, "Headset status", &status, |ui| {
+                    if self.r.xr_active() && ui.button("Recenter").clicked() {
+                        self.r.recenter_vr();
+                    }
+                });
             }
         });
     }

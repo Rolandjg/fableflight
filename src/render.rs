@@ -1099,6 +1099,8 @@ pub struct Frame<'a> {
     pub snow: Option<Vec<u8>>,
     /// dirty sub-rectangles of the dynamic snow track map (snowtrack.rs, RG8)
     pub snow_tracks: Vec<crate::snowtrack::Upload>,
+    /// base cockpit/camera pose for per-eye OpenXR view math (vr.rs)
+    pub xr_base: Option<crate::vr::XrViewBase>,
 }
 
 struct Targets {
@@ -1182,12 +1184,15 @@ pub struct Renderer {
     device_lost: Arc<std::sync::atomic::AtomicBool>,
     surface: wgpu::Surface<'static>,
     pub config: wgpu::SurfaceConfiguration,
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     xr: Option<crate::vr::OpenXrRuntime>,
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     xr_error: Option<String>,
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     xr_eye: Option<usize>,
+    p_xr_blit: Option<wgpu::RenderPipeline>,
+    #[cfg(any(windows, target_os = "linux"))]
+    xr_cs: [[f32; 4]; 2 * CS_MAP],
     globals_ub: wgpu::Buffer,
     bg0: wgpu::BindGroup,
     bg0_pre: wgpu::BindGroup,
@@ -1979,16 +1984,54 @@ impl Renderer {
     /// `samples`: the g-buffer's MSAA samples (1, 2 or 4), or None to suit
     /// the GPU (fewer on integrated graphics).
     pub async fn new(window: Arc<winit::window::Window>, vsync: bool, samples: Option<u32>, vr_requested: bool) -> anyhow::Result<Self> {
-        let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle();
-        if vr_requested {
-            #[cfg(windows)]
-            { instance_desc.backends = wgpu::Backends::DX12; }
-        }
-        let instance = wgpu::Instance::new(instance_desc);
-        let surface = instance.create_surface(window.clone())?;
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, force_fallback_adapter: false, compatible_surface: Some(&surface), ..Default::default() })
-            .await?;
+        #[cfg(target_os = "linux")]
+        let mut xr_boot: Option<crate::vr::XrVulkanBootstrap> = None;
+        #[cfg(any(windows, target_os = "linux"))]
+        let mut xr_error: Option<String> = None;
+
+        #[cfg(target_os = "linux")]
+        let (instance, surface, adapter) = if vr_requested {
+            match crate::vr::XrVulkanBootstrap::init() {
+                Ok((inst, adap, boot)) => {
+                    let surf = inst.create_surface(window.clone())?;
+                    xr_boot = Some(boot);
+                    (inst, surf, adap)
+                }
+                Err(e) => {
+                    let msg = e.to_string();
+                    log::error!("VR startup failed (falling back to desktop): {msg}");
+                    xr_error = Some(msg);
+                    let inst = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+                    let surf = inst.create_surface(window.clone())?;
+                    let adap = inst
+                        .request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, force_fallback_adapter: false, compatible_surface: Some(&surf), ..Default::default() })
+                        .await?;
+                    (inst, surf, adap)
+                }
+            }
+        } else {
+            let inst = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+            let surf = inst.create_surface(window.clone())?;
+            let adap = inst
+                .request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, force_fallback_adapter: false, compatible_surface: Some(&surf), ..Default::default() })
+                .await?;
+            (inst, surf, adap)
+        };
+
+        #[cfg(not(target_os = "linux"))]
+        let (instance, surface, adapter) = {
+            let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle();
+            if vr_requested {
+                #[cfg(windows)]
+                { instance_desc.backends = wgpu::Backends::DX12; }
+            }
+            let inst = wgpu::Instance::new(instance_desc);
+            let surf = inst.create_surface(window.clone())?;
+            let adap = inst
+                .request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, force_fallback_adapter: false, compatible_surface: Some(&surf), ..Default::default() })
+                .await?;
+            (inst, surf, adap)
+        };
         let info = adapter.get_info();
         log::info!("GPU: {} ({:?})", info.name, info.device_type);
         crate::progress::step("gpu");
@@ -2031,21 +2074,50 @@ impl Renderer {
         // AMD's FSR 4 runtime needs extensions wgpu does not turn on (fsr4.rs):
         // the device is opened through wgpu-hal with them when it may be used,
         // and the usual way otherwise or if that fails.
+        // On Linux VR, OpenXR creates the VkDevice so runtime extensions are enabled.
         let mut fsr4_device = false;
-        let opened = if crate::fsr4::rt::wanted(&info) {
-            let desc = wgpu::DeviceDescriptor { label: None, required_features: required_features | crate::fsr4::rt::features(&adapter), required_limits: required_limits.clone(), memory_hints: MEMORY_HINTS, ..Default::default() };
-            match crate::fsr4::rt::open_device(&adapter, &desc) {
-                Ok(dq) => {
-                    fsr4_device = true;
-                    Some(dq)
+        #[cfg(target_os = "linux")]
+        let mut xr_family: Option<u32> = None;
+        let opened = {
+            #[cfg(target_os = "linux")]
+            let xr_dev = if let Some(boot) = &xr_boot {
+                let desc = wgpu::DeviceDescriptor { label: None, required_features, required_limits: required_limits.clone(), memory_hints: MEMORY_HINTS, ..Default::default() };
+                match boot.create_device(&adapter, &desc) {
+                    Ok((d, q, fam)) => {
+                        xr_family = Some(fam);
+                        Some((d, q))
+                    }
+                    Err(e) => {
+                        let msg = e.to_string();
+                        log::error!("VR Vulkan device creation failed (falling back to desktop): {msg}");
+                        xr_error = Some(msg);
+                        xr_boot = None;
+                        None
+                    }
                 }
-                Err(e) => {
-                    log::warn!("device for FSR 4: {e}; opening it without");
-                    None
+            } else {
+                None
+            };
+            #[cfg(not(target_os = "linux"))]
+            let xr_dev: Option<(wgpu::Device, wgpu::Queue)> = None;
+
+            if xr_dev.is_some() {
+                xr_dev
+            } else if crate::fsr4::rt::wanted(&info) {
+                let desc = wgpu::DeviceDescriptor { label: None, required_features: required_features | crate::fsr4::rt::features(&adapter), required_limits: required_limits.clone(), memory_hints: MEMORY_HINTS, ..Default::default() };
+                match crate::fsr4::rt::open_device(&adapter, &desc) {
+                    Ok(dq) => {
+                        fsr4_device = true;
+                        Some(dq)
+                    }
+                    Err(e) => {
+                        log::warn!("device for FSR 4: {e}; opening it without");
+                        None
+                    }
                 }
+            } else {
+                None
             }
-        } else {
-            None
         };
         let (device, queue) = match opened {
             Some(dq) => dq,
@@ -2079,7 +2151,41 @@ impl Renderer {
         let mut config = surface.get_default_config(&adapter, size.width.max(1), size.height.max(1)).ok_or_else(|| anyhow::anyhow!("surface unsupported"))?;
         let caps = surface.get_capabilities(&adapter);
         config.format = caps.formats.iter().copied().find(|f| !f.is_srgb()).unwrap_or(caps.formats[0]);
-        config.present_mode = if vsync { wgpu::PresentMode::AutoVsync } else { wgpu::PresentMode::AutoNoVsync };
+        #[cfg(target_os = "linux")]
+        let xr = if let (Some(boot), Some(fam)) = (xr_boot, xr_family) {
+            match boot.finish(&device, fam) {
+                Ok(xr) => Some(xr),
+                Err(e) => {
+                    let message = e.to_string();
+                    log::error!("VR session startup failed: {message}");
+                    xr_error = Some(message);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        #[cfg(windows)]
+        let xr = if vr_requested {
+            match crate::vr::OpenXrRuntime::new(&adapter, &device, config.format) {
+                Ok(xr) => Some(xr),
+                Err(e) => {
+                    let message = e.to_string();
+                    log::error!("VR startup failed: {message}");
+                    xr_error = Some(message);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        #[cfg(any(windows, target_os = "linux"))]
+        let xr_active_init = xr.is_some();
+        #[cfg(not(any(windows, target_os = "linux")))]
+        let xr_active_init = false;
+        crate::vr::set_active(xr_active_init);
+        // In VR mode, keep the desktop mirror un-vsynced so monitor refresh never throttles the headset.
+        config.present_mode = if vsync && !xr_active_init { wgpu::PresentMode::AutoVsync } else { wgpu::PresentMode::AutoNoVsync };
         surface.configure(&device, &config);
         log::info!("surface {:?}, final passes {}", config.format, if direct_out(&config) { "straight to it" } else { "via a blit" });
 
@@ -2563,7 +2669,7 @@ impl Renderer {
             (p_cshadow_in, p_cshadow_out, p_cshadow_in_plain, p_cshadow_out_plain, p_cshadow_mix, (p_ap_build, p_sky_build, p_cloud_refl, p_cloud_refl_plain), (p_comp_cls, p_comp_sky, p_comp_opaque, p_comp_glass, p_comp_water, p_comp_edge, p_composite, p_composite_edge), p_cloud, p_cloud_plain, p_cloud_classify, p_cloud_plain_cls, p_cloud_storm_cls, p_cloud_rain, p_cloud_temporal, p_cloud_apply),
             (p_terrain, p_terrain_far, p_terrain_water, p_terrain_tess, p_terrain_cells, p_terrain_photo, p_terrain_tess_photo, p_terrain_cells_photo, p_build, p_build_whole, p_build_shadow, p_photo, p_skin, p_photo_shadow, p_photo_shadow_fast, p_photo_mask, p_water_top, p_shore_cover),
             (p_road, p_field, p_lights, p_lamp_top, p_rain, p_bolt, p_veil, p_contrails, p_tree, imp, p_tree_near, p_tree_shadow, p_tree_shadow_fixed, p_card, p_inst, p_inst_shadow, p_scenery, p_scenery_shadow),
-            (p_trans, p_ms, p_sky, p_gtao, p_ao_blur, p_taa, p_down, p_up, p_final, p_final_taa, p_blit, p_particles, p_psim, p_vol, p_dres),
+            (p_trans, p_ms, p_sky, p_gtao, p_ao_blur, p_taa, p_down, p_up, p_final, p_final_taa, p_blit, p_xr_blit, p_particles, p_psim, p_vol, p_dres),
         ) = std::thread::scope(|s| {
 
             let t_cloud = s.spawn(|| {
@@ -2838,6 +2944,10 @@ impl Renderer {
             let p_final = full("final", &pl(&l_post), &m_post, "fs_final", out_format(&config), None);
             let p_final_taa = full("final taa", &pl(&l_post), &m_post, "fs_final_taa", out_format(&config), None);
             let p_blit = full("blit", &pl(&l_post), &m_post, if config.format.is_srgb() { "fs_blit_srgb" } else { "fs_blit" }, config.format, None);
+            #[cfg(any(windows, target_os = "linux"))]
+            let p_xr_blit = xr.as_ref().map(|x| full("xr blit", &pl(&l_post), &m_post, if x.format().is_srgb() { "fs_blit_srgb" } else { "fs_blit" }, x.format(), None));
+            #[cfg(not(any(windows, target_os = "linux")))]
+            let p_xr_blit: Option<wgpu::RenderPipeline> = None;
             let pm = wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha, operation: wgpu::BlendOperation::Add };
             let p_particles = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("particles"),
@@ -2869,7 +2979,7 @@ impl Renderer {
                 t_cloud.join().unwrap(),
                 t_world.join().unwrap(),
                 t_misc.join().unwrap(),
-                (p_trans, p_ms, p_sky, p_gtao, p_ao_blur, p_taa, p_down, p_up, p_final, p_final_taa, p_blit, p_particles, p_psim, p_vol, p_dres),
+                (p_trans, p_ms, p_sky, p_gtao, p_ao_blur, p_taa, p_down, p_up, p_final, p_final_taa, p_blit, p_xr_blit, p_particles, p_psim, p_vol, p_dres),
             )
         });
         crate::progress::step("shaders-done");
@@ -3009,8 +3119,12 @@ impl Renderer {
         let egui = egui_wgpu::Renderer::new(d, out_format(&config), egui_wgpu::RendererOptions::default());
         let mut up = crate::upscale::Upscale::new(d, &pl(&l_post), &m_post, out_format(&config));
         up.fsr4_device = fsr4_device;
-        let targets = Self::make_targets(d, &config, (config.width, config.height), &l_dres, &l_ao, &l_hiz, &l_comp_cls, &l_comp_main, &l_comp_edge, &l_comp_globe, &ap_l, &ap_t, &cloud_refl, &l_cloud, &l_cloud_storm, &l_cloud_rain, &l_cloud_apply, &l_cloud_temporal, &l_post, &l_pdraw, &l_glass, &psim_ub, &pbuf, &black);
-        let fluid_t = fluid.draw_targets(d, &targets.depth, config.width, config.height);
+        #[cfg(any(windows, target_os = "linux"))]
+        let init_out = xr.as_ref().map(|x| (x.extent()[0], x.extent()[1])).unwrap_or((config.width, config.height));
+        #[cfg(not(any(windows, target_os = "linux")))]
+        let init_out = (config.width, config.height);
+        let targets = Self::make_targets(d, &config, init_out, init_out, &l_dres, &l_ao, &l_hiz, &l_comp_cls, &l_comp_main, &l_comp_edge, &l_comp_globe, &ap_l, &ap_t, &cloud_refl, &l_cloud, &l_cloud_storm, &l_cloud_rain, &l_cloud_apply, &l_cloud_temporal, &l_post, &l_pdraw, &l_glass, &psim_ub, &pbuf, &black);
+        let fluid_t = fluid.draw_targets(d, &targets.depth, init_out.0, init_out.1);
         // The transmittance and multi-scatter tables depend only on the planet
         // and the haze: bake them now, and again whenever the haze changes.
         let lut_bake = LutBake { p_trans, p_ms, bg_trans: bg0_boot, bg_ms: bg0_ms, trans: lut_trans, ms: lut_ms };
@@ -3026,17 +3140,7 @@ impl Renderer {
         if let Some(err) = gpu_error.lock().clone() {
             anyhow::bail!("GPU initialisation error: {err}");
         }
-        #[cfg(windows)]
-        let (xr, xr_error) = if vr_requested {
-            match crate::vr::OpenXrRuntime::new(&adapter, &device, config.format) {
-                Ok(xr) => (Some(xr), None),
-                Err(e) => {
-                    let message = e.to_string();
-                    log::error!("VR startup failed: {message}");
-                    (None, Some(message))
-                }
-            }
-        } else { (None, None) };
+
         Ok(Self {
             ground_mats,
             casc_ub, bg_casc, bg_tileu, l_dres, l_ao, p_gtao, p_ao_blur, p_dres, p_road, p_field, p_lights, dyn_lights, p_rain, p_veil, p_bolt, bolt_buf, p_contrails, bg_contrails, contrail_nodes, contrail_segs, p_tree, p_tree_near, imp, p_tree_shadow, p_tree_shadow_fixed, p_card, near_buf, p_inst, p_inst_shadow, inst_buf, fall_buf, tree_lib: None, inst_lib: None,
@@ -3046,7 +3150,13 @@ impl Renderer {
             globals_ub, bg0, bg0_pre, bg0_shadow, lut_sky, shadow, shadow_res: SHADOW_RES, bg0_src, scale: 1.0, ao: true, cloud_step: 1.0, l_tile, l_build, l_comp_cls, l_comp_main, l_comp_edge, l_comp_globe, l_hiz, ap_l, ap_t, cloud_refl, bg_atmlut, bg_comp_sky, p_hiz_build, p_ap_build, p_sky_build, p_cloud_refl, p_cloud_refl_plain, l_cloud, l_cloud_storm, l_cloud_rain, l_cloud_apply, l_cloud_temporal, l_post, l_pdraw, l_glass,
             tile_ub, l_photo, photo_ub, p_photo, p_photo_mask, p_photo_shadow, p_photo_shadow_fast, l_skin, p_skin, skin_slots, p_water_top, p_lamp_top, photo_mask, photo_mask_dirty: true, light_cover, light_cover_view, glow_tex, gclouds_tex, snow_tex, snow_track_tex, build_ub, obj_ub, bg_obj, l_obj, paint_ub, font_ub, tile_ibuf, tile_nidx: ix.len() as u32,
             p_sky, p_terrain, p_terrain_far, p_terrain_water, p_terrain_tess, p_terrain_cells, p_terrain_photo, p_terrain_tess_photo, p_terrain_cells_photo, tess_ibuf, tess_idx, tess_buf, tess_cap, cell_ibuf, p_build, p_build_whole, p_build_shadow, obj_gen: None, obj_gen_rx: Some(obj_gen_rx), wait_objs: false, obj_wait: None, obj_src, pl_obj, obj_fast: None, obj_fast_rx: None, p_comp_cls, p_comp_sky, p_comp_opaque, p_comp_glass, p_comp_water, p_comp_edge, p_composite, p_composite_edge, p_cloud, p_cloud_plain, p_cloud_classify, p_cloud_plain_cls, p_cloud_storm_cls, p_cloud_rain, p_cloud_apply, p_cloud_temporal, p_particles, p_taa, p_psim, p_down, p_up, p_final, p_final_taa, p_blit,
-            psim_ub, pbuf, bg_psim, phead: 0, p_vol, bg_vol_a, bg_vol_b, vol_acc, fluid, fluid_t, ocean, shore, p_shore_cover, smoke_until: 0.0, parts_until: 0.0, now: 0.0, black, targets, cloud_flip: 0, cloud_hist_ok: false, clouds: true, cloud_shadows: true, vendor: info.vendor, cshadow, lut_bake, lut_haze: 1.0, taa_flip: 0, taa_hist_ok: false, up, gpu: info.clone(), meshes: Vec::new(), egui, instance, window, gpu_error, device_lost, surface, config, #[cfg(windows)] xr, #[cfg(windows)] xr_error, #[cfg(windows)] xr_eye: None, queue, device, stats: [0.0; 4], headless: false, integrated,
+            psim_ub, pbuf, bg_psim, phead: 0, p_vol, bg_vol_a, bg_vol_b, vol_acc, fluid, fluid_t, ocean, shore, p_shore_cover, smoke_until: 0.0, parts_until: 0.0, now: 0.0, black, targets, cloud_flip: 0, cloud_hist_ok: false, clouds: true, cloud_shadows: true, vendor: info.vendor, cshadow, lut_bake, lut_haze: 1.0, taa_flip: 0, taa_hist_ok: false, up, gpu: info.clone(), meshes: Vec::new(), egui, instance, window, gpu_error, device_lost, surface, config,
+            #[cfg(any(windows, target_os = "linux"))] xr,
+            #[cfg(any(windows, target_os = "linux"))] xr_error,
+            #[cfg(any(windows, target_os = "linux"))] xr_eye: None,
+            p_xr_blit,
+            #[cfg(any(windows, target_os = "linux"))] xr_cs: [[0.0; 4]; 2 * CS_MAP],
+            queue, device, stats: [0.0; 4], headless: false, integrated,
         })
     }
 
@@ -3056,14 +3166,44 @@ impl Renderer {
     }
 
     pub fn vr_status(&self) -> Option<String> {
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux"))]
         {
             if let Some(error) = &self.xr_error { return Some(format!("OpenXR unavailable: {error}")); }
-            if self.xr.is_some() { return Some("OpenXR headset connected".to_string()); }
+            if let Some(xr) = &self.xr { return Some(xr.status_text()); }
             return None;
         }
-        #[cfg(not(windows))]
-        { Some("Headset VR is supported on Windows only".to_string()) }
+        #[cfg(not(any(windows, target_os = "linux")))]
+        { Some("OpenXR headset VR is supported on Linux (Vulkan) and Windows (D3D12)".to_string()) }
+    }
+
+    pub fn xr_active(&self) -> bool {
+        #[cfg(any(windows, target_os = "linux"))]
+        { self.xr.as_ref().is_some_and(|x| !x.is_exiting()) }
+        #[cfg(not(any(windows, target_os = "linux")))]
+        { false }
+    }
+
+    pub fn xr_head_pose(&self) -> Option<(glam::Vec3, glam::Quat)> {
+        #[cfg(any(windows, target_os = "linux"))]
+        { self.xr.as_ref()?.head_pose() }
+        #[cfg(not(any(windows, target_os = "linux")))]
+        { None }
+    }
+
+    pub fn recenter_vr(&mut self) {
+        #[cfg(any(windows, target_os = "linux"))]
+        if let Some(xr) = self.xr.as_mut() {
+            xr.recenter();
+        }
+    }
+
+    fn target_out_size(&self) -> (u32, u32) {
+        #[cfg(any(windows, target_os = "linux"))]
+        if let Some(xr) = &self.xr {
+            let e = xr.extent();
+            return (e[0].max(1), e[1].max(1));
+        }
+        (self.config.width.max(1), self.config.height.max(1))
     }
 
     /// True if the GPU device was lost.
@@ -3073,15 +3213,14 @@ impl Renderer {
 
     #[allow(clippy::too_many_arguments)]
     fn make_targets(
-        d: &wgpu::Device, config: &wgpu::SurfaceConfiguration, (w, h): (u32, u32), l_dres: &wgpu::BindGroupLayout, l_ao: &wgpu::BindGroupLayout, l_hiz: &wgpu::BindGroupLayout,
+        d: &wgpu::Device, config: &wgpu::SurfaceConfiguration, (ow, oh): (u32, u32), (w, h): (u32, u32), l_dres: &wgpu::BindGroupLayout, l_ao: &wgpu::BindGroupLayout, l_hiz: &wgpu::BindGroupLayout,
         l_comp_cls: &wgpu::BindGroupLayout, l_comp_main: &wgpu::BindGroupLayout, l_comp_edge: &wgpu::BindGroupLayout, l_comp_globe: &wgpu::BindGroupLayout,
         ap_l: &wgpu::TextureView, ap_t: &wgpu::TextureView, cloud_refl: &wgpu::TextureView,
         l_cloud: &wgpu::BindGroupLayout, l_cloud_storm: &wgpu::BindGroupLayout, l_cloud_rain: &wgpu::BindGroupLayout, l_cloud_apply: &wgpu::BindGroupLayout, l_cloud_temporal: &wgpu::BindGroupLayout,
         l_post: &wgpu::BindGroupLayout, l_pdraw: &wgpu::BindGroupLayout, l_glass: &wgpu::BindGroupLayout, psim_ub: &wgpu::Buffer, pbuf: &wgpu::Buffer, black: &wgpu::TextureView,
     ) -> Targets {
         // Everything is drawn at the render resolution (w, h); the tonemap
-        // scales it to the window's, where the UI goes on top.
-        let (ow, oh) = (config.width, config.height);
+        // scales it to the output target (ow, oh) (window or OpenXR eye).
         let rt = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
         let ms = |label: &str, f| view(&make_tex_ms(d, label, w, h, 1, 1, f, rt, msaa()));
         let amb = view(&make_tex(d, "amb", w, h, 1, 1, AMB, rt));
@@ -3163,16 +3302,21 @@ impl Renderer {
         self.config.width = w;
         self.config.height = h;
         self.surface.configure(&self.device, &self.config);
-        self.cshadow.ok = false;
-        self.remake_targets();
+        // When an OpenXR headset owns the render targets, resizing the desktop
+        // mirror window does not change per-eye render dimensions.
+        if !self.xr_active() {
+            self.cshadow.ok = false;
+            self.remake_targets();
+        }
     }
 
-    /// The size everything is drawn at before the tonemap: the window's
-    /// scaled by the render resolution setting.
+    /// The size everything is drawn at before the tonemap: the output target's
+    /// (window or OpenXR eye) scaled by the render resolution setting.
     pub fn render_size(&self) -> (u32, u32) {
         let max = self.device.limits().max_texture_dimension_2d;
         let s = |v: u32| ((v as f32 * self.scale).round() as u32).clamp(1, max);
-        (s(self.config.width), s(self.config.height))
+        let (ow, oh) = self.target_out_size();
+        (s(ow), s(oh))
     }
 
     /// Side of the part of its shadow map layer the aircraft's shadow uses.
@@ -3183,8 +3327,9 @@ impl Renderer {
     fn remake_targets(&mut self) {
         self.cloud_hist_ok = false;
         self.taa_hist_ok = false;
+        let out = self.target_out_size();
         let (w, h) = self.render_size();
-        self.targets = Self::make_targets(&self.device, &self.config, (w, h), &self.l_dres, &self.l_ao, &self.l_hiz, &self.l_comp_cls, &self.l_comp_main, &self.l_comp_edge, &self.l_comp_globe, &self.ap_l, &self.ap_t, &self.cloud_refl, &self.l_cloud, &self.l_cloud_storm, &self.l_cloud_rain, &self.l_cloud_apply, &self.l_cloud_temporal, &self.l_post, &self.l_pdraw, &self.l_glass, &self.psim_ub, &self.pbuf, &self.black);
+        self.targets = Self::make_targets(&self.device, &self.config, out, (w, h), &self.l_dres, &self.l_ao, &self.l_hiz, &self.l_comp_cls, &self.l_comp_main, &self.l_comp_edge, &self.l_comp_globe, &self.ap_l, &self.ap_t, &self.cloud_refl, &self.l_cloud, &self.l_cloud_storm, &self.l_cloud_rain, &self.l_cloud_apply, &self.l_cloud_temporal, &self.l_post, &self.l_pdraw, &self.l_glass, &self.psim_ub, &self.pbuf, &self.black);
         self.fluid_t = self.fluid.draw_targets(&self.device, &self.targets.depth, w, h);
         self.rebuild_upscale();
     }
@@ -3194,7 +3339,7 @@ impl Renderer {
         let t = &self.targets;
         let i = crate::upscale::Inputs {
             render: (t.hdr_tex.width(), t.hdr_tex.height()),
-            display: (self.config.width, self.config.height),
+            display: self.target_out_size(),
             hdr: &t.hdr,
             taa: [&t.taa[0], &t.taa[1]],
             depth: &t.depth,
@@ -3260,7 +3405,7 @@ impl Renderer {
     }
 
     pub fn set_vsync(&mut self, on: bool) {
-        let mode = if on { wgpu::PresentMode::AutoVsync } else { wgpu::PresentMode::AutoNoVsync };
+        let mode = if on && !self.xr_active() { wgpu::PresentMode::AutoVsync } else { wgpu::PresentMode::AutoNoVsync };
         if self.config.present_mode != mode {
             self.config.present_mode = mode;
             self.surface.configure(&self.device, &self.config);
@@ -3581,65 +3726,152 @@ impl Renderer {
         self.ground_mats.photos = Some(crate::materials::spawn(fetch));
     }
 
-    pub fn render(&mut self, f: Frame) {
-        #[cfg(windows)]
+    pub fn render(&mut self, mut f: Frame) {
+        #[cfg(any(windows, target_os = "linux"))]
         if self.xr.is_some() {
             let begin = self.xr.as_mut().and_then(|xr| match xr.poll_begin() {
                 Ok(frame) => frame,
-                Err(e) => { self.xr_error = Some(e.to_string()); log::error!("OpenXR frame failed: {e}"); None }
+                Err(e) => {
+                    self.xr_error = Some(e.to_string());
+                    log::error!("OpenXR frame failed: {e}");
+                    let _ = xr.finish();
+                    None
+                }
             });
             if let Some(xr_frame) = begin {
+                let ui = f.egui.take();
+                let mut drew_vr = false;
                 if xr_frame.should_render && xr_frame.views.len() == 2 {
+                    let base = f.xr_base.unwrap_or(crate::vr::XrViewBase {
+                        cockpit_rot: glam::Quat::IDENTITY,
+                        head_pos: glam::Vec3::ZERO,
+                    });
+                    let near = f.g.misc[0].max(0.01);
+                    let render_h = self.render_size().1.max(1) as f32;
                     for eye in 0..2 {
                         let mut eye_frame = f.clone();
+                        eye_frame.egui = None;
+                        eye_frame.shot = None;
                         let v = &xr_frame.views[eye];
-                        let tan_l = v.fov.angle_left.tan();
-                        let tan_r = v.fov.angle_right.tan();
-                        let tan_d = v.fov.angle_down.tan();
-                        let tan_u = v.fov.angle_up.tan();
-                        let n = eye_frame.g.misc[0].max(0.01);
-                        let p = glam::Mat4::from_cols_array(&[
-                            2.0/(tan_r-tan_l),0.0,0.0,0.0,
-                            0.0,2.0/(tan_u-tan_d),0.0,0.0,
-                            (tan_r+tan_l)/(tan_r-tan_l),(tan_u+tan_d)/(tan_u-tan_d),0.0,-1.0,
-                            0.0,0.0,n,0.0,
-                        ]);
-                        let h = self.config.height.max(1) as f32;
-                        let render_h = self.render_size().1.max(1) as f32;
-                        let tan_y = eye_frame.g.misc[3] * render_h * 0.5;
-                        let base = glam::Mat4::from_cols_array(&[
-                            1.0/(tan_y*self.config.width.max(1) as f32/h),0.0,0.0,0.0,
-                            0.0,1.0/tan_y,0.0,0.0,
-                            0.0,0.0,0.0,-1.0,
-                            0.0,0.0,n,0.0,
-                        ]);
-                        let center_view = base.inverse() * glam::Mat4::from_cols_array_2d(&eye_frame.g.view_proj);
-                        let pose = v.pose;
-                        let eye_offset = glam::Vec3::new(pose.position.x, pose.position.y, pose.position.z);
-                        let q = glam::Quat::from_xyzw(pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w);
-                        let eye_view = glam::Mat4::from_rotation_translation(q.conjugate(), -eye_offset) * center_view;
-                        let vp = p * eye_view;
+                        let eye_pos = glam::Vec3::new(v.pose.position.x, v.pose.position.y, v.pose.position.z);
+                        let eye_rot = glam::Quat::from_xyzw(v.pose.orientation.x, v.pose.orientation.y, v.pose.orientation.z, v.pose.orientation.w);
+                        let (vp, inv_vp) = crate::vr::eye_matrices(base, eye_pos, eye_rot, v.fov, near);
                         eye_frame.g.view_proj = vp.to_cols_array_2d();
-                        eye_frame.g.inv_view_proj = vp.inverse().to_cols_array_2d();
-                        if eye == 1 {
-                            if let Some((_, delta, _)) = &mut eye_frame.egui { *delta = egui::TexturesDelta::default(); }
-                        }
+                        eye_frame.g.inv_view_proj = inv_vp.to_cols_array_2d();
+                        eye_frame.g.misc[3] = (v.fov.angle_up.tan() - v.fov.angle_down.tan()).abs().max(1e-3) / render_h;
+                        eye_frame.g.taa[0] = 0.0;
+                        eye_frame.g.taa[1] = 0.0;
+                        eye_frame.g.taa[2] = 0.0;
                         eye_frame.g.cam_delta[3] = 0.0;
                         self.xr_eye = Some(eye);
                         self.render_one(eye_frame);
                     }
+                    drew_vr = true;
                 }
                 self.xr_eye = None;
                 if let Some(xr) = self.xr.as_mut() {
-                    if let Err(e) = xr.finish() { self.xr_error = Some(e.to_string()); log::error!("OpenXR frame end failed: {e}"); }
+                    if let Err(e) = xr.finish() {
+                        self.xr_error = Some(e.to_string());
+                        log::error!("OpenXR frame end failed: {e}");
+                    }
                 }
-                return;
+                if drew_vr {
+                    self.present_xr_mirror(ui);
+                    return;
+                }
+                f.egui = ui;
             }
         }
         self.render_one(f);
     }
 
+    /// Presents a live desktop mirror of the VR view with crisp 1:1 egui menus
+    /// on the monitor (un-vsynced so it never limits the headset refresh rate).
+    #[cfg(any(windows, target_os = "linux"))]
+    fn present_xr_mirror(&mut self, mut egui_in: Option<(Vec<egui::ClippedPrimitive>, egui::TexturesDelta, f32)>) {
+        if let Some((_, delta, _)) = &mut egui_in {
+            for (id, ds) in delta.set.drain() {
+                for d in &ds {
+                    self.egui.update_texture(&self.device, &self.queue, id, d);
+                }
+            }
+        }
+        if self.headless || self.is_device_lost() {
+            if let Some((_, delta, _)) = &mut egui_in {
+                for id in delta.free.drain() {
+                    self.egui.free_texture(&id);
+                }
+            }
+            return;
+        }
+        let frame = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => Some(t),
+            wgpu::CurrentSurfaceTexture::Outdated => {
+                self.surface.configure(&self.device, &self.config);
+                None
+            }
+            wgpu::CurrentSurfaceTexture::Lost => {
+                if let Ok(s) = self.instance.create_surface(self.window.clone()) {
+                    self.surface = s;
+                }
+                self.surface.configure(&self.device, &self.config);
+                None
+            }
+            _ => None,
+        };
+        let Some(frame) = frame else {
+            if let Some((_, delta, _)) = &mut egui_in {
+                for id in delta.free.drain() {
+                    self.egui.free_texture(&id);
+                }
+            }
+            return;
+        };
+        let sview = frame.texture.create_view(&Default::default());
+        let mut enc = self.device.create_command_encoder(&Default::default());
+        {
+            let mut rp = enc.begin_render_pass(&pass_desc(&[Some(color_att(&sview, true))], None));
+            rp.set_pipeline(&self.p_blit);
+            rp.set_bind_group(0, &self.bg0, &[]);
+            rp.set_bind_group(1, &self.targets.bg_blit, &[]);
+            rp.draw(0..3, 0..1);
+        }
+        let egui_jobs = if direct_out(&self.config) {
+            egui_in.map(|(jobs, delta, ppp)| {
+                let sd = egui_wgpu::ScreenDescriptor { size_in_pixels: [self.config.width, self.config.height], pixels_per_point: ppp };
+                self.egui.update_buffers(&self.device, &self.queue, &mut enc, &jobs, &sd);
+                (jobs, delta, sd)
+            })
+        } else {
+            if let Some((_, mut delta, _)) = egui_in {
+                for id in delta.free.drain() {
+                    self.egui.free_texture(&id);
+                }
+            }
+            None
+        };
+        if let Some((jobs, _, sd)) = &egui_jobs {
+            let mut rp = enc.begin_render_pass(&pass_desc(&[Some(color_att(&sview, false))], None)).forget_lifetime();
+            self.egui.render(&mut rp, jobs, sd);
+        }
+        self.queue.submit([enc.finish()]);
+        self.queue.present(frame);
+        if let Some((_, mut delta, _)) = egui_jobs {
+            for id in delta.free.drain() {
+                self.egui.free_texture(&id);
+            }
+        }
+    }
+
     fn render_one(&mut self, mut f: Frame) {
+        #[cfg(any(windows, target_os = "linux"))]
+        let in_xr = self.xr_eye.is_some();
+        #[cfg(not(any(windows, target_os = "linux")))]
+        let in_xr = false;
+        #[cfg(any(windows, target_os = "linux"))]
+        let second_eye = self.xr_eye == Some(1);
+        #[cfg(not(any(windows, target_os = "linux")))]
+        let second_eye = false;
         if self.up.stale {
             // (AMD's runtime failed last frame: FSR 3.1 takes over)
             self.rebuild_upscale();
@@ -3661,10 +3893,7 @@ impl Renderer {
         let t_acq = std::time::Instant::now();
         // Headless: everything is drawn but nothing is shown, so no frame of the
         // window's is needed (and a hidden or locked screen does not stop it).
-        let frame = if self.headless || {
-            #[cfg(windows)] { self.xr_eye.is_some() }
-            #[cfg(not(windows))] { false }
-        } {
+        let frame = if self.headless || in_xr {
             None
         } else {
             match self.surface.get_current_texture() {
@@ -3689,10 +3918,7 @@ impl Renderer {
                 }
             }
         };
-        if frame.is_none() && !self.headless && {
-            #[cfg(windows)] { self.xr_eye.is_none() }
-            #[cfg(not(windows))] { true }
-        } {
+        if frame.is_none() && !self.headless && !in_xr {
             if let Some((_, delta, _)) = &mut f.egui {
                 for id in delta.free.drain() {
                     self.egui.free_texture(&id);
@@ -3727,52 +3953,75 @@ impl Renderer {
             }
         }
         self.update_obj_wait(kind);
-        #[cfg(windows)]
-        let sview = self.xr_eye.and_then(|eye| self.xr.as_ref()?.target(eye)).or_else(|| frame.as_ref().map(|f| f.texture.create_view(&Default::default())));
-        #[cfg(not(windows))]
-        let sview = frame.as_ref().map(|f| f.texture.create_view(&Default::default()));
+        let surface_view = frame.as_ref().map(|f| f.texture.create_view(&Default::default()));
+        #[cfg(any(windows, target_os = "linux"))]
+        let xr_view = self.xr_eye.and_then(|eye| self.xr.as_ref()?.target(eye).cloned());
+        #[cfg(any(windows, target_os = "linux"))]
+        let sview: Option<&wgpu::TextureView> = xr_view.as_ref().or(surface_view.as_ref());
+        #[cfg(not(any(windows, target_os = "linux")))]
+        let sview: Option<&wgpu::TextureView> = surface_view.as_ref();
         let q = &self.queue;
-        self.cloud_flip ^= 1;
-        if !self.cloud_hist_ok {
+        if !second_eye {
+            self.cloud_flip ^= 1;
+        }
+        if !self.cloud_hist_ok || in_xr {
             f.g.cam_delta[3] = 0.0;
         }
-        self.cloud_hist_ok = true;
+        self.cloud_hist_ok = !in_xr;
         // Anti-aliasing blends into last frame's result, if there is one and
         // the camera has not jumped since.
-        let taa = f.g.taa[2] > 0.5;
-        if !self.taa_hist_ok || f.g.cam_delta[3] < 0.5 {
+        let taa = !in_xr && f.g.taa[2] > 0.5;
+        if !self.taa_hist_ok || f.g.cam_delta[3] < 0.5 || in_xr {
             f.g.taa[2] = 0.0;
         }
         self.taa_hist_ok = taa;
-        self.taa_flip ^= 1;
-        // A clock jump (new flight) makes the bookkeeping meaningless.
-        if f.g.time[0] < self.now - 1.0 {
-            self.smoke_until = 0.0;
-            self.parts_until += f.g.time[0] - self.now;
-        } else if !f.sim_steps {
-            // (paused: the particles do not age, so neither does their deadline)
-            self.parts_until += (f.g.time[0] - self.now).max(0.0);
+        if !second_eye {
+            self.taa_flip ^= 1;
         }
-        self.now = f.g.time[0];
+        // A clock jump (new flight) makes the bookkeeping meaningless.
+        if !second_eye {
+            if f.g.time[0] < self.now - 1.0 {
+                self.smoke_until = 0.0;
+                self.parts_until += f.g.time[0] - self.now;
+            } else if !f.sim_steps {
+                // (paused: the particles do not age, so neither does their deadline)
+                self.parts_until += (f.g.time[0] - self.now).max(0.0);
+            }
+            self.now = f.g.time[0];
+        }
         let parts = self.now < self.parts_until;
         let smoke = self.now < self.smoke_until || f.fluid.is_some();
         f.g.vol_u[3] = if smoke { 1.0 } else { 0.0 };
-        self.ground_mats.poll(&self.device, q);
+        if !second_eye {
+            self.ground_mats.poll(&self.device, q);
+        }
         f.g.det = self.ground_mats.params;
         f.g.det_mean = self.ground_mats.means;
         f.g.det_hmean = self.ground_mats.hmeans;
-        f.g.quality = [self.cloud_step, self.scale, 1.0 / self.config.width.max(1) as f32, 1.0 / self.config.height.max(1) as f32];
+        let (ow, oh) = self.target_out_size();
+        f.g.quality = [self.cloud_step, self.scale, 1.0 / ow.max(1) as f32, 1.0 / oh.max(1) as f32];
         // Cloud shadows off (or no clouds): lookups find none (common.wgsl
         // `cloud_sun`), and the map is redrawn whole once they are back on.
         let cs_on = self.clouds && self.cloud_shadows;
-        let cs_full = if cs_on {
-            self.cshadow.prepare(&mut f.g)
+        let cs_full = if second_eye {
+            #[cfg(any(windows, target_os = "linux"))]
+            { f.g.cs = self.xr_cs; }
+            false
+        } else if cs_on {
+            let full = self.cshadow.prepare(&mut f.g);
+            #[cfg(any(windows, target_os = "linux"))]
+            { self.xr_cs = f.g.cs; }
+            full
         } else {
             self.cshadow.ok = false;
             f.g.cs[4][3] = 0.0;
+            #[cfg(any(windows, target_os = "linux"))]
+            { self.xr_cs = f.g.cs; }
             false
         };
-        q.write_buffer(&self.cshadow.mix_ub, 0, &self.cshadow.mix_bytes());
+        if !second_eye {
+            q.write_buffer(&self.cshadow.mix_ub, 0, &self.cshadow.mix_bytes());
+        }
         let horizon = (2.0 * crate::geo::R * (f.g.up[3].max(500.0) as f64)).sqrt() as f32;
         f.g.lite[2] = (horizon * 1.4).clamp(100_000.0, 500_000.0);
         let n_tiles = f.tiles.len().min(MAX_TILES as usize);
@@ -3829,39 +4078,41 @@ impl Renderer {
         if !f.tess.cells.is_empty() {
             q.write_buffer(&self.tess_buf, 0, bytemuck::cast_slice(&f.tess.cells));
         }
-        if let Some(px) = &f.glow {
-            let n = crate::skyglow::N as u32;
-            q.write_texture(
-                wgpu::TexelCopyTextureInfo { texture: &self.glow_tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-                bytemuck::cast_slice(px),
-                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(n * 8), rows_per_image: Some(n) },
-                wgpu::Extent3d { width: n, height: n, depth_or_array_layers: 1 },
-            );
-        }
-        if let Some(px) = &f.snow {
-            let n = crate::snowmap::N as u32;
-            q.write_texture(
-                wgpu::TexelCopyTextureInfo { texture: &self.snow_tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-                px,
-                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(n * 2), rows_per_image: Some(n) },
-                wgpu::Extent3d { width: n, height: n, depth_or_array_layers: 1 },
-            );
-        }
-        for u in &f.snow_tracks {
-            q.write_texture(
-                wgpu::TexelCopyTextureInfo { texture: &self.snow_track_tex, mip_level: 0, origin: wgpu::Origin3d { x: u.x, y: u.y, z: 0 }, aspect: wgpu::TextureAspect::All },
-                &u.data,
-                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(u.w * 2), rows_per_image: Some(u.h) },
-                wgpu::Extent3d { width: u.w, height: u.h, depth_or_array_layers: 1 },
-            );
-        }
-        if f.cover.len() == COVER_N * COVER_N {
-            q.write_texture(
-                wgpu::TexelCopyTextureInfo { texture: &self.light_cover, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-                &f.cover,
-                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(COVER_N as u32), rows_per_image: Some(COVER_N as u32) },
-                wgpu::Extent3d { width: COVER_N as u32, height: COVER_N as u32, depth_or_array_layers: 1 },
-            );
+        if !second_eye {
+            if let Some(px) = &f.glow {
+                let n = crate::skyglow::N as u32;
+                q.write_texture(
+                    wgpu::TexelCopyTextureInfo { texture: &self.glow_tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                    bytemuck::cast_slice(px),
+                    wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(n * 8), rows_per_image: Some(n) },
+                    wgpu::Extent3d { width: n, height: n, depth_or_array_layers: 1 },
+                );
+            }
+            if let Some(px) = &f.snow {
+                let n = crate::snowmap::N as u32;
+                q.write_texture(
+                    wgpu::TexelCopyTextureInfo { texture: &self.snow_tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                    px,
+                    wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(n * 2), rows_per_image: Some(n) },
+                    wgpu::Extent3d { width: n, height: n, depth_or_array_layers: 1 },
+                );
+            }
+            for u in &f.snow_tracks {
+                q.write_texture(
+                    wgpu::TexelCopyTextureInfo { texture: &self.snow_track_tex, mip_level: 0, origin: wgpu::Origin3d { x: u.x, y: u.y, z: 0 }, aspect: wgpu::TextureAspect::All },
+                    &u.data,
+                    wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(u.w * 2), rows_per_image: Some(u.h) },
+                    wgpu::Extent3d { width: u.w, height: u.h, depth_or_array_layers: 1 },
+                );
+            }
+            if f.cover.len() == COVER_N * COVER_N {
+                q.write_texture(
+                    wgpu::TexelCopyTextureInfo { texture: &self.light_cover, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                    &f.cover,
+                    wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(COVER_N as u32), rows_per_image: Some(COVER_N as u32) },
+                    wgpu::Extent3d { width: COVER_N as u32, height: COVER_N as u32, depth_or_array_layers: 1 },
+                );
+            }
         }
         // One extra slot after the tiles for loose trees: they are already
         // camera-relative, and offset.w = 1 keeps them to the model they were given.
@@ -3977,10 +4228,12 @@ impl Renderer {
         self.fluid.poll();
         let t = &self.targets;
         let mut enc = self.device.create_command_encoder(&Default::default());
-        if let Some(c) = self.frame_clock.as_mut() {
-            c.begin(&mut enc);
+        if !second_eye {
+            if let Some(c) = self.frame_clock.as_mut() {
+                c.begin(&mut enc);
+            }
         }
-        let mut gt = self.gpu_timer.take();
+        let mut gt = if second_eye { None } else { self.gpu_timer.take() };
         let gtr = gt.as_ref();
         let mut mark = |enc: &mut wgpu::CommandEncoder, l: &'static str| {
             if let Some(g) = gtr {
@@ -3994,61 +4247,63 @@ impl Renderer {
             }
         };
         mark(&mut enc, "start");
-        match &f.fluid {
-            Some(ff) => self.fluid.compute(q, &mut enc, ff),
-            None => self.fluid.live = false,
-        }
-        mark(&mut enc, "fire.sim");
-        // the wave fft only runs while some water is drawn.
-        if let Some(o) = &f.ocean {
-            self.ocean.compute(q, &mut enc, o);
-        }
-        mark(&mut enc, "ocean.fft");
-        if f.g.weather[3] != self.lut_haze {
-            self.lut_haze = f.g.weather[3];
-            self.lut_bake.draw(&mut enc);
-        }
-        mark(&mut enc, "sky.lut_bake");
-        if f.sim_steps && parts {
-            let mut cp = enc.begin_compute_pass(&Default::default());
-            cp.set_pipeline(&self.p_psim);
-            cp.set_bind_group(0, &self.bg0, &[]);
-            cp.set_bind_group(1, &self.bg_psim, &[]);
-            cp.dispatch_workgroups(MAX_PARTICLES / 64, 1, 1);
-        }
-        mark(&mut enc, "particles.sim");
-        if smoke {
-            // Smoke volume: splat, smooth, then light it (see vol.wgsl).
-            enc.clear_buffer(&self.vol_acc, 0, None);
-            if self.fluid.live {
-                self.fluid.splat_coarse(&mut enc);
+        let plain_wx = f.g.storm[3] <= 0.0 && f.g.nimbo[0][3] <= 0.0;
+        if !second_eye {
+            match &f.fluid {
+                Some(ff) => self.fluid.compute(q, &mut enc, ff),
+                None => self.fluid.live = false,
             }
-            let mut cp = enc.begin_compute_pass(&Default::default());
-            cp.set_bind_group(0, &self.bg0_pre, &[]);
-            let g = [VOL_N[0] / 4, VOL_N[1] / 4, VOL_N[2] / 4];
-            for (k, p) in self.p_vol.iter().enumerate() {
-                cp.set_pipeline(p);
-                cp.set_bind_group(1, if k == 4 { &self.bg_vol_b } else { &self.bg_vol_a }, &[]);
-                if k == 0 {
-                    cp.dispatch_workgroups(MAX_PARTICLES / 64, 1, 1);
-                } else {
-                    cp.dispatch_workgroups(g[0], g[1], g[2]);
+            mark(&mut enc, "fire.sim");
+            // the wave fft only runs while some water is drawn.
+            if let Some(o) = &f.ocean {
+                self.ocean.compute(q, &mut enc, o);
+            }
+            mark(&mut enc, "ocean.fft");
+            if f.g.weather[3] != self.lut_haze {
+                self.lut_haze = f.g.weather[3];
+                self.lut_bake.draw(&mut enc);
+            }
+            mark(&mut enc, "sky.lut_bake");
+            if f.sim_steps && parts {
+                let mut cp = enc.begin_compute_pass(&Default::default());
+                cp.set_pipeline(&self.p_psim);
+                cp.set_bind_group(0, &self.bg0, &[]);
+                cp.set_bind_group(1, &self.bg_psim, &[]);
+                cp.dispatch_workgroups(MAX_PARTICLES / 64, 1, 1);
+            }
+            mark(&mut enc, "particles.sim");
+            if smoke {
+                // Smoke volume: splat, smooth, then light it (see vol.wgsl).
+                enc.clear_buffer(&self.vol_acc, 0, None);
+                if self.fluid.live {
+                    self.fluid.splat_coarse(&mut enc);
+                }
+                let mut cp = enc.begin_compute_pass(&Default::default());
+                cp.set_bind_group(0, &self.bg0_pre, &[]);
+                let g = [VOL_N[0] / 4, VOL_N[1] / 4, VOL_N[2] / 4];
+                for (k, p) in self.p_vol.iter().enumerate() {
+                    cp.set_pipeline(p);
+                    cp.set_bind_group(1, if k == 4 { &self.bg_vol_b } else { &self.bg_vol_a }, &[]);
+                    if k == 0 {
+                        cp.dispatch_workgroups(MAX_PARTICLES / 64, 1, 1);
+                    } else {
+                        cp.dispatch_workgroups(g[0], g[1], g[2]);
+                    }
                 }
             }
+            mark(&mut enc, "smoke.volume");
+            if cs_on {
+                self.cshadow.draw(&mut enc, &self.bg0_pre, cs_full, plain_wx);
+            }
+            mark(&mut enc, "clouds.shadow_map");
+            {
+                let mut rp = enc.begin_render_pass(&pass_desc(&[Some(color_att(&self.lut_sky, true))], None));
+                rp.set_pipeline(&self.p_sky);
+                rp.set_bind_group(0, &self.bg0_pre, &[]);
+                rp.draw(0..3, 0..1);
+            }
+            mark(&mut enc, "sky.lut");
         }
-        mark(&mut enc, "smoke.volume");
-        let plain_wx = f.g.storm[3] <= 0.0 && f.g.nimbo[0][3] <= 0.0;
-        if cs_on {
-            self.cshadow.draw(&mut enc, &self.bg0_pre, cs_full, plain_wx);
-        }
-        mark(&mut enc, "clouds.shadow_map");
-        {
-            let mut rp = enc.begin_render_pass(&pass_desc(&[Some(color_att(&self.lut_sky, true))], None));
-            rp.set_pipeline(&self.p_sky);
-            rp.set_bind_group(0, &self.bg0_pre, &[]);
-            rp.draw(0..3, 0..1);
-        }
-        mark(&mut enc, "sky.lut");
         // Stage names for the draws `solids` makes: the main view, then each cascade.
         const SOLID_LABELS: [[&str; 5]; CASCADES + 1] = [
             ["view.buildings", "view.trees", "view.tree_cards+impostors", "view.cars+props", "view.aircraft"],
@@ -4402,6 +4657,8 @@ impl Renderer {
         };
         // (first: the cascades leave out our scenery the mesh stands over)
         // Where the 3D tiles are, seen from above: our own scenery gives way there.
+        // Shared across both VR eyes: only build masks and shadows once per frame.
+        if !second_eye {
         if n_photo > 0 || self.photo_mask_dirty {
             let clear = wgpu::RenderPassColorAttachment { view: &self.photo_mask, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: -1e4, b: 0.0, a: -1e4 }), store: wgpu::StoreOp::Store } };
             let mut rp = enc.begin_render_pass(&pass_desc(&[Some(clear)], None));
@@ -4559,6 +4816,7 @@ impl Renderer {
             }
         }
         mark(&mut enc, "shadow.aircraft_fine");
+        }
         {
             // The composite reads original samples at water/foreground boundaries.
             let att = |v, r| wgpu::RenderPassColorAttachment { view: v, depth_slice: None, resolve_target: (msaa() > 1).then_some(r), ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store } };
@@ -4976,7 +5234,7 @@ impl Renderer {
         mark(&mut enc, "glass");
         // The finished frame: `hdr` itself, or blended into the frames before
         // it (temporal AA), or upscaled from it by FSR 3.1 (upscale.rs).
-        let mode = self.up.active();
+        let mode = if in_xr && self.up.active().temporal() { crate::graphics::Upscaler::Bilinear } else { self.up.active() };
         let mut fsr_parity = None;
         let src = if mode.temporal() && self.up.t.is_some() {
             // (the temporal upscaler takes the temporal AA's place)
@@ -5028,8 +5286,10 @@ impl Renderer {
         mark(&mut enc, "bloom");
         // The tonemap, UI and title go straight into the window's frame when
         // it takes them as they are; `ldr` and a copy to the window otherwise,
-        // and for screenshots, which read `ldr` back.
-        let direct = sview.as_ref().filter(|_| f.shot.is_none() && direct_out(&self.config));
+        // and for screenshots (which read `ldr` back) and OpenXR (where `t.ldr`
+        // is sized to the headset eye extent, not the desktop window).
+        let xr_standby = !in_xr && self.xr_active();
+        let direct = sview.filter(|_| !in_xr && !xr_standby && f.shot.is_none() && direct_out(&self.config));
         let out = direct.unwrap_or(&t.ldr);
         let fsr3_final = if mode == crate::graphics::Upscaler::Fsr4 { self.up.fsr4.as_ref().and_then(|f| f.bg_final.as_ref()) } else { fsr_parity.and_then(|p| self.up.fsr3.as_ref()?.bg_final(p)) };
         match (&self.up.t, fsr3_final) {
@@ -5042,18 +5302,47 @@ impl Renderer {
         }
 
         mark(&mut enc, "tonemap");
-        let egui_jobs = f.egui.map(|(jobs, delta, ppp)| {
-            let sd = egui_wgpu::ScreenDescriptor { size_in_pixels: [self.config.width, self.config.height], pixels_per_point: ppp };
-            self.egui.update_buffers(&self.device, &self.queue, &mut enc, &jobs, &sd);
-            (jobs, delta, sd)
-        });
+        // In XR standby (headset connected, waiting for session READY / visible),
+        // blit the XR-sized `t.ldr` to the desktop window first, then draw egui
+        // at desktop window dimensions on top so menus stay crisp and uncropped.
+        let mut blitted_standby = false;
+        if xr_standby {
+            if let Some(sv) = sview {
+                full(&mut enc, sv, true, &self.p_blit, &t.bg_blit);
+                blitted_standby = true;
+                mark(&mut enc, "blit");
+            }
+        }
+        let ui_target = if blitted_standby && direct_out(&self.config) {
+            sview.unwrap_or(out)
+        } else {
+            out
+        };
+        let egui_jobs = if blitted_standby && !direct_out(&self.config) {
+            if let Some((_, mut delta, _)) = f.egui {
+                for id in delta.free.drain() {
+                    self.egui.free_texture(&id);
+                }
+            }
+            None
+        } else {
+            f.egui.map(|(jobs, delta, ppp)| {
+                let sd = egui_wgpu::ScreenDescriptor { size_in_pixels: [self.config.width, self.config.height], pixels_per_point: ppp };
+                self.egui.update_buffers(&self.device, &self.queue, &mut enc, &jobs, &sd);
+                (jobs, delta, sd)
+            })
+        };
         if let Some((jobs, _, sd)) = &egui_jobs {
-            let mut rp = enc.begin_render_pass(&pass_desc(&[Some(color_att(out, false))], None)).forget_lifetime();
+            let mut rp = enc.begin_render_pass(&pass_desc(&[Some(color_att(ui_target, false))], None)).forget_lifetime();
             self.egui.render(&mut rp, jobs, sd);
         }
         mark(&mut enc, "ui");
-        if let Some(sview) = sview.as_ref().filter(|_| direct.is_none()) {
-            full(&mut enc, sview, true, &self.p_blit, &t.bg_blit);
+        if let Some(sview) = sview.filter(|_| direct.is_none() && !blitted_standby) {
+            #[cfg(any(windows, target_os = "linux"))]
+            let blit_pipe = if in_xr { self.p_xr_blit.as_ref().unwrap_or(&self.p_blit) } else { &self.p_blit };
+            #[cfg(not(any(windows, target_os = "linux")))]
+            let blit_pipe = &self.p_blit;
+            full(&mut enc, sview, true, blit_pipe, &t.bg_blit);
             mark(&mut enc, "blit");
         }
         let bgra = out_format(&self.config) == wgpu::TextureFormat::Bgra8Unorm;
@@ -5075,26 +5364,34 @@ impl Renderer {
         if let Some(g) = gt.as_mut() {
             g.resolve(&mut enc);
         }
-        if let Some(c) = self.frame_clock.as_mut() {
-            c.end(&mut enc);
+        if !second_eye {
+            if let Some(c) = self.frame_clock.as_mut() {
+                c.end(&mut enc);
+            }
         }
         self.queue.submit([enc.finish()]);
-        if let Some(c) = self.frame_clock.as_mut() {
-            c.after_submit();
+        if !second_eye {
+            if let Some(c) = self.frame_clock.as_mut() {
+                c.after_submit();
+            }
         }
         crate::gputime::cpu("render.submit");
         if let Some(g) = gt.as_mut() {
             g.collect(&self.device);
         }
         crate::gputime::cpu("render.profiler_gpu_wait");
-        self.gpu_timer = gt;
-        self.fluid.after_submit();
+        if !second_eye {
+            self.gpu_timer = gt;
+            self.fluid.after_submit();
+        }
         match frame {
             Some(frame) => self.queue.present(frame),
-            // Nothing paces a frame that is not shown: wait for the GPU to finish it.
-            None => {
+            // In VR, OpenXR synchronizes on the same GPU queue via xrReleaseSwapchainImage / xrEndFrame;
+            // only wait in headless mode (where nothing else paces the frame).
+            None if !in_xr => {
                 let _ = self.device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None });
             }
+            None => {}
         }
         self.stats[3] += t_sub.elapsed().as_secs_f64();
         if let Some((_, mut delta, _)) = egui_jobs {
@@ -5158,6 +5455,10 @@ fn pass_desc<'a>(colors: &'a [Option<wgpu::RenderPassColorAttachment<'a>>], dept
 
 impl Drop for Renderer {
     fn drop(&mut self) {
+        let _ = self.device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None });
+        #[cfg(any(windows, target_os = "linux"))]
+        { self.xr = None; }
+        crate::vr::set_active(false);
         self.fluid.shutdown(&self.device);
     }
 }

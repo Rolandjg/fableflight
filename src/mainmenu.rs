@@ -153,8 +153,9 @@ impl Game {
                 }
             }
 
-            if self.vr.enabled {
-                p.text(pos2(screen.center().x, top - 24.0), Align2::CENTER_CENTER, "◆ OPENXR VR · STEREO COCKPIT ◆", FontId::proportional(13.0), ACCENT);
+            if self.vr.enabled || self.r.vr_status().is_some() {
+                let banner = self.r.vr_status().unwrap_or_else(|| "Restart with --vr to connect an OpenXR headset".to_string());
+                p.text(pos2(screen.center().x, top - 24.0), Align2::CENTER_CENTER, format!("◆ {banner} ◆"), FontId::proportional(13.0), ACCENT);
             }
             if padui::active() {
                 let mut f = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_center_size(pos2(screen.center().x, foot_y), vec2(360.0, 28.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
