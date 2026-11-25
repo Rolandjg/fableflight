@@ -48,6 +48,59 @@ pub struct VrOrb {
     pub state: [f32; 4],
 }
 
+/// 3D floating UI panel quad rendered stereoscopically in VR (in the recentered
+/// head/menu reference frame, rotated by `XrViewBase::cockpit_rot`).
+#[derive(Copy, Clone, Debug)]
+pub struct VrUiQuad {
+    /// Panel center in base frame (m), e.g. `(0, 0, -1.8)`.
+    pub center: Vec3,
+    /// Unit right axis of the panel in base frame.
+    pub right: Vec3,
+    /// Unit up axis of the panel in base frame.
+    pub up: Vec3,
+    /// Half-width and half-height of the panel in metres.
+    pub half_w: f32,
+    pub half_h: f32,
+}
+
+/// GPU instance data for a 3D VR laser beam segment (camera-relative world coords).
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct VrLaserBeam {
+    /// Start position (xyz) and beam radius in metres (w).
+    pub start_r: [f32; 4],
+    /// End position (xyz) and far-end fade flag (`0.0` = crisp hit end, `1.0` = fade out).
+    pub end_fade: [f32; 4],
+    /// RGBA display-space glow color.
+    pub color: [f32; 4],
+}
+
+/// GPU instance data for a 3D VR laser target dot or controller emitter dot.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct VrLaserDot {
+    /// World-relative center (xyz) and outer disc radius in metres (w).
+    pub pos_r: [f32; 4],
+    /// Surface normal (xyz) facing the viewer (`0,0,0` = camera billboard) and style (`w`: `0` = reticle dot, `1` = controller orb).
+    pub norm_style: [f32; 4],
+    /// RGBA display-space color (`a` = pressed/pulse intensity).
+    pub color: [f32; 4],
+}
+
+/// Per-frame VR menu/overlay primitives rendered after tonemap (in LDR display space
+/// with a short near plane so UI and lasers are never clipped by orbital globe near planes).
+#[derive(Clone, Debug, Default)]
+pub struct VrOverlay {
+    /// Floating 3D UI quad (presents the egui texture in VR when menus/panels are open).
+    pub panel: Option<VrUiQuad>,
+    /// 3D laser beams (active pointer ray, plus connecting pinch beam on globe).
+    pub beams: Vec<VrLaserBeam>,
+    /// 3D reticle dot on the UI panel + controller emitter orbs.
+    pub dots: Vec<VrLaserDot>,
+    /// Continuously advancing wall-clock seconds for smooth hover animations even in paused menus.
+    pub time: f32,
+}
+
 /// Angular size (radians per egui logical point) of 3D-anchored globe labels in VR.
 /// Gives ~0.98° tall city names (14 pt) across all headset FOVs and resolutions.
 pub const VR_GLOBE_RAD_PER_PT: f32 = 1.0 / 820.0;

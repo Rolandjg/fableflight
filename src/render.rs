@@ -1107,8 +1107,20 @@ pub struct Frame<'a> {
     pub xr_base: Option<crate::vr::XrViewBase>,
     /// translucent 3D VR hand indicator orbs (camera-relative, vr.rs / vr_cockpit.rs)
     pub vr_orbs: Vec<crate::vr::VrOrb>,
-    /// 3D-anchored labels/markers projected per VR eye
+    /// 3D VR menu UI quad, laser beams, and target dots (rendered after tonemap in LDR space)
+    pub vr_overlay: crate::vr::VrOverlay,
+    /// 3D-anchored globe labels/markers projected per VR eye before the floating UI panel
     pub vr_globe: crate::vr::VrGlobeLabels,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
+struct VrOvUniform {
+    view_proj: [[f32; 4]; 4],
+    eye_pos: [f32; 4],
+    quad_c: [f32; 4],
+    quad_r: [f32; 4],
+    quad_u: [f32; 4],
 }
 
 struct Targets {
@@ -1234,6 +1246,20 @@ pub struct Renderer {
     vr_orb_ibuf: wgpu::Buffer,
     vr_orb_nidx: u32,
     vr_orb_inst: wgpu::Buffer,
+    l_vr_ui: wgpu::BindGroupLayout,
+    s_vr_ui: wgpu::Sampler,
+    p_vr_ui_quad: wgpu::RenderPipeline,
+    p_vr_beam: wgpu::RenderPipeline,
+    p_vr_dot: wgpu::RenderPipeline,
+    vr_ov_ub: wgpu::Buffer,
+    vr_beam_inst: wgpu::Buffer,
+    vr_dot_inst: wgpu::Buffer,
+    vr_ui_tex: wgpu::Texture,
+    vr_ui_view: wgpu::TextureView,
+    bg_vr_ui: wgpu::BindGroup,
+    vr_ui_size: [u32; 2],
+    #[cfg(any(windows, target_os = "linux"))]
+    vr_ov_eye: Option<([[f32; 4]; 4], [f32; 4])>,
     #[cfg(any(windows, target_os = "linux"))]
     vr_globe_eye: Option<(Vec<egui::ClippedPrimitive>, f32)>,
     /// falling rain and lightning channels (precip.wgsl), over the clouds
@@ -3217,10 +3243,155 @@ impl Renderer {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        // 3D VR UI panel, laser beam, and target dot pipelines (LDR display space, after tonemap).
+        let l_vr_ui = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("vr ui"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let s_vr_ui = d.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("vr ui sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            ..Default::default()
+        });
+        let m_vr_ui = d.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("vr_ui"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/vr_ui.wgsl").into()),
+        });
+        let pl_vr_ui = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("vr ui"),
+            bind_group_layouts: &[Some(&l_vr_ui)],
+            immediate_size: 0,
+        });
+        let ui_fmt = out_format(&config);
+        let p_vr_ui_quad = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("vr ui quad"),
+            layout: Some(&pl_vr_ui),
+            vertex: wgpu::VertexState { module: &m_vr_ui, entry_point: Some("vs_quad"), compilation_options: Default::default(), buffers: &[] },
+            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &m_vr_ui,
+                entry_point: Some("fs_quad"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: ui_fmt,
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        const A_VR_OV_I: [wgpu::VertexAttribute; 3] = wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4];
+        let p_vr_beam = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("vr laser beam"),
+            layout: Some(&pl_vr_ui),
+            vertex: wgpu::VertexState {
+                module: &m_vr_ui,
+                entry_point: Some("vs_beam"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<crate::vr::VrLaserBeam>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &A_VR_OV_I,
+                })],
+            },
+            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &m_vr_ui,
+                entry_point: Some("fs_beam"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: ui_fmt,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let p_vr_dot = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("vr laser dot"),
+            layout: Some(&pl_vr_ui),
+            vertex: wgpu::VertexState {
+                module: &m_vr_ui,
+                entry_point: Some("vs_dot"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<crate::vr::VrLaserDot>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &A_VR_OV_I,
+                })],
+            },
+            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &m_vr_ui,
+                entry_point: Some("fs_dot"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: ui_fmt,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let vr_ov_ub = d.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vr ov uniform"),
+            size: std::mem::size_of::<VrOvUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let vr_beam_inst = d.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vr beam instances"),
+            size: (8 * std::mem::size_of::<crate::vr::VrLaserBeam>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let vr_dot_inst = d.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vr dot instances"),
+            size: (8 * std::mem::size_of::<crate::vr::VrLaserDot>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let vr_ui_size = [config.width.max(1), config.height.max(1)];
+        let (vr_ui_tex, vr_ui_view, bg_vr_ui) = Self::make_vr_ui_target(d, ui_fmt, vr_ui_size[0], vr_ui_size[1], &l_vr_ui, &vr_ov_ub, &s_vr_ui);
 
         Ok(Self {
             ground_mats,
             casc_ub, bg_casc, bg_tileu, l_dres, l_ao, p_gtao, p_ao_blur, p_dres, p_road, p_field, p_lights, dyn_lights, p_vr_hand, vr_orb_vbuf, vr_orb_ibuf, vr_orb_nidx, vr_orb_inst,
+            l_vr_ui, s_vr_ui, p_vr_ui_quad, p_vr_beam, p_vr_dot, vr_ov_ub, vr_beam_inst, vr_dot_inst, vr_ui_tex, vr_ui_view, bg_vr_ui, vr_ui_size,
+            #[cfg(any(windows, target_os = "linux"))]
+            vr_ov_eye: None,
             #[cfg(any(windows, target_os = "linux"))]
             vr_globe_eye: None,
             p_rain, p_veil, p_bolt, bolt_buf, p_contrails, bg_contrails, contrail_nodes, contrail_segs, p_tree, p_tree_near, imp, p_tree_shadow, p_tree_shadow_fixed, p_card, near_buf, p_inst, p_inst_shadow, inst_buf, fall_buf, tree_lib: None, inst_lib: None,
@@ -3398,6 +3569,53 @@ impl Renderer {
             bg_blit: post(&ldr, black),
             color, aux, amb, depth, depth_tex, hdr, cloud, cloud_dist, cloud_raw, cloud_dist_raw, cloud_cls_data, cloud_cls_depth, cloud_hist, bloom, ldr_tex, ldr,
         }
+    }
+
+    fn make_vr_ui_target(
+        d: &wgpu::Device,
+        fmt: wgpu::TextureFormat,
+        w: u32,
+        h: u32,
+        layout: &wgpu::BindGroupLayout,
+        ub: &wgpu::Buffer,
+        sampler: &wgpu::Sampler,
+    ) -> (wgpu::Texture, wgpu::TextureView, wgpu::BindGroup) {
+        let tex = d.create_texture(&wgpu::TextureDescriptor {
+            label: Some("vr ui offscreen"),
+            size: wgpu::Extent3d { width: w.max(1), height: h.max(1), depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: fmt,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = tex.create_view(&Default::default());
+        let bg = d.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("vr ui bg"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(sampler) },
+            ],
+        });
+        (tex, view, bg)
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    fn ensure_vr_ui_target(&mut self, w: u32, h: u32) {
+        let w = w.max(1);
+        let h = h.max(1);
+        if self.vr_ui_size == [w, h] {
+            return;
+        }
+        let fmt = out_format(&self.config);
+        let (tex, view, bg) = Self::make_vr_ui_target(&self.device, fmt, w, h, &self.l_vr_ui, &self.vr_ov_ub, &self.s_vr_ui);
+        self.vr_ui_tex = tex;
+        self.vr_ui_view = view;
+        self.bg_vr_ui = bg;
+        self.vr_ui_size = [w, h];
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {
@@ -3848,12 +4066,31 @@ impl Renderer {
                 let vr_globe = std::mem::take(&mut f.vr_globe);
                 let mut drew_vr = false;
                 if xr_frame.should_render && xr_frame.views.len() == 2 {
-                    // Upload egui texture deltas once so 3D VR labels have up-to-date font glyphs.
+                    // Upload egui texture deltas once, and rasterize egui into the VR UI
+                    // offscreen texture once per frame whenever a 3D VR menu panel is shown.
                     if let Some((_, delta, _)) = &mut ui {
                         for (id, ds) in delta.set.drain() {
                             for d in &ds {
                                 self.egui.update_texture(&self.device, &self.queue, id, d);
                             }
+                        }
+                    }
+                    if f.vr_overlay.panel.is_some() {
+                        if let Some((jobs, _, ppp)) = &ui {
+                            self.ensure_vr_ui_target(self.config.width, self.config.height);
+                            let sd = egui_wgpu::ScreenDescriptor {
+                                size_in_pixels: self.vr_ui_size,
+                                pixels_per_point: *ppp,
+                            };
+                            let mut enc = self.device.create_command_encoder(&Default::default());
+                            self.egui.update_buffers(&self.device, &self.queue, &mut enc, jobs, &sd);
+                            {
+                                let mut rp = enc
+                                    .begin_render_pass(&pass_desc(&[Some(color_att(&self.vr_ui_view, true))], None))
+                                    .forget_lifetime();
+                                self.egui.render(&mut rp, jobs, &sd);
+                            }
+                            self.queue.submit([enc.finish()]);
                         }
                     }
                     let base = f.xr_base.unwrap_or(crate::vr::XrViewBase {
@@ -3871,6 +4108,9 @@ impl Renderer {
                         let eye_pos = glam::Vec3::new(v.pose.position.x, v.pose.position.y, v.pose.position.z);
                         let eye_rot = glam::Quat::from_xyzw(v.pose.orientation.x, v.pose.orientation.y, v.pose.orientation.z, v.pose.orientation.w);
                         let (vp, inv_vp) = crate::vr::eye_matrices(base, eye_pos, eye_rot, v.fov, near);
+                        let (ov_vp, _) = crate::vr::eye_matrices(base, eye_pos, eye_rot, v.fov, 0.05);
+                        let eye_world = base.cockpit_rot * (eye_pos - base.head_pos);
+                        self.vr_ov_eye = Some((ov_vp.to_cols_array_2d(), [eye_world.x, eye_world.y, eye_world.z, 1.0]));
                         self.vr_globe_eye = (!vr_globe.is_empty()).then(|| (vr_globe.project_for_eye(vp, out_w, out_h), vr_globe.pixels_per_point));
                         eye_frame.g.view_proj = vp.to_cols_array_2d();
                         eye_frame.g.inv_view_proj = inv_vp.to_cols_array_2d();
@@ -3882,6 +4122,7 @@ impl Renderer {
                         self.xr_eye = Some(eye);
                         self.render_one(eye_frame);
                     }
+                    self.vr_ov_eye = None;
                     self.vr_globe_eye = None;
                     drew_vr = true;
                 }
@@ -5453,6 +5694,52 @@ impl Renderer {
                     }
                     mark(&mut enc, "vr_globe_labels");
                 }
+            }
+        }
+        // Stereoscopic 3D VR UI panel, laser beams, and target dots drawn onto
+        // `t.ldr` (display-encoded LDR space, short near plane) before the OpenXR blit.
+        #[cfg(any(windows, target_os = "linux"))]
+        if in_xr {
+            if let Some((ov_vp, ov_eye)) = self.vr_ov_eye {
+                let has_panel = f.vr_overlay.panel.is_some();
+                let n_beams = f.vr_overlay.beams.len().min(8);
+                let n_dots = f.vr_overlay.dots.len().min(8);
+                if has_panel || n_beams > 0 || n_dots > 0 {
+                    let (qc, qr, qu) = if let Some(p) = f.vr_overlay.panel {
+                        (
+                            [p.center.x, p.center.y, p.center.z, p.half_w],
+                            [p.right.x, p.right.y, p.right.z, p.half_h],
+                            [p.up.x, p.up.y, p.up.z, f.vr_overlay.time],
+                        )
+                    } else {
+                        ([0.0; 4], [1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, f.vr_overlay.time])
+                    };
+                    let ov = VrOvUniform { view_proj: ov_vp, eye_pos: ov_eye, quad_c: qc, quad_r: qr, quad_u: qu };
+                    q.write_buffer(&self.vr_ov_ub, 0, bytemuck::bytes_of(&ov));
+                    if n_beams > 0 {
+                        q.write_buffer(&self.vr_beam_inst, 0, bytemuck::cast_slice(&f.vr_overlay.beams[..n_beams]));
+                    }
+                    if n_dots > 0 {
+                        q.write_buffer(&self.vr_dot_inst, 0, bytemuck::cast_slice(&f.vr_overlay.dots[..n_dots]));
+                    }
+                    let mut rp = enc.begin_render_pass(&pass_desc(&[Some(color_att(out, false))], None));
+                    rp.set_bind_group(0, &self.bg_vr_ui, &[]);
+                    if has_panel {
+                        rp.set_pipeline(&self.p_vr_ui_quad);
+                        rp.draw(0..6, 0..1);
+                    }
+                    if n_beams > 0 {
+                        rp.set_pipeline(&self.p_vr_beam);
+                        rp.set_vertex_buffer(0, self.vr_beam_inst.slice(..));
+                        rp.draw(0..6, 0..n_beams as u32);
+                    }
+                    if n_dots > 0 {
+                        rp.set_pipeline(&self.p_vr_dot);
+                        rp.set_vertex_buffer(0, self.vr_dot_inst.slice(..));
+                        rp.draw(0..6, 0..n_dots as u32);
+                    }
+                }
+                mark(&mut enc, "vr_ui_overlay");
             }
         }
         // In XR standby (headset connected, waiting for session READY / visible),

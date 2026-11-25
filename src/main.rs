@@ -84,6 +84,7 @@ mod world;
 mod yasim;
 pub mod vr;
 mod vr_cockpit;
+mod vr_menu;
 
 #[derive(Copy, Clone, PartialEq)]
 enum Mode {
@@ -1259,6 +1260,10 @@ struct Game {
     vr_cockpit: vr_cockpit::VrCockpit,
     vr_hand_orbs: [Option<vr_cockpit::VrHandOrbInfo>; 2],
     vr_impact_shock: f32,
+    vr_menu: vr_menu::VrMenu,
+    vr_menu_events: Vec<egui::Event>,
+    vr_menu_pointer: Option<(egui::Pos2, bool)>,
+    vr_menu_out: Option<vr_menu::VrMenuOut>,
     cam_yaw: f64,
     cam_pitch: f64,
     cam_dist: f64,
@@ -1910,6 +1915,10 @@ impl Game {
             vr_cockpit,
             vr_hand_orbs: [None; 2],
             vr_impact_shock: 0.0,
+            vr_menu: vr_menu::VrMenu::new(),
+            vr_menu_events: Vec::new(),
+            vr_menu_pointer: None,
+            vr_menu_out: None,
             livewx: livewx::LiveWx::new(),
             gclouds: globeclouds::GlobeClouds::default(),
             menu_time_set: set_time,
@@ -3041,7 +3050,7 @@ impl Game {
     /// pilot's VR hands are hovering over or actively manipulating.
     fn vr_cockpit_labels(&self, ctx: &egui::Context, cam: DVec3) -> Vec<(Vec3, Vec3, Vec3, f32, Vec<egui::Shape>)> {
         use egui::{Align2, Color32, CornerRadius, Stroke};
-        if !self.r.xr_active() || self.cam_mode != 1 || self.crashed || self.pause_open || self.info_open || self.goto_open || self.radial.open || self.show_help || self.minimap.full {
+        if !self.r.xr_active() || self.cam_mode != 1 || self.crashed || self.vr_menu_kind().is_some() {
             return Vec::new();
         }
         // Collect targets from both hands, deduplicating when both hands touch the same control.
@@ -3843,6 +3852,183 @@ impl Game {
     /// the stations around, the OBS, and the altimeter setting.
     /// The autopilot flies, if engaged: its stick and throttle replace the
     /// pilot's (whose small inputs add to them; a firm one disconnects it).
+    /// OpenXR hand controllers: grabbing the yoke/stick, working clickable
+    /// cockpit controls directly, thumbstick rudder, and button brakes/recenter.
+    /// Returns which VR floating-UI menu mode is active right now, if any.
+    fn vr_menu_kind(&self) -> Option<vr_menu::MenuKind> {
+        if !self.r.xr_active() {
+            return None;
+        }
+        if self.mode == Mode::Menu {
+            Some(if self.menu.screen == menu::Screen::Fly {
+                vr_menu::MenuKind::Globe
+            } else {
+                vr_menu::MenuKind::FullScreen
+            })
+        } else if self.pause_open
+            || self.info_open
+            || self.goto_open
+            || self.loading.is_some()
+            || self.radial.open
+            || self.show_help
+            || self.minimap.full
+            || self.crashed
+            || self.wreck_t > 2.0
+        {
+            Some(vr_menu::MenuKind::InFlight)
+        } else {
+            None
+        }
+    }
+
+    /// Steps VR laser-pointer menu navigation and two-handed globe pinch/pan gestures.
+    fn step_vr_menu(&mut self, dt: f64) {
+        let hands = self.r.xr_hands();
+        let Some(kind) = self.vr_menu_kind() else {
+            self.vr_menu.reset(hands);
+            self.vr_menu_events.clear();
+            self.vr_menu_pointer = None;
+            self.vr_menu_out = None;
+            return;
+        };
+        let w = self.r.config.width.max(1) as f32;
+        let h = self.r.config.height.max(1) as f32;
+        let ppp = self.egui_ctx.pixels_per_point().max(0.5);
+        let head_pos = self.r.xr_head_pose().map(|(p, _)| p).unwrap_or(Vec3::ZERO);
+        let globe = (kind == vr_menu::MenuKind::Globe).then(|| vr_menu::GlobeView {
+            lat: self.menu.lat,
+            lon: self.menu.lon,
+            alt: self.menu.alt,
+            picked: self.menu.pick,
+            head_pos,
+        });
+        let egui_ctx = &self.egui_ctx;
+        let is_over_ui = |pos: egui::Pos2| -> bool {
+            if egui_ctx.egui_is_using_pointer() {
+                return true;
+            }
+            egui_ctx
+                .layer_id_at(pos)
+                .is_some_and(|l| l.order != egui::Order::Background)
+        };
+        let mut out = self.vr_menu.step(dt, kind, hands, w, h, ppp, globe, is_over_ui);
+        self.vr_menu_events.append(&mut out.egui_events);
+        self.vr_menu_pointer = out.pointer_logical.map(|p| (p, out.trigger_down));
+
+        for cmd in &out.haptics {
+            self.r.xr_apply_haptic(cmd.hand, cmd.amplitude, cmd.frequency, cmd.duration_ns);
+        }
+
+        if self.mode == Mode::Menu && self.menu.screen == menu::Screen::Fly {
+            if let Some((dx, dy)) = out.globe_drag {
+                self.menu.drag(dx, dy, h as f64, 60f64.to_radians());
+            }
+            if out.globe_zoom.abs() > 1e-6 {
+                self.menu.zoom(out.globe_zoom);
+            }
+            if let Some((lat, lon)) = out.globe_pick {
+                // When zoomed in far enough to display airports, snap to a nearby visible paved airport.
+                let snapped_airport = if self.menu.alt < 450_000.0 {
+                    let db = airports::Db::get();
+                    let snap_m = (self.menu.alt * 0.025).clamp(1_500.0, 28_000.0);
+                    db.near(lat, lon, snap_m)
+                        .into_iter()
+                        .find(|&(i, _)| {
+                            let a = &db.apts[i as usize];
+                            a.any_paved()
+                                && !(a.kind < 1 && self.menu.alt > 60_000.0)
+                                && !(a.kind < 2 && self.menu.alt > 200_000.0)
+                        })
+                        .map(|(i, _)| i)
+                } else {
+                    None
+                };
+                if let Some(i) = snapped_airport {
+                    let double = self.real - self.last_click < 0.55;
+                    self.last_click = self.real;
+                    if double && self.menu.airport == Some(i) {
+                        self.begin();
+                    } else {
+                        self.choose_airport(i);
+                    }
+                } else {
+                    let double = self.real - self.last_click < 0.55;
+                    self.last_click = self.real;
+                    let same_spot = self.menu.pick.is_some_and(|(plat, plon)| {
+                        let tol = (self.menu.alt / 200_000.0).clamp(0.05, 6.0);
+                        (lat - plat).hypot(lon - plon) < tol
+                    });
+                    if double && same_spot {
+                        self.begin();
+                    } else {
+                        self.pick(lat, lon);
+                    }
+                }
+            }
+        }
+
+        if out.menu {
+            if self.mode == Mode::Menu {
+                self.menu_back();
+            } else if self.loading.is_some() {
+                self.finish_loading();
+            } else if self.pause_open {
+                if self.pause_page != menu::Page::Game {
+                    self.pause_page = menu::Page::Game;
+                    self.pad_home = true;
+                } else {
+                    self.set_pause_menu(false);
+                }
+            } else {
+                self.set_pause_menu(true);
+            }
+        } else if out.back {
+            if self.mode == Mode::Menu {
+                self.menu_back();
+            } else if self.loading.is_some() {
+                self.finish_loading();
+            } else if self.goto_open {
+                self.goto_open = false;
+            } else if self.show_help {
+                self.show_help = false;
+            } else if self.minimap.full {
+                self.minimap.full = false;
+            } else if self.radial.open {
+                self.radial.open = false;
+            } else if self.info_open {
+                self.info_open = false;
+            } else if self.pause_open {
+                if self.pause_page != menu::Page::Game {
+                    self.pause_page = menu::Page::Game;
+                    self.pad_home = true;
+                } else {
+                    self.set_pause_menu(false);
+                }
+            } else if self.crashed || self.wreck_t > 2.0 {
+                // Never trap the pilot on the crash/wreck screen: B opens Pause Menu.
+                self.set_pause_menu(true);
+            }
+        }
+        if out.recenter {
+            self.r.recenter_vr();
+            self.status = "VR view recentered".into();
+            self.status_until = self.real + 3.0;
+        }
+        self.vr_menu_out = Some(out);
+    }
+
+    /// Finishes an egui pass when VR is active: draws the optional compact VR keyboard
+    /// for focused text fields and draws the mirror laser dot.
+    fn vr_ui_finish(&mut self, ctx: &egui::Context) {
+        if !self.r.xr_active() {
+            return;
+        }
+        self.vr_menu.draw_vr_keyboard(ctx);
+        if let Some((pos, down)) = self.vr_menu_pointer {
+            vr_menu::VrMenu::draw_mirror_dot(ctx, Some(pos), down);
+        }
+    }
+
     /// Effective VR cockpit eye origin in aircraft body frame (`+X` right, `+Y` up, `-Z` forward),
     /// combining the aircraft's nominal seated eye point with the persistent VR seat offset.
     pub(crate) fn vr_seat_eye(&self) -> Vec3 {
@@ -3892,7 +4078,7 @@ impl Game {
             return;
         }
         let raw_hands = self.r.xr_hands();
-        if self.mode == Mode::Menu || self.pause_open || self.info_open || self.goto_open || self.loading.is_some() || self.radial.open || self.show_help || self.minimap.full || self.crashed || self.wreck_t > 2.0 {
+        if self.vr_menu_kind().is_some() {
             self.vr_cockpit.cancel_grabs();
             self.vr_cockpit.sync_buttons(raw_hands);
             self.vr_hand_orbs = [None; 2];
@@ -5027,15 +5213,23 @@ impl Game {
             raw.events.retain(|e| !matches!(e, egui::Event::Key { key: egui::Key::Tab, .. }));
         }
         raw.events.append(&mut self.pad_events);
+        raw.events.append(&mut self.vr_menu_events);
         // --cursor points the UI too, for scripted screenshots of it.
         if let Some((x, y)) = self.script_cursor {
             raw.events.push(egui::Event::PointerMoved(egui::pos2(x as f32 / ppp, y as f32 / ppp)));
         }
-        // The pad works the game whether or not the window has the keyboard,
-        // and egui only lets a focused slider take the arrows in a focused window.
-        if padui::active() {
+        // The pad or VR laser works the UI whether or not the desktop window has OS focus,
+        // and egui keeps sliders and text fields responsive only when `focused` is true.
+        if padui::active() || self.r.xr_active() {
             raw.focused = true;
         }
+        // VR hand lasers naturally wobble more than a desk mouse while pulling an analog trigger:
+        // widen egui's click tolerance in VR so button clicks never silently fail on trigger squeeze.
+        let (max_click_dist, max_click_duration) = if self.r.xr_active() { (32.0, 1.4) } else { (6.0, 0.8) };
+        self.egui_ctx.options_mut(|o| {
+            o.input_options.max_click_dist = max_click_dist;
+            o.input_options.max_click_duration = max_click_duration;
+        });
         raw
     }
 
@@ -6428,6 +6622,7 @@ impl Game {
         }
 
         // ---- camera
+        self.step_vr_menu(dt_real);
         self.apply_graphics();
         let size = self.window.inner_size();
         let (w, h) = (size.width.max(1) as f32, size.height.max(1) as f32);
@@ -7223,7 +7418,7 @@ impl Game {
         // The globe's labels are placed in the window's pixels, not the (maybe smaller) 3D scene's.
         let (ww, wh) = (self.r.config.width as f32, self.r.config.height as f32);
         crate::gputime::cpu("live_traffic+weather_fetch");
-        let (ui, vr_globe) = if in_menu { (self.menu_ui(vp, cam, ww, wh), vr::VrGlobeLabels::default()) } else { self.ui(agl, cam) };
+        let (ui, vr_globe) = if in_menu { self.menu_ui(vp, cam, cam_up, cam_right, ww, wh) } else { self.ui(agl, cam) };
         crate::gputime::cpu("ui.build(egui)");
         // The smoke volume: a grid around the effects anchor, on its local east/north/up axes.
         {
@@ -7331,9 +7526,14 @@ impl Game {
                 });
             }
         }
+        let vr_overlay = if let (Some(out), Some(base)) = (&self.vr_menu_out, xr_base) {
+            out.to_world_overlay(base, self.real as f32)
+        } else {
+            vr::VrOverlay::default()
+        };
         let rain_drops = if in_menu || (self.cam_rain < 0.002 && self.cam_blow < 0.01) { 0 } else { render::RAIN_DROPS };
         crate::gputime::cpu("shore+fields+misc");
-        self.r.render(Frame { rain_drops, bolts, contrails: &self.contrail_draw, g, tiles, tess, details, photo, skins, skin_slots, fields, lights: air_lights, objs, insts, scenery, fall, near, casc_vp, shore: sf.step, shore_c, shore_tiles, psim, sim_steps: dt > 0.0, fluid, ocean: self.world.water_in_view().then(|| self.world.ocean.uniform()), egui: Some(ui), shot, cover, glow: glow_px, snow: snow_px, snow_tracks: snow_tr_uploads, xr_base, vr_orbs, vr_globe });
+        self.r.render(Frame { rain_drops, bolts, contrails: &self.contrail_draw, g, tiles, tess, details, photo, skins, skin_slots, fields, lights: air_lights, objs, insts, scenery, fall, near, casc_vp, shore: sf.step, shore_c, shore_tiles, psim, sim_steps: dt > 0.0, fluid, ocean: self.world.water_in_view().then(|| self.world.ocean.uniform()), egui: Some(ui), shot, cover, glow: glow_px, snow: snow_px, snow_tracks: snow_tr_uploads, xr_base, vr_orbs, vr_overlay, vr_globe });
         self.finish_mcp_shots();
         if (had_shots && std::env::args().any(|a| a == "--shot") && self.record.is_none()) || rec_done {
             self.quit = true;
@@ -7341,12 +7541,14 @@ impl Game {
     }
 
     /// The start screen drawn over the globe: labels, the chosen spot, and the panel.
-    fn menu_ui(&mut self, vp: Mat4, cam: DVec3, w: f32, h: f32) -> (Vec<egui::ClippedPrimitive>, egui::TexturesDelta, f32) {
+    fn menu_ui(&mut self, vp: Mat4, cam: DVec3, cam_up: DVec3, cam_right: DVec3, w: f32, h: f32) -> ((Vec<egui::ClippedPrimitive>, egui::TexturesDelta, f32), vr::VrGlobeLabels) {
         let raw = self.egui_input();
         let mut go: Option<String> = None;
         let mut start = false;
         let mut jump: Option<(f64, f64, &'static str)> = None;
         let mut airport: Option<u32> = None;
+        let mut vr_raw_labels: Vec<(Vec3, Vec3, Vec3, f32, Vec<egui::Shape>)> = Vec::new();
+        let vr_globe_mode = self.r.xr_active();
         let alt = self.menu.alt;
         self.src.google.update_attribution(self.menu.lat, self.menu.lon, alt);
         let out = self.egui_ctx.clone().run_ui(raw, |root| {
@@ -7358,6 +7560,7 @@ impl Game {
                 menu::Screen::Main => {
                     self.main_menu(ctx);
                     padui::focus_ring(ctx, menu::ACCENT);
+                    self.vr_ui_finish(ctx);
                     return;
                 }
                 menu::Screen::Settings => {
@@ -7366,11 +7569,13 @@ impl Game {
                         self.pad_home = true;
                     }
                     padui::focus_ring(ctx, menu::ACCENT);
+                    self.vr_ui_finish(ctx);
                     return;
                 }
                 menu::Screen::Aircraft => {
                     self.aircraft_screen(ctx);
                     padui::focus_ring(ctx, menu::ACCENT);
+                    self.vr_ui_finish(ctx);
                     return;
                 }
                 menu::Screen::Fly => {}
@@ -7397,95 +7602,248 @@ impl Game {
                 painter.text(p + egui::vec2(1.0, 1.0), Align2::LEFT_CENTER, text, menu::medium(size), Color32::from_black_alpha(200));
                 painter.text(p, Align2::LEFT_CENTER, text, menu::medium(size), col);
             };
-            // (where the other players are on screen: city names give way to theirs)
-            let mp_at: Vec<egui::Pos2> = self.mp_world.iter().filter_map(|sp| project(sp.lat_deg(), sp.lon_deg())).collect();
-            if alt > 25_000.0 {
-                // cities next to the start marker give way to its label.
-                let pick_at = self.menu.pick.and_then(|(la, lo)| project(la, lo));
-                for (name, lat, lon, tier) in menu::CITIES {
-                    if *tier > 1 && alt > 7.0e6 {
-                        continue;
+            if vr_globe_mode {
+                // In VR, anchor globe labels directly on the 3D Earth surface and project
+                // them through each eye's exact view-projection matrix instead of baking
+                // them onto the flat z = -1.80 m UI quad.
+                let world_up = cam_up.as_vec3();
+                let fallback_right = cam_right.as_vec3();
+                let near_side_pos = |lat: f64, lon: f64| -> Option<(DVec3, Vec3, Vec3, Vec3, f32)> {
+                    let p = geo::lla_to_pos(lat.to_radians(), lon.to_radians(), 0.0);
+                    if p.normalize().dot((cam - p).normalize()) < 0.05 {
+                        return None;
                     }
-                    let clear = |p: &egui::Pos2| pick_at.is_none_or(|k| (*p - k).length() > 70.0) && mp_at.iter().all(|m| (m.y - p.y).abs() > 16.0 || (m.x - p.x).abs() > 90.0);
-                    if let Some(p) = project(*lat, *lon).filter(clear) {
-                        painter.circle_filled(p, 2.5, Color32::from_rgba_unmultiplied(255, 255, 255, 220));
-                        label(p + egui::vec2(7.0, 0.0), tr_en(name), if *tier == 1 { 14.0 } else { 12.5 }, Color32::from_rgba_unmultiplied(255, 255, 255, 225));
+                    let rel = (p - cam).as_vec3();
+                    let (right, up, scale) = vr::globe_label_basis(rel, world_up, fallback_right)?;
+                    Some((p, rel, right, up, scale))
+                };
+                let push_text = |p: egui::Pos2, text: &str, size: f32, col: Color32, shapes: &mut Vec<egui::Shape>| {
+                    let font = menu::medium(size);
+                    let shadow = Color32::from_black_alpha(200);
+                    let sg = painter.layout_no_wrap(text.to_string(), font.clone(), shadow);
+                    let sr = Align2::LEFT_CENTER.anchor_size(p + egui::vec2(1.0, 1.0), sg.size());
+                    shapes.push(egui::Shape::galley(sr.min, sg, shadow));
+                    let g = painter.layout_no_wrap(text.to_string(), font, col);
+                    let r = Align2::LEFT_CENTER.anchor_size(p, g.size());
+                    shapes.push(egui::Shape::galley(r.min, g, col));
+                };
+                let vr_hover = self.vr_menu_out.as_ref().and_then(|o| o.globe_hover);
+                let vr_hover_dir = vr_hover.map(|(la, lo)| (geo::lla_to_pos(la.to_radians(), lo.to_radians(), 0.0) - cam).normalize());
+                let mp_dirs: Vec<DVec3> = self
+                    .mp_world
+                    .iter()
+                    .filter_map(|sp| {
+                        let p = geo::lla_to_pos(sp.lat_deg().to_radians(), sp.lon_deg().to_radians(), 0.0);
+                        (p.normalize().dot((cam - p).normalize()) >= 0.05).then(|| (p - cam).normalize())
+                    })
+                    .collect();
+                if alt > 25_000.0 {
+                    let pick_dir = self.menu.pick.and_then(|(la, lo)| {
+                        let p = geo::lla_to_pos(la.to_radians(), lo.to_radians(), 0.0);
+                        (p.normalize().dot((cam - p).normalize()) >= 0.05).then(|| (p - cam).normalize())
+                    });
+                    for (name, lat, lon, tier) in menu::CITIES {
+                        if *tier > 1 && alt > 7.0e6 {
+                            continue;
+                        }
+                        let Some((p, rel, right, up, scale)) = near_side_pos(*lat, *lon) else { continue };
+                        let dir = (p - cam).normalize();
+                        let clear_pick = pick_dir.is_none_or(|k| (dir.angle_between(k) as f32) / vr::VR_GLOBE_RAD_PER_PT > 70.0);
+                        let clear_mp = mp_dirs.iter().all(|m| {
+                            let diff = *m - dir;
+                            let dx = diff.dot(right.as_dvec3()).abs() as f32 / vr::VR_GLOBE_RAD_PER_PT;
+                            let dy = diff.dot(up.as_dvec3()).abs() as f32 / vr::VR_GLOBE_RAD_PER_PT;
+                            dy > 16.0 || dx > 90.0
+                        });
+                        if clear_pick && clear_mp {
+                            let mut shapes = Vec::with_capacity(3);
+                            shapes.push(egui::Shape::circle_filled(egui::Pos2::ZERO, 2.5, Color32::from_rgba_unmultiplied(255, 255, 255, 220)));
+                            push_text(egui::pos2(7.0, 0.0), tr_en(name), if *tier == 1 { 14.0 } else { 12.5 }, Color32::from_rgba_unmultiplied(255, 255, 255, 225), &mut shapes);
+                            vr_raw_labels.push((rel, right, up, scale, shapes));
+                        }
                     }
                 }
-            }
-            // Airports, once zoomed in far enough to tell them apart. Each one can be clicked.
-            self.menu.markers.clear();
-            if alt < 450_000.0 {
-                let db = airports::Db::get();
-                let mut n = 0;
-                for (i, _) in db.near(self.menu.lat, self.menu.lon, (alt * 1.6).min(600_000.0)) {
-                    let a = &db.apts[i as usize];
-                    if a.kind < 1 && alt > 60_000.0 || a.kind < 2 && alt > 200_000.0 || !a.any_paved() || n >= 80 {
-                        continue;
-                    }
-                    if let Some(p) = project(a.lat, a.lon) {
+                self.menu.markers.clear();
+                if alt < 450_000.0 {
+                    let db = airports::Db::get();
+                    let vr_hover_apt = vr_hover.and_then(|(hlat, hlon)| {
+                        let snap_m = (alt * 0.025).clamp(1_500.0, 28_000.0);
+                        db.near(hlat, hlon, snap_m)
+                            .into_iter()
+                            .find(|&(i, _)| {
+                                let a = &db.apts[i as usize];
+                                a.any_paved() && !(a.kind < 1 && alt > 60_000.0) && !(a.kind < 2 && alt > 200_000.0)
+                            })
+                            .map(|(i, _)| i)
+                    });
+                    let mut n = 0;
+                    for (i, _) in db.near(self.menu.lat, self.menu.lon, (alt * 2.4).min(800_000.0)) {
+                        let a = &db.apts[i as usize];
+                        if a.kind < 1 && alt > 60_000.0 || a.kind < 2 && alt > 200_000.0 || !a.any_paved() || n >= 120 {
+                            continue;
+                        }
+                        if let Some(p2d) = project(a.lat, a.lon) {
+                            self.menu.markers.push((i, p2d.x * ppp, p2d.y * ppp));
+                        }
+                        let Some((_, rel, right, up, scale)) = near_side_pos(a.lat, a.lon) else { continue };
                         n += 1;
-                        self.menu.markers.push((i, p.x * ppp, p.y * ppp));
                         let chosen = self.menu.airport == Some(i);
-                        let hover = ctx.pointer_hover_pos().is_some_and(|h| (h - p).length() < 14.0 / ppp) || aim.is_some_and(|c| (c - p).length() < 28.0);
+                        let hover = vr_hover_apt == Some(i);
                         let col = if chosen || hover { menu::ACCENT } else if a.kind == 2 { Color32::from_rgb(120, 200, 255) } else { Color32::from_rgb(170, 200, 220) };
+                        let mut shapes = Vec::with_capacity(5);
                         if hover {
-                            painter.circle_stroke(p, 8.0, egui::Stroke::new(1.5, col));
-                            label(p + egui::vec2(if chosen { 18.0 } else { 6.0 }, 16.0), &a.name.chars().take(40).collect::<String>(), 13.0, col);
+                            shapes.push(egui::Shape::circle_stroke(egui::Pos2::ZERO, 8.0, egui::Stroke::new(1.5, col)));
+                            push_text(egui::pos2(if chosen { 18.0 } else { 6.0 }, 16.0), &a.name.chars().take(40).collect::<String>(), 13.0, col, &mut shapes);
                         }
-                        painter.rect_filled(egui::Rect::from_center_size(p, egui::vec2(5.0, 5.0)), 1.0, col);
-                        // the chosen airport is named by the start marker.
+                        shapes.push(egui::Shape::rect_filled(egui::Rect::from_center_size(egui::Pos2::ZERO, egui::vec2(5.0, 5.0)), 1.0, col));
                         if !chosen {
-                            label(p + egui::vec2(6.0, 0.0), &a.ident, if a.kind == 2 { 13.0 } else { 12.0 }, col);
+                            push_text(egui::pos2(6.0, 0.0), &a.ident, if a.kind == 2 { 13.0 } else { 12.0 }, col, &mut shapes);
+                        }
+                        vr_raw_labels.push((rel, right, up, scale, shapes));
+                    }
+                }
+                if !self.mp_world.is_empty() {
+                    let col = MP_COLOUR;
+                    let shade = Color32::from_black_alpha(170);
+                    let crowd = self.mp_world.len() > 24 && alt > 3.0e6;
+                    let mut named: Vec<(DVec3, f32)> = Vec::new();
+                    for sp in &self.mp_world {
+                        let (la, lo) = (sp.lat_deg(), sp.lon_deg());
+                        let Some((p, rel, right, up, scale)) = near_side_pos(la, lo) else { continue };
+                        let p_dir = (p - cam).normalize();
+                        let (e_p, n_p, _) = geo::enu(p);
+                        let h = sp.heading_deg().to_radians();
+                        let hdg_3d = (n_p * h.cos() + e_p * h.sin()).normalize();
+                        let d2 = egui::vec2(hdg_3d.dot(right.as_dvec3()) as f32, -hdg_3d.dot(up.as_dvec3()) as f32);
+                        let dir = if d2.length() > 0.05 { d2.normalized() } else { egui::vec2(0.0, -1.0) };
+                        let side = egui::vec2(-dir.y, dir.x);
+                        let hover = vr_hover_dir.is_some_and(|hd| (p_dir.angle_between(hd) as f32) / vr::VR_GLOBE_RAD_PER_PT < 14.0);
+                        let k = if hover { 1.35 } else { 1.0 };
+                        let a = vec![dir.to_pos2() * 8.0 * k, (-dir * 5.0 * k + side * 5.5 * k).to_pos2(), (-dir * 2.0 * k).to_pos2(), (-dir * 5.0 * k - side * 5.5 * k).to_pos2()];
+                        let mut shapes = Vec::with_capacity(8);
+                        shapes.push(egui::Shape::closed_line(a.clone(), egui::Stroke::new(3.0, shade)));
+                        shapes.push(egui::Shape::convex_polygon(vec![a[0], a[1], a[2]], col, egui::Stroke::NONE));
+                        shapes.push(egui::Shape::convex_polygon(vec![a[0], a[2], a[3]], col, egui::Stroke::NONE));
+                        let name_w = 9.0 * sp.name.chars().count() as f32 + 12.0;
+                        let clear_name = named.iter().all(|&(nd, nw)| {
+                            let diff = nd - p_dir;
+                            let dx = diff.dot(right.as_dvec3()).abs() as f32 / vr::VR_GLOBE_RAD_PER_PT;
+                            let dy = diff.dot(up.as_dvec3()).abs() as f32 / vr::VR_GLOBE_RAD_PER_PT;
+                            dy > 18.0 || dx > name_w.max(nw)
+                        });
+                        if hover || (!crowd && clear_name) {
+                            push_text(egui::pos2(11.0, 0.0), &sp.name, 13.0, col, &mut shapes);
+                            named.push((p_dir, name_w));
+                        }
+                        if hover {
+                            let ac = mp_proto::AIRCRAFT.get(sp.aircraft as usize).copied().unwrap_or("?");
+                            let how = if sp.flags & mp_proto::F_GROUND != 0 { t!("game.on_the_ground").to_string() } else { format!("{:.0} ft  ·  {} kt  ·  {:03.0}°", sp.alt_m() * 3.28084, sp.speed, sp.heading_deg()) };
+                            push_text(egui::pos2(11.0, 15.0), &format!("{ac}  ·  {how}"), 11.5, Color32::from_rgba_unmultiplied(255, 255, 255, 220), &mut shapes);
+                        }
+                        vr_raw_labels.push((rel, right, up, scale, shapes));
+                    }
+                }
+                if let Some((lat, lon)) = self.menu.pick {
+                    if let Some((_, rel, right, up, scale)) = near_side_pos(lat, lon) {
+                        let accent = menu::ACCENT;
+                        let mut shapes = Vec::with_capacity(3);
+                        shapes.push(egui::Shape::circle_filled(egui::Pos2::ZERO, 3.5, accent));
+                        let name = self.menu.airport.map(|i| airports::Db::get().apts[i as usize].ident.clone());
+                        push_text(egui::pos2(18.0, 0.0), &name.unwrap_or_else(|| t!("game.start_here").to_string()), 16.0, accent, &mut shapes);
+                        vr_raw_labels.push((rel, right, up, scale, shapes));
+                    }
+                }
+            } else {
+                // (where the other players are on screen: city names give way to theirs)
+                let mp_at: Vec<egui::Pos2> = self.mp_world.iter().filter_map(|sp| project(sp.lat_deg(), sp.lon_deg())).collect();
+                if alt > 25_000.0 {
+                    // cities next to the start marker give way to its label.
+                    let pick_at = self.menu.pick.and_then(|(la, lo)| project(la, lo));
+                    for (name, lat, lon, tier) in menu::CITIES {
+                        if *tier > 1 && alt > 7.0e6 {
+                            continue;
+                        }
+                        let clear = |p: &egui::Pos2| pick_at.is_none_or(|k| (*p - k).length() > 70.0) && mp_at.iter().all(|m| (m.y - p.y).abs() > 16.0 || (m.x - p.x).abs() > 90.0);
+                        if let Some(p) = project(*lat, *lon).filter(clear) {
+                            painter.circle_filled(p, 2.5, Color32::from_rgba_unmultiplied(255, 255, 255, 220));
+                            label(p + egui::vec2(7.0, 0.0), tr_en(name), if *tier == 1 { 14.0 } else { 12.5 }, Color32::from_rgba_unmultiplied(255, 255, 255, 225));
                         }
                     }
                 }
-            }
-            // The other players (multiplayer, connected): an arrow each, the
-            // way they fly, with their name; more about them under the mouse.
-            if !self.mp_world.is_empty() {
-                let col = MP_COLOUR;
-                let shade = Color32::from_black_alpha(170);
-                let d = (alt / 111_000.0 * 0.03).clamp(0.002, 0.6);
-                let crowd = self.mp_world.len() > 24 && alt > 3.0e6;
-                // (a name that would overlap one already written is left to the mouse)
-                let mut named: Vec<egui::Rect> = Vec::new();
-                for sp in &self.mp_world {
-                    let (la, lo) = (sp.lat_deg(), sp.lon_deg());
-                    let Some(p) = project(la, lo) else { continue };
-                    let h = sp.heading_deg().to_radians();
-                    let ahead = project(la + d * h.cos(), lo + d * h.sin() / la.to_radians().cos().max(0.05));
-                    let dir = ahead.map(|a| a - p).filter(|v| v.length() > 0.05).map(|v| v.normalized()).unwrap_or(egui::vec2(0.0, -1.0));
-                    let side = egui::vec2(-dir.y, dir.x);
-                    let arrow = |k: f32| vec![p + dir * 8.0 * k, p - dir * 5.0 * k + side * 5.5 * k, p - dir * 2.0 * k, p - dir * 5.0 * k - side * 5.5 * k];
-                    let hover = ctx.pointer_hover_pos().is_some_and(|m| (m - p).length() < 12.0) || aim.is_some_and(|c| (c - p).length() < 20.0);
-                    let k = if hover { 1.35 } else { 1.0 };
-                    painter.add(egui::Shape::closed_line(arrow(k), egui::Stroke::new(3.0, shade)));
-                    // (two triangles: the arrowhead's notch makes it concave)
-                    let a = arrow(k);
-                    painter.add(egui::Shape::convex_polygon(vec![a[0], a[1], a[2]], col, egui::Stroke::NONE));
-                    painter.add(egui::Shape::convex_polygon(vec![a[0], a[2], a[3]], col, egui::Stroke::NONE));
-                    let at = p + egui::vec2(11.0, 0.0);
-                    let room = egui::Rect::from_min_size(at - egui::vec2(0.0, 9.0), egui::vec2(9.0 * sp.name.chars().count() as f32 + 8.0, 18.0));
-                    if hover || (!crowd && named.iter().all(|r| !r.intersects(room))) {
-                        label(at, &sp.name, 13.0, col);
-                        named.push(room);
-                    }
-                    if hover {
-                        let ac = mp_proto::AIRCRAFT.get(sp.aircraft as usize).copied().unwrap_or("?");
-                        let how = if sp.flags & mp_proto::F_GROUND != 0 { t!("game.on_the_ground").to_string() } else { format!("{:.0} ft  ·  {} kt  ·  {:03.0}°", sp.alt_m() * 3.28084, sp.speed, sp.heading_deg()) };
-                        label(p + egui::vec2(11.0, 15.0), &format!("{ac}  ·  {how}"), 11.5, Color32::from_rgba_unmultiplied(255, 255, 255, 220));
+                // Airports, once zoomed in far enough to tell them apart. Each one can be clicked.
+                self.menu.markers.clear();
+                if alt < 450_000.0 {
+                    let db = airports::Db::get();
+                    let mut n = 0;
+                    for (i, _) in db.near(self.menu.lat, self.menu.lon, (alt * 1.6).min(600_000.0)) {
+                        let a = &db.apts[i as usize];
+                        if a.kind < 1 && alt > 60_000.0 || a.kind < 2 && alt > 200_000.0 || !a.any_paved() || n >= 80 {
+                            continue;
+                        }
+                        if let Some(p) = project(a.lat, a.lon) {
+                            n += 1;
+                            self.menu.markers.push((i, p.x * ppp, p.y * ppp));
+                            let chosen = self.menu.airport == Some(i);
+                            let hover = ctx.pointer_hover_pos().is_some_and(|h| (h - p).length() < 14.0 / ppp) || aim.is_some_and(|c| (c - p).length() < 28.0);
+                            let col = if chosen || hover { menu::ACCENT } else if a.kind == 2 { Color32::from_rgb(120, 200, 255) } else { Color32::from_rgb(170, 200, 220) };
+                            if hover {
+                                painter.circle_stroke(p, 8.0, egui::Stroke::new(1.5, col));
+                                label(p + egui::vec2(if chosen { 18.0 } else { 6.0 }, 16.0), &a.name.chars().take(40).collect::<String>(), 13.0, col);
+                            }
+                            painter.rect_filled(egui::Rect::from_center_size(p, egui::vec2(5.0, 5.0)), 1.0, col);
+                            // the chosen airport is named by the start marker.
+                            if !chosen {
+                                label(p + egui::vec2(6.0, 0.0), &a.ident, if a.kind == 2 { 13.0 } else { 12.0 }, col);
+                            }
+                        }
                     }
                 }
-            }
-            if let Some((lat, lon)) = self.menu.pick {
-                if let Some(p) = project(lat, lon) {
-                    let accent = menu::ACCENT;
-                    let pulse = 11.0 + 3.0 * (self.real * 3.0).sin() as f32;
-                    painter.circle_stroke(p, pulse, egui::Stroke::new(2.0, accent));
-                    painter.circle_filled(p, 3.5, accent);
-                    let name = self.menu.airport.map(|i| airports::Db::get().apts[i as usize].ident.clone());
-                    label(p + egui::vec2(18.0, 0.0), &name.unwrap_or_else(|| t!("game.start_here").to_string()), 16.0, accent);
+                // The other players (multiplayer, connected): an arrow each, the
+                // way they fly, with their name; more about them under the mouse.
+                if !self.mp_world.is_empty() {
+                    let col = MP_COLOUR;
+                    let shade = Color32::from_black_alpha(170);
+                    let d = (alt / 111_000.0 * 0.03).clamp(0.002, 0.6);
+                    let crowd = self.mp_world.len() > 24 && alt > 3.0e6;
+                    // (a name that would overlap one already written is left to the mouse)
+                    let mut named: Vec<egui::Rect> = Vec::new();
+                    for sp in &self.mp_world {
+                        let (la, lo) = (sp.lat_deg(), sp.lon_deg());
+                        let Some(p) = project(la, lo) else { continue };
+                        let h = sp.heading_deg().to_radians();
+                        let ahead = project(la + d * h.cos(), lo + d * h.sin() / la.to_radians().cos().max(0.05));
+                        let dir = ahead.map(|a| a - p).filter(|v| v.length() > 0.05).map(|v| v.normalized()).unwrap_or(egui::vec2(0.0, -1.0));
+                        let side = egui::vec2(-dir.y, dir.x);
+                        let arrow = |k: f32| vec![p + dir * 8.0 * k, p - dir * 5.0 * k + side * 5.5 * k, p - dir * 2.0 * k, p - dir * 5.0 * k - side * 5.5 * k];
+                        let hover = ctx.pointer_hover_pos().is_some_and(|m| (m - p).length() < 12.0) || aim.is_some_and(|c| (c - p).length() < 20.0);
+                        let k = if hover { 1.35 } else { 1.0 };
+                        painter.add(egui::Shape::closed_line(arrow(k), egui::Stroke::new(3.0, shade)));
+                        // (two triangles: the arrowhead's notch makes it concave)
+                        let a = arrow(k);
+                        painter.add(egui::Shape::convex_polygon(vec![a[0], a[1], a[2]], col, egui::Stroke::NONE));
+                        painter.add(egui::Shape::convex_polygon(vec![a[0], a[2], a[3]], col, egui::Stroke::NONE));
+                        let at = p + egui::vec2(11.0, 0.0);
+                        let room = egui::Rect::from_min_size(at - egui::vec2(0.0, 9.0), egui::vec2(9.0 * sp.name.chars().count() as f32 + 8.0, 18.0));
+                        if hover || (!crowd && named.iter().all(|r| !r.intersects(room))) {
+                            label(at, &sp.name, 13.0, col);
+                            named.push(room);
+                        }
+                        if hover {
+                            let ac = mp_proto::AIRCRAFT.get(sp.aircraft as usize).copied().unwrap_or("?");
+                            let how = if sp.flags & mp_proto::F_GROUND != 0 { t!("game.on_the_ground").to_string() } else { format!("{:.0} ft  ·  {} kt  ·  {:03.0}°", sp.alt_m() * 3.28084, sp.speed, sp.heading_deg()) };
+                            label(p + egui::vec2(11.0, 15.0), &format!("{ac}  ·  {how}"), 11.5, Color32::from_rgba_unmultiplied(255, 255, 255, 220));
+                        }
+                    }
+                }
+                if let Some((lat, lon)) = self.menu.pick {
+                    if let Some(p) = project(lat, lon) {
+                        let accent = menu::ACCENT;
+                        let pulse = 11.0 + 3.0 * (self.real * 3.0).sin() as f32;
+                        painter.circle_stroke(p, pulse, egui::Stroke::new(2.0, accent));
+                        painter.circle_filled(p, 3.5, accent);
+                        let name = self.menu.airport.map(|i| airports::Db::get().apts[i as usize].ident.clone());
+                        label(p + egui::vec2(18.0, 0.0), &name.unwrap_or_else(|| t!("game.start_here").to_string()), 16.0, accent);
+                    }
                 }
             }
             if let Some(c) = aim {
@@ -7609,7 +7967,13 @@ impl Game {
                                 });
                             }
                             ui.add_space(2.0);
-                            let tip = if padui::active() { t!("game.or_turn_the_globe_left") } else { t!("game.or_drag_the_globe_scroll") };
+                            let tip = if self.r.xr_active() {
+                                "Point laser at globe + trigger to set start · Grip + drag to spin · Two-hand pinch to zoom"
+                            } else if padui::active() {
+                                t!("game.or_turn_the_globe_left")
+                            } else {
+                                t!("game.or_drag_the_globe_scroll")
+                            };
                             ui.label(RichText::new(tip).font(menu::caption()).color(DIM));
                         });
                         let place = menu::QUICK.iter().find(|q| self.menu.pick == Some((q.1, q.2))).map(|q| tr_en(q.0)).unwrap_or("");
@@ -7820,6 +8184,7 @@ impl Game {
             });
             self.credits(ctx);
             padui::focus_ring(ctx, ACCENT);
+            self.vr_ui_finish(ctx);
         });
         self.egui_state.handle_platform_output(&self.window, out.platform_output);
         if self.mouse_captured { self.window.set_cursor_visible(false); }
@@ -7854,7 +8219,23 @@ impl Game {
             self.begin();
         }
         let jobs = self.egui_ctx.tessellate(out.shapes, out.pixels_per_point);
-        (jobs, out.textures_delta, out.pixels_per_point)
+        let vr_globe = if vr_raw_labels.is_empty() {
+            vr::VrGlobeLabels::default()
+        } else {
+            let labels = vr_raw_labels
+                .into_iter()
+                .map(|(rel_pos, right, up, scale, shapes)| {
+                    let clipped = shapes
+                        .into_iter()
+                        .map(|shape| egui::epaint::ClippedShape { clip_rect: egui::Rect::EVERYTHING, shape, transform_after_tessellation: egui::emath::TSTransform::IDENTITY })
+                        .collect();
+                    let primitives = self.egui_ctx.tessellate(clipped, out.pixels_per_point);
+                    vr::VrGlobeLabel { rel_pos, right, up, scale, primitives }
+                })
+                .collect();
+            vr::VrGlobeLabels { labels, pixels_per_point: out.pixels_per_point }
+        };
+        ((jobs, out.textures_delta, out.pixels_per_point), vr_globe)
     }
 
     /// The data credits for the corner of the screen (the Google Maps logo
@@ -8468,6 +8849,7 @@ impl Game {
             if self.pause_open {
                 self.pause_menu(ctx, &mut act, lat.to_degrees(), lon.to_degrees(), local);
                 padui::focus_ring(ctx, menu::ACCENT);
+                self.vr_ui_finish(ctx);
                 return;
             }
             if self.info_open {
@@ -8794,6 +9176,7 @@ impl Game {
             }
             padui::focus_ring(ctx, menu::ACCENT);
             vr_raw_labels = self.vr_cockpit_labels(ctx, cam);
+            self.vr_ui_finish(ctx);
         });
         self.egui_state.handle_platform_output(&self.window, out.platform_output);
         if self.mouse_captured { self.window.set_cursor_visible(false); }
