@@ -34,6 +34,7 @@ pub mod mat {
     pub const DISPLAY: f32 = 14.0; // radio readout; extra = which display
     pub const SATIN: f32 = 15.0; // satin paint / primer
     pub const PROPDISC: f32 = 16.0; // the blur of a spinning propeller
+    pub const PLUME: f32 = 17.0; // afterburner / rocket exhaust plume
 }
 /// Surface patterns (vertex `mat.y`); keep in step with plane.wgsl.
 pub mod pat {

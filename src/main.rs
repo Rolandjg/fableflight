@@ -205,6 +205,7 @@ struct Loaded {
     group_mesh: Vec<usize>,
     piece_cut: Vec<bool>,
     piece_inner: Vec<bool>,
+    piece_cockpit_glass: Vec<bool>,
     group_pivots: Vec<(Vec3, f32)>,
     /// what the anti-aliasing takes to be flying along with the camera:
     /// everything within the aircraft's bounds, and a little around them for
@@ -212,6 +213,34 @@ struct Loaded {
     plane_box: [[f32; 4]; 2],
     /// its outside lights (glow sprites, landing-light beam)
     lamps: Vec<airframe::Lamp>,
+}
+
+/// Whether `p` is cockpit/window glass whose glass shader should be turned off
+/// from inside the cockpit in VR (where screen-space refraction, reflections,
+/// and grime cause stereo discomfort). Preserves propeller blur discs, exhaust
+/// plumes, and active HUD combiners that draw conformal symbology (F/A-18).
+fn is_cockpit_window_glass(spec: &aircraft::Spec, p: &airframe::Piece) -> bool {
+    if !p.glass {
+        return false;
+    }
+    if p.vis == airframe::Vis::FastProp || p.role == airframe::Role::Prop {
+        return false;
+    }
+    if spec.id == 2 && p.name == "hud combiner" {
+        return false;
+    }
+    if p.name == "afterburner" || p.name.ends_with("plume") {
+        return false;
+    }
+    if !p.mesh.v.is_empty()
+        && p.mesh.v.iter().all(|v| {
+            let m = v.mat[0].round() as u32;
+            m == airframe::mat::PROPDISC as u32 || m == airframe::mat::PLUME as u32
+        })
+    {
+        return false;
+    }
+    true
 }
 
 impl Loaded {
@@ -242,6 +271,7 @@ impl Loaded {
         let inner_pat = |m: f32| matches!(m as u32, 7..=12 | 14 | 15 | 18..=20);
         let outer_pat = |m: f32| matches!(m as u32, 1..=6 | 13 | 16 | 17);
         let piece_inner: Vec<bool> = model.pieces.iter().map(|p| !p.glass && p.mesh.v.iter().any(|v| inner_pat(v.mat[1])) && !p.mesh.v.iter().any(|v| outer_pat(v.mat[1]))).collect();
+        let piece_cockpit_glass: Vec<bool> = model.pieces.iter().map(|p| is_cockpit_window_glass(spec, p)).collect();
         let mut group_mesh: Vec<usize> = model.groups.iter().map(|m| r.add_mesh(&m.v, &m.i)).collect();
         // A downloaded aircraft's own textures, for its pieces and its wreckage.
         if let Some(t) = &model.tex {
@@ -265,7 +295,7 @@ impl Loaded {
         let (c, h) = model.bounds();
         let plane_box = [c.extend(0.0).to_array(), (h + Vec3::splat(0.25 * spec.span / 5.5)).extend(0.0).to_array()];
         let lamps = model.lamps();
-        Loaded { spec, model, piece_mesh, group_mesh, piece_cut, piece_inner, group_pivots, plane_box, lamps }
+        Loaded { spec, model, piece_mesh, group_mesh, piece_cut, piece_inner, piece_cockpit_glass, group_pivots, plane_box, lamps }
     }
 }
 
@@ -1187,6 +1217,7 @@ struct Game {
     piece_cut: Vec<bool>,
     /// is the piece inside the cabin.
     piece_inner: Vec<bool>,
+    piece_cockpit_glass: Vec<bool>,
     /// each breakable group's centre and size, for the wreckage
     group_pivots: Vec<(Vec3, f32)>,
     /// the models of the other aircraft flown this session, already on the GPU
@@ -1698,7 +1729,7 @@ impl Game {
         let lv = aircraft::liveries(spec).get(livery);
         r.set_paint(lv.and_then(|l| l.paint).or(spec.paint.as_ref()));
         r.set_livery(aircraft::livery_uniform(spec, lv));
-        let Loaded { spec: _, model, piece_mesh, group_mesh, piece_cut, piece_inner, group_pivots, plane_box, lamps } = Loaded::build(spec, &mut r);
+        let Loaded { spec: _, model, piece_mesh, group_mesh, piece_cut, piece_inner, piece_cockpit_glass, group_pivots, plane_box, lamps } = Loaded::build(spec, &mut r);
         let tm = trees::build_meshes();
         r.set_tree_meshes(&tm.meshes);
         world.tree_dims = tm.dims;
@@ -1829,7 +1860,7 @@ impl Game {
         vr.ipd = prefs.vr_ipd;
         let start_cam_mode = if vr.enabled { 1 } else { args.start_view.unwrap_or(prefs.cam_mode) };
         let mut g = Self {
-            gkey: src.google.key(), gkey_show: false, gm_logo: None, stills: std::collections::HashMap::new(), window, r, world, src, spec, model, piece_mesh, group_mesh, piece_cut, piece_inner, group_pivots, hangar: Vec::new(), building: Vec::new(), crashed: false, crash: None, crash_real: 0.0, egui_ctx, egui_state, keys: HashSet::new(), drag: false, lean_drag: None, last_cursor: None,
+            gkey: src.google.key(), gkey_show: false, gm_logo: None, stills: std::collections::HashMap::new(), window, r, world, src, spec, model, piece_mesh, group_mesh, piece_cut, piece_inner, piece_cockpit_glass, group_pivots, hangar: Vec::new(), building: Vec::new(), crashed: false, crash: None, crash_real: 0.0, egui_ctx, egui_state, keys: HashSet::new(), drag: false, lean_drag: None, last_cursor: None,
             minimap: minimap::Minimap::new(&prefs),
             cam_yaw: cy.to_radians(), cam_pitch: cp, cam_dist: cd, cam_mode: start_cam_mode, view_before_tail: 0, cam_pos, cam_dir: -plane.forward(), cam_look: plane.pos, orbit: 0.0, cam_rise: 0.0, cam_clear_t: 0.0, cam_ang: None, cam_hold: 0.0,
             utc: (args.hour - lon / 15.0).rem_euclid(24.0), doy: args.day.unwrap_or(doy), wx, time: 0.0, real: 0.0, last: Instant::now(), acc: 0.0, wave_off: DVec2::ZERO, shore: shore::Shore::default(), ocean_off: DVec2::ZERO, prev_cam: cam_pos, prev_vp: [[0.0; 4]; 4], gfx, gfx_applied: None, gfx_eff: gfx, dynq: dynamic::Dynamic::default(), storms_seen: false, dyn_cli: args.dynamic.is_some(), prev_plane: Mat4::IDENTITY, plane_box, lamps,
@@ -2034,6 +2065,7 @@ impl Game {
             group_mesh: std::mem::replace(&mut self.group_mesh, next.group_mesh),
             piece_cut: std::mem::replace(&mut self.piece_cut, next.piece_cut),
             piece_inner: std::mem::replace(&mut self.piece_inner, next.piece_inner),
+            piece_cockpit_glass: std::mem::replace(&mut self.piece_cockpit_glass, next.piece_cockpit_glass),
             group_pivots: std::mem::replace(&mut self.group_pivots, next.group_pivots),
             plane_box: std::mem::replace(&mut self.plane_box, next.plane_box),
             lamps: std::mem::replace(&mut self.lamps, next.lamps),
@@ -6670,8 +6702,14 @@ impl Game {
             }
             // from far outside the cabin interior cannot be seen, skip its vertices.
             let far_out = self.cam_mode != 1 && (cam - self.plane.model_pos()).length() > 40.0;
+            // In VR from inside the cockpit, turn off the cockpit glass shader
+            // (screen-space refraction/reflections and grime look wrong in stereo).
+            let vr_cockpit = self.r.xr_active() && self.cam_mode == 1 && !self.crashed && !in_menu;
             for (i, p) in self.model.pieces.iter().enumerate() {
                 if far_out && self.piece_inner[i] {
+                    continue;
+                }
+                if vr_cockpit && self.piece_cockpit_glass[i] {
                     continue;
                 }
                 let hide = match p.vis {
@@ -9223,5 +9261,26 @@ mod cli_tests {
         assert_eq!(a.lang.map(|lang| lang.code()), Some("ko"));
         assert!(a.weather_panel);
         assert!(!a.mcp);
+    }
+
+    #[test]
+    fn vr_cockpit_glass_skips_windows_but_keeps_props_plumes_and_fa18_hud() {
+        for key in ["c172", "dr400", "b747", "fa18"] {
+            let spec = aircraft::by_key(key).unwrap();
+            let model = (spec.build)();
+            let has_window = model.pieces.iter().any(|p| is_cockpit_window_glass(spec, p));
+            assert!(has_window, "{key} should have at least one cockpit window glass piece");
+            for p in &model.pieces {
+                if p.vis == airframe::Vis::FastProp || p.role == airframe::Role::Prop {
+                    assert!(!is_cockpit_window_glass(spec, p), "{key} prop disc {:?} must stay visible in VR", p.name);
+                }
+                if p.name == "afterburner" || p.name.ends_with("plume") {
+                    assert!(!is_cockpit_window_glass(spec, p), "{key} plume {:?} must stay visible in VR", p.name);
+                }
+                if spec.id == 2 && p.name == "hud combiner" {
+                    assert!(!is_cockpit_window_glass(spec, p), "F/A-18 HUD combiner must stay visible in VR");
+                }
+            }
+        }
     }
 }
