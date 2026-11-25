@@ -150,6 +150,9 @@ struct Globals {
   // (camera-relative) + intensity (0 = none, and none after it); beam
   // direction + cosine of its half-angle.
   flood: array<vec4f, 16>,
+  // Cockpit gaze-adaptive luminance (main.rs, cockpit.rs, plane.wgsl):
+  // xyz = pilot gaze forward (world space, unit), w = eye dark-adaptation 0..1 (0 outside cockpit).
+  pit_adapt: vec4f,
 };
 @group(0) @binding(0) var<uniform> G: Globals;
 @group(0) @binding(1) var t_trans: texture_2d<f32>;

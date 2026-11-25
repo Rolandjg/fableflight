@@ -25,7 +25,9 @@ pub struct Head {
     /// zoom asked for (a factor on the field of view), and where it is now
     pub zoom: f64,
     zoom_s: f64,
-    /// the eye's adaptation, in stops over the outside exposure
+    /// the eye's dark-adaptation for the cockpit interior (0..1; 0 when looking
+    /// out into bright daylight, rising smoothly toward 1 when looking into the
+    /// dim cabin or at night)
     pub adapt: f32,
     pub inside: f32,
     /// sitting in the other cockpit (`Spec::eye2`)
@@ -127,15 +129,26 @@ impl Head {
         let rot_b = q * DQuat::from_rotation_z(-self.roll);
         let fov_now = fov * self.zoom_s as f32;
 
-        // How much of the view is the cabin: the eye opens up for it (more by
-        // day; at night the cabin and the world are both dark).
-        let inside = interior(spec, rot_b, fov_now.to_radians(), aspect);
-        self.inside = inside;
-        let want = (inside * 1.3 - 0.12) * (0.45 + 0.55 * day);
-        // Opening up for the dark takes longer than stopping down for the light.
-        let rate = if want > self.adapt { 1.4 } else { 3.5 };
-        self.adapt += (want - self.adapt) * (1.0 - (-rate * dt as f32).exp());
+        self.update_adapt(spec, dt, rot_b, fov_now.to_radians(), aspect, day);
         View { eye, rot: rot_b, fov: fov_now }
+    }
+
+    /// Update eye dark-adaptation for the cockpit interior from the pilot's
+    /// body-frame look orientation (`rot_b`, desktop head or tracked VR
+    /// headset), vertical field of view (rad), aspect ratio, and daylight
+    /// factor (`day`, 0 night .. 1 day).
+    pub fn update_adapt(&mut self, spec: &'static Spec, dt: f64, rot_b: DQuat, fov_rad: f32, aspect: f32, day: f32) {
+        let inside = interior(spec, rot_b, fov_rad, aspect);
+        self.inside = inside;
+        // Looking into the cockpit opens up eye adaptation; at night the eyes
+        // stay partially dark-adapted even when looking ahead, and open fully
+        // when looking down or sideways at panels and consoles.
+        let night = 1.0 - day.clamp(0.0, 1.0);
+        let floor = 0.42 * night;
+        let want = (floor + (1.0 - floor) * ((inside - 0.12) / 0.68).clamp(0.0, 1.0)).clamp(0.0, 1.0);
+        // Opening up for the dark takes longer than stopping down for bright light.
+        let rate = if want > self.adapt { 1.6 } else { 3.5 };
+        self.adapt += (want - self.adapt) * (1.0 - (-rate * dt as f32).exp());
     }
 }
 
@@ -214,6 +227,38 @@ mod tests {
         assert!(lookup(t, dir_of(0.0, -1.5).as_dvec3()) > 0.7);
         // Out of the left front window (straight left is the door post).
         assert!(lookup(t, dir_of(-1.15, 0.25).as_dvec3()) < 0.4);
+    }
+
+    #[test]
+    fn adapt_opens_when_looking_inside_and_tracks_vr_gaze() {
+        let spec = &crate::aircraft::fa18::SPEC;
+        let mut head = Head::new(0.0, 0.0);
+        // Staring out the canopy by day stops adaptation down near zero.
+        for _ in 0..120 {
+            head.update_adapt(spec, 0.05, DQuat::IDENTITY, 1.0, 1.0, 1.0);
+        }
+        let day_out = head.adapt;
+        assert!(day_out < 0.15, "day looking out should stay low, got {day_out}");
+
+        // Pitching VR gaze down onto the instrument panel/console opens adaptation up.
+        let down = look(0.0, 0.75);
+        for _ in 0..120 {
+            head.update_adapt(spec, 0.05, down, 1.0, 1.0, 1.0);
+        }
+        let day_in = head.adapt;
+        assert!(day_in > 0.75, "day looking at panel should adapt up, got {day_in}");
+
+        // At night, looking straight ahead keeps a gentle dark-adapted floor,
+        // and looking into the cockpit adapts all the way up.
+        for _ in 0..120 {
+            head.update_adapt(spec, 0.05, DQuat::IDENTITY, 1.0, 1.0, 0.0);
+        }
+        let night_out = head.adapt;
+        assert!(night_out > 0.35 && night_out < 0.65, "night ahead floor expected ~0.42..0.55, got {night_out}");
+        for _ in 0..120 {
+            head.update_adapt(spec, 0.05, down, 1.0, 1.0, 0.0);
+        }
+        assert!(head.adapt > 0.90, "night looking at panel should adapt near 1, got {}", head.adapt);
     }
 }
 

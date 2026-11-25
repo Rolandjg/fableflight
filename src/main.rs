@@ -6184,6 +6184,7 @@ impl Game {
                 // Live OpenXR headset: drive camera, frustum culling, and spatial audio
                 // directly from the tracked 6DOF head pose (no synthetic mouse-look or roll).
                 let (xr_pos, xr_rot) = self.r.xr_head_pose().unwrap_or((Vec3::ZERO, glam::Quat::IDENTITY));
+                self.head.update_adapt(self.spec, dt_real, xr_rot.as_dquat(), self.vr.fov_v.to_radians(), 1.0, day);
                 fov = self.vr.fov_v.to_radians();
                 let seat_eye = self.spec.eye2.filter(|_| self.head.rear).unwrap_or(self.spec.eye).as_dvec3();
                 let cockpit_rot = self.plane.rot * wob;
@@ -6411,7 +6412,7 @@ impl Game {
         let lit = self.city_probe.map_or(0.0, |(_, v)| v);
         let city_target = if in_menu { 0.0 } else { lit.sqrt() * (1.0 - day) };
         self.city_adapt += (city_target - self.city_adapt) * (dt_real as f32 * 0.3).min(1.0);
-        let exposure = (NIGHT_EXPOSURE.ln() + (GLOBE_EXPOSURE.ln() - NIGHT_EXPOSURE.ln()) * globe + (0.5f32.ln() - NIGHT_EXPOSURE.ln()) * day * (1.0 - globe)).exp() * if self.cam_mode == 1 && !self.crashed && !in_menu { 2f32.powf(self.head.adapt) } else { 1.0 } * 2f32.powf(1.3 * self.storm_adapt - CITY_STOPS * self.city_adapt);
+        let exposure = (NIGHT_EXPOSURE.ln() + (GLOBE_EXPOSURE.ln() - NIGHT_EXPOSURE.ln()) * globe + (0.5f32.ln() - NIGHT_EXPOSURE.ln()) * day * (1.0 - globe)).exp() * 2f32.powf(1.3 * self.storm_adapt - CITY_STOPS * self.city_adapt);
         let v4 = |v: DVec3, w: f64| [v.x as f32, v.y as f32, v.z as f32, w as f32];
         let cam_right = dir.cross(upv).normalize();
         let cam_up = cam_right.cross(dir);
@@ -6529,6 +6530,7 @@ impl Game {
             det_mean: [[1.0 / 0.35, 1.0 / 0.35, 1.0 / 0.35, 1.0]; 16],
             det_hmean: [[0.5; 4]; 4],
             flood: [[0.0; 4]; 16],
+            pit_adapt: [dir.x as f32, dir.y as f32, dir.z as f32, if self.cam_mode == 1 && !self.crashed && !in_menu { self.head.adapt } else { 0.0 }],
         };
         if !in_menu {
             let cells = self.wx.storm_cells(cam);

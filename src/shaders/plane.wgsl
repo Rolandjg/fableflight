@@ -2262,6 +2262,28 @@ fn surface(in: VOut) -> Shaded {
   // enough to make out the panel and glareshield (from outside too, through
   // the windows), still well under the displays.
   c += albedo * vec3f(1.0, 0.62, 0.38) * G.sun_dir.w * 0.0045 * night * inside * ao;
+  // Cockpit-only gaze-adaptive luminance: as the pilot looks into a dark
+  // cockpit (desktop or VR), dark interior surfaces subtly adapt in luminance
+  // the way human dark-adaptation works, without affecting the outside world
+  // or blowing out sunlit panels and self-lit displays.
+  if (inside > 0.5 && G.pit_adapt.w > 0.001 && O.glow.x < 0.001 && dot(in.P, in.P) < 25.0) {
+    let exp_now = max(G.time.z * 1.6, 1e-4);
+    let lum_disp = luma(c) * exp_now;
+    let dark_need = 1.0 - smoothstep(0.015, 0.24, lum_disp);
+    let gaze_w = 0.65 + 0.35 * smoothstep(-0.2, 0.85, dot(V, G.pit_adapt.xyz));
+    let ak = G.pit_adapt.w * gaze_w * dark_need;
+    if (ak > 0.001) {
+      c *= 1.0 + ak * 1.5;
+      if (id != M_DISPLAY) {
+        let shape = 0.32 + 0.48 * ndv + 0.20 * (0.5 + 0.5 * dot(N, l.upn));
+        let ao_soft = 0.28 + 0.72 * sqrt(sat(ao));
+        let fres = 0.035 * (0.35 + 0.65 * pow(1.0 - ndv, 2.5));
+        let refl = albedo * (1.0 - metal * 0.5) * 0.45 + vec3f((1.0 - metal * 0.3) * 0.022 + fres);
+        let tint = mix(vec3f(0.98, 0.99, 1.0), vec3f(0.90, 0.94, 1.0), night);
+        c += tint * refl * (0.60 * ak * shape * ao_soft / exp_now);
+      }
+    }
+  }
   c += emit;
   // Embers along the charred edges while it burns.
   let ember = smoothstep(0.45, 0.7, cn.b) * smoothstep(0.2, 0.6, char) * O.glow.x;

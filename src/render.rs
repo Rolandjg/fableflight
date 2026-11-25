@@ -245,6 +245,10 @@ pub struct Globals {
     /// `flood_light`), eight, two each: camera-relative lamp + intensity (0 =
     /// none, and none after it); beam direction + cosine of its half-angle
     pub flood: [[f32; 4]; 16],
+    /// cockpit gaze-adaptive luminance (main.rs, cockpit.rs, plane.wgsl):
+    /// xyz = pilot gaze forward direction (world space, unit), w = cockpit eye
+    /// dark-adaptation 0..1 (0 outside cockpit)
+    pub pit_adapt: [f32; 4],
 }
 
 /// Raindrops drawn around the camera in rain (as many as the rain is heavy show).
