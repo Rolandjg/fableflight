@@ -1028,7 +1028,7 @@ impl Plane {
     /// half-span (beyond ultimate load, where the wing has broken anyway).
     /// The wing bending for drawing, left then right: tip deflection over the
     /// half-span squared, so a point x out along the span rises by bend x²
-    /// (plane.wgsl `deform`, main.rs `own_lights`).
+    /// (plane.wgsl `deform`, game/scene.rs `own_lights`).
     pub fn wing_bend(&self) -> [f32; 2] {
         // (`Spec::span` is the tip's station: the half-span)
         let s = (self.spec.span as f64).max(0.5);

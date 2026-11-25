@@ -499,7 +499,7 @@ fn wheels_below(aircraft: u8) -> f64 {
 
 /// The other players as traffic models with their lights (as live.rs draws
 /// the real traffic). Those `full` are drawn with their own model already
-/// (main.rs `draw_mp_planes`): only their lights' glow is added here.
+/// (game/multiplayer.rs `draw_mp_planes`): only their lights' glow is added here.
 pub fn instances(players: &[Remote], full: &[bool], cam: DVec3, out: &mut Vec<(u32, Inst)>, lights: &mut Vec<Light>) {
     for (i, p) in players.iter().enumerate() {
         let own_model = full.get(i).copied().unwrap_or(false);

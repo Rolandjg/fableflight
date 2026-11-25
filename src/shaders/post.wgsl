@@ -74,7 +74,7 @@ fn finish(scene: vec3f, in: FsIn) -> vec4f {
   c += (ign(in.pos.xy + 17.0) - 0.5) / 255.0;
   return vec4f(c, still_alpha(uv));
 }
-// Aircraft-picker stills (main.rs `--still`, G.detail.w < 0): opaque where
+// Aircraft-picker stills (cli.rs `--still`, G.detail.w < 0): opaque where
 // the surface seen lies inside the aircraft's box (in its body frame; it is
 // shot held in the air, so nothing else is near), transparent elsewhere.
 fn still_alpha(uv: vec2f) -> f32 {

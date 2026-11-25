@@ -10,6 +10,14 @@ These instructions apply throughout this repository.
 - Before substantive investigation or changes, check the model identity supplied by the runtime. If you do not meet the requirement, or cannot establish that you do, stop unless the task clearly falls within the simple-work exception. Do not split a complex task into small edits to bypass this rule.
 - When stopping, tell the user: "This task needs a stronger model. Please switch to Opus 5.5, GPT-6 Astra, Fable, or an equivalent or more capable model."
 - Agents, sign your model name at the end of your commit messages
+## Where the game lives
+
+- `src/main.rs`: the modules, the `Game` struct and its fields, shared constants and helpers, and `main()`.
+- `src/game/`: the `impl Game` methods, one file per subject: `setup` (building the game, settings), `flow` (starting, loading, respawning, ending a flight), `frame` (one frame: simulation, world, drawing), `input` (keys, gamepad, joystick, mouse yoke), `hotspots` (the clickable cockpit), `ap` (autopilot controls), `scene` (what the renderer is handed about the aircraft and sky), `sound`, `combat` (birds, weapons, wrecks), `multiplayer`, `hud`, `pages` (pause and flight menu pages), `start_menu`.
+- `src/cli.rs` (command line), `src/app.rs` (the winit application), `src/devtools.rs` (JSBSim comparison and flight checks).
+
+Put a new `Game` method in the file of its subject, as `pub(crate) fn`; give a new subject its own file in `src/game/` rather than growing `main.rs`.
+
 ## Learn from the existing aircraft
 
 Read the closest existing aircraft before adding or substantially changing one. Reuse the project's integration patterns while verifying real-world accuracy independently; existing values are not authoritative aircraft specifications.
@@ -51,7 +59,7 @@ Every crewed aircraft's cockpit can be worked with the mouse, and with the gamep
   - Several identical controls, such as four thrust levers or two fuel switches, each get their own hotspot.
 - **Moving controls show their state:** a clickable control should be an animated piece driven by the simulated state, using `Anim`/`Drive` with an `Input` such as `Throttle`, `GearHandle`, `ParkingBrake`, `Master`, `Ignition` or `Mixture`. Its position should always match the setting. Add an `Input` or a `Plane` field if you need one, rather than leaving the control static.
 - **Reachable and not clicked through:** the pilot must be able to aim at every hotspot from `Spec::eye`, using the normal head movement and lean, without a panel, glareshield, yoke, stick or seat in the way. If a cockpit's solid parts are not covered by the name list in `cockpit::blockers`, add them there, so that the mouse cannot click a control through a panel. Looking out ahead at the horizon must not hit any hotspot.
-- **Labels and state:** the hover label is the action's `action.<id>` key in `assets/locales/*.lng`, for `bind::ACTIONS` and for the mouse-only actions (`c172::cabin::action_label`) alike. The setting shown under the pointer comes from `hot_state` in `src/main.rs`. For any new action, add both: the `action.<id>` key in `eng.lng` (and `fr.lng`), and its `hot_state`. See `docs/translating.md`.
+- **Labels and state:** the hover label is the action's `action.<id>` key in `assets/locales/*.lng`, for `bind::ACTIONS` and for the mouse-only actions (`c172::cabin::action_label`) alike. The setting shown under the pointer comes from `hot_state` in `src/game/hotspots.rs`. For any new action, add both: the `action.<id>` key in `eng.lng` (and `fr.lng`), and its `hot_state`. See `docs/translating.md`.
 - **Coverage:** at minimum, provide throttle(s), gear (on retractable-gear types), flaps, parking brake, the engine start controls (master/battery, ignition or fuel control, starter) and the aircraft's other primary controls. It should be possible to do a cold-and-dark start with the mouse alone wherever the simulated systems support one. Document the controls that remain unclickable or decorative.
 - **Verification:** `cargo test` runs `hotspot_tests` in `src/aircraft/mod.rs`. These tests check that every action exists, that throttle and gear targets are present, and that every control can be reached and seen from the pilot's eye with gear up and down. In the game, hover over every control from the seat and check the ring, the label and the state. Then try them with `--cursor`, `--click SEC[,HELD[,X,Y]]` and `--wheel SEC,N[,X,Y]`, and confirm that each one moves its piece and changes the simulated state.
 

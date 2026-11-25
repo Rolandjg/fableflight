@@ -200,7 +200,7 @@ pub struct Globals {
     pub nav: [f32; 4],
     /// Cessna instruments, radio receivers and heading-up navigation plot
     /// (rows 0-7); the autoflight and systems state the glass cockpits show
-    /// (rows 8-11, main.rs `cockpit_globals`, read by deck650.wgsl).
+    /// (rows 8-11, game/scene.rs `cockpit_globals`, read by deck650.wgsl).
     pub cockpit: [[f32; 4]; 12],
     /// snow lying on the ground (snow.rs `globals`): snow line under the
     /// camera (m), its change northwards (m per m), +1 / -1 for the north /
