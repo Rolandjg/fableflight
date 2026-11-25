@@ -950,6 +950,42 @@ pub const PAD_MENUS: &[(&str, &[(&str, &str)])] = &[
     ]),
 ];
 
+/// VR controllers: (buttons / gesture, what they do). Shown on the VR tab of the Controls page.
+pub const VR_CONTROLS: &[(&str, &[(&str, &str)])] = &[
+    ("VR · COCKPIT", &[
+        ("Grip / Trigger", "grab yoke (1- or 2-handed) or flight stick"),
+        ("Grip on lever", "move throttle, flaps, trim, mixture, prop"),
+        ("Throttle past max", "afterburner gate (jets)"),
+        ("Trigger / Grip", "flip switches; hold starter or reversers"),
+        ("Twist / Stick", "turn rotary knobs (OBS, radios, autopilot)"),
+        ("Thumbstick L / R", "rudder left / right"),
+        ("Thumbstick U / D", "pitch trim (while holding yoke / stick)"),
+        ("A / X", "wheel brakes (hold)"),
+        ("B / R-Stick click", "flight & radio menu (radial)"),
+        ("Y / L-Stick click", "recenter VR view"),
+        ("Left Menu", "pause menu"),
+    ]),
+    ("VR · MENUS", &[
+        ("Aim + Trigger", "laser pointer click (or A / X)"),
+        ("Thumbstick U / D", "scroll panel"),
+        ("B / R-Stick click", "back / close menu (or pause on crash)"),
+        ("Left Menu", "pause menu / back"),
+        ("Y / L-Stick click", "recenter VR view"),
+        ("Search box", "opens VR keyboard (or use PC keyboard)"),
+    ]),
+    ("VR · GLOBE", &[
+        ("Both Grips", "pinch / spread to zoom, move to pan"),
+        ("Grip (1 hand)", "grab and turn the globe"),
+        ("Trigger (globe)", "tap to pick, drag to pan, double-tap to fly"),
+        ("Left Stick", "pan the globe"),
+        ("Right Stick U / D", "zoom in / out"),
+    ]),
+    ("VR · SHORTCUTS", &[
+        ("Home / Mid-click", "recenter VR view (keyboard / mouse)"),
+        ("C", "switch seat / chase view"),
+    ]),
+];
+
 /// The words of a search, lower case.
 pub fn search_words(query: &str) -> Vec<String> {
     query.split_whitespace().map(str::to_lowercase).collect()
@@ -1026,38 +1062,92 @@ fn gamepad_sections(words: &[String]) -> Vec<Section> {
     out
 }
 
-/// The whole controls list: the keyboard's, or the gamepad's while one is
-/// plugged in, each a tab away, with a search over both.
+/// The VR controller part of the controls list, the rows matching a search.
+fn vr_sections(words: &[String]) -> Vec<Section> {
+    VR_CONTROLS
+        .iter()
+        .map(|(title, rows)| {
+            let rows = rows
+                .iter()
+                .filter(|(k, w)| matches(words, &[tr_en(k), tr_en(w), k, w, tr_en(title)]))
+                .map(|(k, w)| (tr_en(k).to_string(), tr_en(w).to_string()))
+                .collect();
+            (tr_en(title).to_string(), rows)
+        })
+        .filter(|(_, rows): &Section| !rows.is_empty())
+        .collect()
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+enum ControlsTab {
+    Keyboard,
+    Gamepad,
+    Vr,
+}
+
+/// The whole controls list: VR while in VR, gamepad while one is plugged in,
+/// or keyboard, each a tab away, with a search over all three.
 pub fn controls_list(ui: &mut egui::Ui) {
+    let vr = crate::vr::active();
     let pad = padui::active();
-    // The tab picked by hand holds until a pad comes or goes.
+    let default_tab = if vr {
+        ControlsTab::Vr
+    } else if pad {
+        ControlsTab::Gamepad
+    } else {
+        ControlsTab::Keyboard
+    };
+    // The tab picked by hand holds until VR or gamepad state changes.
     let key = egui::Id::unique("controls_list tab");
-    let (mut on_pad, picked_with) = ui.data(|d| d.get_temp::<(bool, bool)>(key)).unwrap_or((pad, pad));
-    if picked_with != pad {
-        on_pad = pad;
+    let (mut tab, picked_with) = ui.data(|d| d.get_temp::<(ControlsTab, (bool, bool))>(key)).unwrap_or((default_tab, (vr, pad)));
+    if picked_with != (vr, pad) {
+        tab = default_tab;
     }
     let width = ui.available_width();
     // the tabs, and the search beside them (under them where it is narrow).
     let words = ui.horizontal_wrapped(|ui| {
         segments(ui, |ui| {
-            seg(ui, &mut on_pad, false, t!("menu.keyboard"));
-            seg(ui, &mut on_pad, true, t!("menu.gamepad"));
+            seg(ui, &mut tab, ControlsTab::Keyboard, t!("menu.keyboard"));
+            seg(ui, &mut tab, ControlsTab::Gamepad, t!("menu.gamepad"));
+            seg(ui, &mut tab, ControlsTab::Vr, t!("menu.vr"));
         });
         ui.add_space(10.0);
         search_box(ui, "controls_list", t!("menu.search_controls"), ui.available_width().clamp(220.0, 360.0))
     }).inner;
     ui.add_space(2.0);
-    ui.data_mut(|d| d.insert_temp(key, (on_pad, pad)));
-    let sections = if on_pad { gamepad_sections(&words) } else { keyboard_sections(&words) };
-    // While searching, say where else it turns up.
-    let other = if words.is_empty() { 0 } else { (if on_pad { keyboard_sections(&words) } else { gamepad_sections(&words) }).iter().map(|s| s.1.len()).sum::<usize>() };
+    ui.data_mut(|d| d.insert_temp(key, (tab, (vr, pad))));
+    let on_pad = tab == ControlsTab::Gamepad;
+    let sections = match tab {
+        ControlsTab::Keyboard => keyboard_sections(&words),
+        ControlsTab::Gamepad => gamepad_sections(&words),
+        ControlsTab::Vr => vr_sections(&words),
+    };
     if sections.is_empty() {
         ui.add_space(10.0);
         ui.label(RichText::new(t!("menu.no_controls_match")).font(body()).color(DIM));
     }
-    if other > 0 {
-        let where_ = if on_pad { t!("menu.keyboard") } else { t!("menu.gamepad") };
-        ui.label(RichText::new(t!("menu.more_matches_on", n = other, tab = where_)).font(caption()).color(ACCENT));
+    // While searching, say where else it turns up.
+    if !words.is_empty() {
+        for (other_tab, label) in [
+            (ControlsTab::Keyboard, t!("menu.keyboard")),
+            (ControlsTab::Gamepad, t!("menu.gamepad")),
+            (ControlsTab::Vr, t!("menu.vr")),
+        ] {
+            if other_tab == tab {
+                continue;
+            }
+            let n: usize = match other_tab {
+                ControlsTab::Keyboard => keyboard_sections(&words),
+                ControlsTab::Gamepad => gamepad_sections(&words),
+                ControlsTab::Vr => vr_sections(&words),
+            }
+            .iter()
+            .map(|s| s.1.len())
+            .sum();
+            if n > 0 {
+                ui.label(RichText::new(t!("menu.more_matches_on", n = n, tab = label)).font(caption()).color(ACCENT));
+            }
+        }
     }
     // Two columns where there is room, else one; the sections shared out evenly.
     let cols = if width >= 640.0 { 2 } else { 1 };
@@ -1217,6 +1307,31 @@ mod search_tests {
         assert!(keyboard_sections(&search_words("f12")).iter().any(|s| s.1.iter().any(|r| r.1 == "screenshot")));
         assert!(keyboard_sections(&search_words("zzzz")).is_empty());
         assert!(!gamepad_sections(&[]).is_empty());
+    }
+
+    #[test]
+    fn vr_controls_list_filters_and_defaults_when_vr_active() {
+        let all = vr_sections(&[]);
+        assert!(all.len() >= 3);
+        let recenter = vr_sections(&search_words("recenter"));
+        assert!(!recenter.is_empty());
+        assert!(vr_sections(&search_words("pinch")).iter().any(|(t, rows)| t.contains("GLOBE") && !rows.is_empty()));
+        assert!(vr_sections(&search_words("zzzz")).is_empty());
+
+        let prev = crate::vr::active();
+        crate::vr::set_active(true);
+        let ctx = egui::Context::default();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                controls_list(ui);
+                let key = egui::Id::unique("controls_list tab");
+                let (tab, (vr, _)) = ui.data(|d| d.get_temp::<(ControlsTab, (bool, bool))>(key)).unwrap();
+                assert!(vr);
+                assert_eq!(tab, ControlsTab::Vr);
+            });
+        });
+        out.textures_delta.clear();
+        crate::vr::set_active(prev);
     }
 }
 

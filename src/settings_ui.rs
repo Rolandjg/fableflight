@@ -548,7 +548,13 @@ impl Game {
         }
         ui.add_space(14.0);
         card(ui, t!("settings.key_reference"), |ui| {
-            let t = if padui::active() { t!("settings.in_flight_y_view_shows") } else { t!("settings.in_flight_tab_shows_the") };
+            let t = if crate::vr::active() {
+                t!("settings.in_flight_vr_menu_shows")
+            } else if padui::active() {
+                t!("settings.in_flight_y_view_shows")
+            } else {
+                t!("settings.in_flight_tab_shows_the")
+            };
             note(ui, t);
             ui.add_space(6.0);
             menu::controls_list(ui);

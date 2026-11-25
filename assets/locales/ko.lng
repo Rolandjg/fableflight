@@ -26,6 +26,7 @@ menu.on = "켜기"
 menu.off = "끄기"
 menu.click_or_drag_to_choose = "클릭하거나 끌어 방위를 선택"
 menu.w = "서"
+menu.vr = "VR"
 
 # ---- main.rs: start panel, flight panel, HUD, messages
 game.missiles_are_for_arcade_mode = "미사일은 아케이드 모드 전용 (설정 › 일반)"

@@ -111,6 +111,8 @@ const FLASH_FADE: f64 = 0.8;
 #[derive(Copy, Clone)]
 enum PauseAct {
     Resume,
+    OpenPause,
+    OpenRadio,
     Respawn,
     GoTo,
     FlyTo(f64, f64, &'static str),
@@ -2360,6 +2362,10 @@ impl Game {
         self.restore_wreck_meshes();
         self.flash.clear();
         self.crashed = false;
+        self.crash = None;
+        self.wreck_t = 0.0;
+        self.radial.open = false;
+        self.goto_open = false;
         self.cam_rise = 0.0;
         self.cam_ang = None;
         self.acc = 0.0;
@@ -4036,7 +4042,6 @@ impl Game {
         base + self.vr.seat_offset
     }
 
-    #[allow(dead_code)]
     pub(crate) fn nudge_vr_seat(&mut self, delta: Vec3) {
         self.vr.nudge_seat(delta);
         self.show_vr_seat_status();
@@ -4048,7 +4053,6 @@ impl Game {
         self.status_until = self.real + 3.0;
     }
 
-    #[allow(dead_code)]
     fn show_vr_seat_status(&mut self) {
         let o = self.vr.seat_offset;
         let fwd_cm = (-o.z * 100.0).round() as i32;
@@ -4438,9 +4442,10 @@ impl Game {
 
     /// the radio page: the two receivers, the stations near, and the altimeter.
     fn radio_page(&mut self, ui: &mut egui::Ui) {
-        use egui::{Color32, RichText};
-        use flightui::{big, cells, key, note, pick_row, tag, wide_tile, LIT, SOFT};
+        use egui::{pos2, vec2, Align2, Color32, RichText, Sense, Stroke};
+        use flightui::{big, cells, key, note, pick_row, tag, wide_tile, AMBER, LIT, SOFT};
         use nav::Kind;
+        let vr = self.r.xr_active();
         let pos = self.plane.pos;
         let (la, lo, _) = geo::pos_to_lla(pos);
         let (lat, lon) = (la.to_degrees(), lo.to_degrees());
@@ -4453,11 +4458,24 @@ impl Game {
         let mut adf_off = false;
         let mut obs_step = 0.0;
         let mut direct = false;
-        cells(ui, 2, 132.0, |ui, i| {
+
+        let badge = |ui: &mut egui::Ui, text: &str, col: Color32| {
+            egui::Frame::new()
+                .fill(col.gamma_multiply(0.18))
+                .stroke(Stroke::new(1.0, col.gamma_multiply(0.55)))
+                .inner_margin(egui::Margin::symmetric(7, 2))
+                .show(ui, |ui| {
+                    ui.label(RichText::new(text).font(menu::semibold(if vr { 12.0 } else { 11.0 })).color(col));
+                });
+        };
+
+        let rx_h = if vr { 196.0 } else { 154.0 };
+        let off_sz = if vr { (72.0, 28.0) } else { (64.0, 22.0) };
+        cells(ui, 2, rx_h, |ui, i| {
             let off = |ui: &mut egui::Ui| {
                 let mut hit = false;
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    hit = key(ui, t!("game.off"), false, 64.0, 22.0).clicked();
+                    hit = key(ui, t!("game.off"), false, off_sz.0, off_sz.1).clicked();
                 });
                 hit
             };
@@ -4480,41 +4498,78 @@ impl Game {
                         } else {
                             big(ui, &st.label(), "", LIT);
                         }
-                        let mut state = if !r.live {
-                            t!("game.no_signal").to_string()
+                        // Status pill row (live TO/FROM/LOC, G/S, DME, or NO SIGNAL).
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 5.0;
+                            if !r.live {
+                                badge(ui, t!("game.no_signal"), AMBER);
+                            } else {
+                                let mode = match r.to {
+                                    Some(true) => "TO",
+                                    Some(false) => "FROM",
+                                    None => "LOC",
+                                };
+                                badge(ui, mode, Color32::from_rgb(80, 215, 115));
+                                if r.gs.is_some() {
+                                    badge(ui, "G/S", Color32::from_rgb(80, 215, 115));
+                                }
+                                if let Some(d) = r.dme {
+                                    badge(ui, &format!("DME {d:.1}"), Color32::WHITE);
+                                }
+                            }
+                            note(ui, &if has_freq { st.label() } else { f });
+                        });
+                        // Compact live CDI course deviation bar.
+                        ui.add_space(if vr { 5.0 } else { 2.0 });
+                        let cdi_h = if vr { 22.0 } else { 16.0 };
+                        let (cr, _) = ui.allocate_exact_size(vec2(ui.available_width(), cdi_h), Sense::hover());
+                        let pt = ui.painter();
+                        pt.rect_filled(cr, 0, Color32::from_rgba_premultiplied(8, 11, 16, 200));
+                        pt.rect_stroke(cr, 0, Stroke::new(1.0, Color32::from_white_alpha(26)), egui::StrokeKind::Inside);
+                        let cy = cr.center().y;
+                        let span = (cr.width() * 0.42).max(20.0);
+                        pt.line_segment([pos2(cr.center().x - span, cy), pos2(cr.center().x + span, cy)], Stroke::new(1.0, Color32::from_white_alpha(38)));
+                        for s in [-1.0f32, -0.5, 0.5, 1.0] {
+                            pt.circle_stroke(pos2(cr.center().x + s * span, cy), 2.5, Stroke::new(1.2, Color32::from_white_alpha(95)));
+                        }
+                        pt.circle_stroke(pos2(cr.center().x, cy), 4.0, Stroke::new(1.4, Color32::from_white_alpha(150)));
+                        if r.live {
+                            let nx = cr.center().x + (r.cdi.clamp(-1.0, 1.0) as f32) * span;
+                            pt.line_segment([pos2(nx, cr.top() + 3.0), pos2(nx, cr.bottom() - 3.0)], Stroke::new(2.8, LIT));
+                            if let Some(gs) = r.gs {
+                                let gx = cr.right() - 10.0;
+                                let gy = cy - (gs.clamp(-1.0, 1.0) as f32) * (cdi_h * 0.34);
+                                pt.circle_filled(pos2(gx, gy), 3.0, Color32::from_rgb(80, 215, 115));
+                            }
                         } else {
-                            match r.to { Some(true) => "TO".into(), Some(false) => "FROM".into(), None => "LOC".to_string() }
-                        };
-                        if r.live && r.gs.is_some() {
-                            state += "  ·  G/S";
+                            pt.text(cr.center(), Align2::CENTER_CENTER, "OFF", menu::semibold(10.5), menu::BAD);
                         }
-                        if let Some(d) = r.dme.filter(|_| r.live) {
-                            state += &format!("  ·  DME {d:.1}");
-                        }
-                        note(ui, &if has_freq { format!("{}  ·  {state}", st.label()) } else { format!("{f}  ·  {state}") });
-                        ui.add_space(2.0);
+                        ui.add_space(if vr { 6.0 } else { 3.0 });
                         if st.kind == Kind::Ils {
                             note(ui, &t!("game.course_03_0_2", st.course));
                         } else {
+                            let btn_h = if vr { 34.0 } else { 26.0 };
+                            let sw = if vr { 42.0 } else { 34.0 };
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 4.0;
                                 for (txt, d) in [("−10", -10.0), ("−1", -1.0)] {
-                                    if key(ui, txt, false, 36.0, 24.0).clicked() {
+                                    if hold_repeat(&key(ui, txt, false, sw, btn_h)) {
                                         obs_step = d;
                                     }
                                 }
-                                ui.label(RichText::new(format!("OBS {:03.0}°", self.radios.obs)).font(menu::semibold(14.0)).color(Color32::WHITE));
+                                ui.label(RichText::new(format!("OBS {:03.0}°", self.radios.obs)).font(menu::semibold(if vr { 15.0 } else { 13.5 })).color(Color32::WHITE));
                                 for (txt, d) in [("+1", 1.0), ("+10", 10.0)] {
-                                    if key(ui, txt, false, 36.0, 24.0).clicked() {
+                                    if hold_repeat(&key(ui, txt, false, sw, btn_h)) {
                                         obs_step = d;
                                     }
                                 }
-                                direct = key(ui, t!("game.direct"), false, ui.available_width(), 24.0).clicked();
+                                direct = key(ui, t!("game.direct"), false, ui.available_width().max(52.0), btn_h).clicked();
                             });
                         }
                     }
                     _ => {
                         big(ui, "---.--", "MHz", SOFT);
+                        ui.add_space(4.0);
                         note(ui, t!("game.pick_a_station_below"));
                     }
                 }
@@ -4529,15 +4584,63 @@ impl Game {
                 adf_off = hit;
                 match &adf {
                     Some(st) => {
-                        big(ui, &st.freq_text(), "kHz", LIT);
-                        note(ui, &st.label());
-                        match adf_brg {
-                            Some(b) => note(ui, &t!("game.needle_03_0_relative", b.rem_euclid(360.0))),
-                            None => note(ui, t!("game.no_signal")),
-                        }
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.spacing_mut().item_spacing.y = 4.0;
+                                big(ui, &st.freq_text(), "kHz", LIT);
+                                note(ui, &st.label());
+                                match adf_brg {
+                                    Some(b) => {
+                                        badge(ui, &format!("REL {:03.0}°", b.rem_euclid(360.0)), Color32::from_rgb(80, 215, 115));
+                                    }
+                                    None => {
+                                        badge(ui, t!("game.no_signal"), AMBER);
+                                    }
+                                }
+                            });
+                            // Compact live ADF relative-bearing dial on the right.
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                let dial_sz = if vr { 74.0 } else { 58.0 };
+                                let (dr, _) = ui.allocate_exact_size(vec2(dial_sz, dial_sz), Sense::hover());
+                                let pt = ui.painter();
+                                let c = dr.center();
+                                let rad = dial_sz * 0.45;
+                                pt.circle_filled(c, rad, Color32::from_rgba_premultiplied(8, 11, 16, 215));
+                                pt.circle_stroke(c, rad, Stroke::new(1.3, Color32::from_white_alpha(65)));
+                                for k in 0..8 {
+                                    let a = k as f32 * std::f32::consts::FRAC_PI_4;
+                                    let dir = vec2(a.sin(), -a.cos());
+                                    let inner = if k % 2 == 0 { rad - 5.5 } else { rad - 3.5 };
+                                    pt.line_segment([c + dir * inner, c + dir * rad], Stroke::new(1.2, Color32::from_white_alpha(120)));
+                                }
+                                // Top lubber marker (aircraft nose).
+                                pt.add(egui::Shape::convex_polygon(
+                                    vec![c + vec2(0.0, -rad + 1.0), c + vec2(-3.5, -rad - 4.0), c + vec2(3.5, -rad - 4.0)],
+                                    LIT,
+                                    Stroke::NONE,
+                                ));
+                                if let Some(b) = adf_brg {
+                                    let a = (b as f32).to_radians();
+                                    let fwd = vec2(a.sin(), -a.cos());
+                                    let side = vec2(fwd.y, -fwd.x);
+                                    let tip = c + fwd * (rad - 6.0);
+                                    let tail = c - fwd * (rad - 9.0);
+                                    pt.line_segment([tail, tip], Stroke::new(2.2, LIT));
+                                    pt.add(egui::Shape::convex_polygon(
+                                        vec![tip, tip - fwd * 8.0 + side * 4.0, tip - fwd * 8.0 - side * 4.0],
+                                        LIT,
+                                        Stroke::NONE,
+                                    ));
+                                    pt.circle_filled(c, 2.5, Color32::WHITE);
+                                } else {
+                                    pt.text(c, Align2::CENTER_CENTER, "OFF", menu::semibold(10.5), menu::BAD);
+                                }
+                            });
+                        });
                     }
                     None => {
                         big(ui, "---", "kHz", SOFT);
+                        ui.add_space(4.0);
                         note(ui, t!("game.pick_a_beacon_below"));
                     }
                 }
@@ -4568,9 +4671,10 @@ impl Game {
         let mut ndbs = nav::near(lat, lon, 150_000.0, Kind::Ndb);
         ndbs.truncate(7);
         let rows = vors.len().max(ndbs.len()).max(1) as f32;
+        let row_step = if vr { 40.0 } else { 32.0 };
         let mut tune_nav = None;
         let mut tune_adf = None;
-        cells(ui, 2, 30.0 + rows * 32.0, |ui, i| {
+        cells(ui, 2, 34.0 + rows * row_step, |ui, i| {
             ui.spacing_mut().item_spacing.y = 2.0;
             let (list, now, empty) = if i == 0 { (&vors, &self.radios.nav, t!("game.no_vor_or_ils_in")) } else { (&ndbs, &self.radios.adf, t!("game.no_beacon_in_range")) };
             tag(ui, if i == 0 { t!("game.stations_near") } else { t!("game.beacons_near") });
@@ -4579,7 +4683,9 @@ impl Game {
             }
             for (st, d) in list {
                 let on = now.as_ref() == Some(st);
-                if pick_row(ui, &st.freq_text(), &st.label(), &format!("{:.0} km", d / 1000.0), on).clicked() && !on {
+                let brg = nav::bearing(pos, st.pos());
+                let right = format!("{brg:03.0}°  ·  {:.0} km", d / 1000.0);
+                if pick_row(ui, &st.freq_text(), &st.label(), &right, on).clicked() && !on {
                     if i == 0 { tune_nav = Some(st.clone()) } else { tune_adf = Some(st.clone()) }
                 }
             }
@@ -4593,28 +4699,32 @@ impl Game {
         // the altimeter: its setting large, the keys to change it at the right.
         let qnh = self.wx.qnh;
         let set = self.radios.setting(qnh);
+        let inhg = set * 0.029529983;
         let src = if self.wx.live && !self.wx.live_station.is_empty() { self.wx.live_station.clone() } else { t!("game.standard").into() };
         let mut baro = self.radios.baro;
+        let baro_h = if vr { 38.0 } else { 32.0 };
+        let baro_step_w = if vr { 52.0 } else { 44.0 };
+        let baro_mode_w = if vr { 66.0 } else { 56.0 };
         wide_tile(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
                     tag(ui, t!("game.altimeter"));
-                    big(ui, &format!("{set:.0}"), "hPa", Color32::WHITE);
+                    big(ui, &format!("{set:.0}"), &format!("hPa  ·  {inhg:.2} inHg"), Color32::WHITE);
                     note(ui, &format!("QNH {qnh:.0} hPa  ·  {src}"));
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    if key(ui, "STD", baro == Some(1013.25), 56.0, 32.0).on_hover_text("1013 hPa").clicked() {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    if key(ui, "STD", baro == Some(1013.25), baro_mode_w, baro_h).on_hover_text("1013 hPa").clicked() {
                         baro = Some(1013.25);
                     }
-                    if key(ui, "QNH", baro.is_none(), 56.0, 32.0).on_hover_text("X").clicked() {
+                    if key(ui, "QNH", baro.is_none(), baro_mode_w, baro_h).on_hover_text("X").clicked() {
                         baro = None;
                     }
-                    if key(ui, "+1", false, 44.0, 32.0).clicked() {
+                    if hold_repeat(&key(ui, "+1", false, baro_step_w, baro_h)) {
                         baro = Some(set.round() + 1.0);
                     }
-                    if key(ui, "−1", false, 44.0, 32.0).clicked() {
+                    if hold_repeat(&key(ui, "−1", false, baro_step_w, baro_h)) {
                         baro = Some(set.round() - 1.0);
                     }
                 });
@@ -4875,7 +4985,7 @@ impl Game {
             }
             // A skips the loading screen (the scenery goes on loading), as Enter does.
             (_, Button::South) if self.loading.as_ref().is_some_and(|l| l.done.is_none()) => self.key(KeyCode::Enter),
-            (_, Button::South) if self.crashed => self.respawn_here(),
+            (_, Button::South) if self.crashed || self.plane.wrecked() => self.respawn_here(),
             // Menu pauses, unless Y + Menu is given something to do.
             (_, Button::Start) if !(modifier && self.binds.pad.has_y(padmap::PadBtn::Menu)) => self.set_pause_menu(true),
             // Everything else that flies is in Settings › Controls › Gamepad (pad_fly_buttons).
@@ -4971,8 +5081,13 @@ impl Game {
             KeyCode::Escape if self.show_help => self.show_help = false,
             KeyCode::Escape if self.minimap.full => self.minimap.full = false,
             KeyCode::Escape => self.set_pause_menu(true),
-            KeyCode::KeyR if self.arcade || self.crashed => self.respawn_here(),
+            KeyCode::KeyR if self.arcade || self.crashed || self.plane.wrecked() => self.respawn_here(),
             KeyCode::KeyR => self.arcade_only(t!("game.respawning_in_flight")),
+            KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::Space
+                if self.crashed && !self.info_open && !self.radial.open && !self.goto_open && !self.show_help && !self.minimap.full =>
+            {
+                self.respawn_here();
+            }
             KeyCode::KeyC => self.next_view(),
             KeyCode::Home if self.r.xr_active() => {
                 self.r.recenter_vr();
@@ -5166,7 +5281,14 @@ impl Game {
     fn to_globe(&mut self) {
         self.set_pause_menu(false);
         self.info_open = false;
-        let (lat, lon, _) = geo::pos_to_lla(self.plane.pos);
+        self.radial.open = false;
+        self.goto_open = false;
+        self.minimap.full = false;
+        let spot = if self.crashed { self.crash.as_ref().map(|c| c.site).unwrap_or(self.plane.pos) } else { self.plane.pos };
+        self.crashed = false;
+        self.crash = None;
+        self.wreck_t = 0.0;
+        let (lat, lon, _) = geo::pos_to_lla(spot);
         self.menu.look_at(lat.to_degrees(), lon.to_degrees(), 60_000.0);
         self.menu.pick = Some((lat.to_degrees(), lon.to_degrees()));
         self.menu.hour = (self.utc + lon.to_degrees() / 15.0).rem_euclid(24.0);
@@ -6379,6 +6501,11 @@ impl Game {
                     }
                     self.crash = Some(crash);
                     self.crashed = true;
+                    self.radial.open = false;
+                    self.info_open = false;
+                    self.goto_open = false;
+                    self.show_help = false;
+                    self.minimap.full = false;
                     self.vr_cockpit.cancel_grabs();
                     self.vr_impact_shock = 1.0;
                     self.crash_real = self.real;
@@ -6714,7 +6841,9 @@ impl Game {
             self.orbit += dt_real * 0.1;
             let (e, n, u) = geo::enu(cr.site);
             let back = (self.cam_pos - centre).normalize_or_zero();
-            let mut a = self.cam_ang.unwrap_or_else(|| back.dot(n).atan2(back.dot(e))) + dt_real * 0.12;
+            // In VR, keep a steady vantage point instead of spinning around the wreck while reading UI.
+            let orbit_rate = if self.r.xr_active() { 0.0 } else { 0.12 };
+            let mut a = self.cam_ang.unwrap_or_else(|| back.dot(n).atan2(back.dot(e))) + dt_real * orbit_rate;
             let horiz = |a: f64| e * a.cos() + n * a.sin();
             // Keep a clear view: swing round, or rise a little, to see past
             // whatever building stands in the way.
@@ -6836,7 +6965,18 @@ impl Game {
             self.cam_look = self.plane.pos;
         }
         if self.r.xr_active() && xr_base.is_none() {
-            let f = dir.as_vec3().normalize_or_zero();
+            // In VR crash view, keep the horizon strictly level so turning your head feels natural
+            // and the floating crash UI stands upright right at eye level instead of tilted down.
+            let f = if self.crashed {
+                let horiz = dir - upv * dir.dot(upv);
+                if horiz.length_squared() > 1e-6 {
+                    horiz.normalize().as_vec3()
+                } else {
+                    dir.as_vec3().normalize_or_zero()
+                }
+            } else {
+                dir.as_vec3().normalize_or_zero()
+            };
             let right = f.cross(upv.as_vec3()).normalize_or_zero();
             let up_o = right.cross(f).normalize_or_zero();
             let cockpit_rot = glam::Quat::from_mat3(&glam::Mat3::from_cols(right, up_o, -f));
@@ -8355,86 +8495,163 @@ impl Game {
             }
             return;
         }
-        // The backdrop dims the scene (darkest behind the buttons) and keeps the mouse from the camera behind it.
+        let vr = self.r.xr_active();
+        // The backdrop dims the scene on desktop; in VR, let the pause card float cleanly in 3D space.
         let screen = ctx.content_rect();
-        egui::Area::new(egui::Id::unique("pause_dim")).order(egui::Order::Middle).fixed_pos(screen.min).show(ctx, |ui| {
-            ui.allocate_response(screen.size(), egui::Sense::click());
-            let p = ui.painter();
-            p.rect_filled(screen, 0.0, Color32::from_black_alpha(150));
-            let mut mesh = egui::Mesh::default();
-            let (l, r) = (Color32::from_black_alpha(130), Color32::TRANSPARENT);
-            let mid = screen.left() + screen.width() * 0.6;
-            mesh.colored_vertex(screen.left_top(), l);
-            mesh.colored_vertex(egui::pos2(mid, screen.top()), r);
-            mesh.colored_vertex(egui::pos2(mid, screen.bottom()), r);
-            mesh.colored_vertex(screen.left_bottom(), l);
-            mesh.add_triangle(0, 1, 2);
-            mesh.add_triangle(0, 2, 3);
-            p.add(mesh);
-        });
+        if !vr {
+            egui::Area::new(egui::Id::unique("pause_dim")).order(egui::Order::Middle).fixed_pos(screen.min).show(ctx, |ui| {
+                ui.allocate_response(screen.size(), egui::Sense::click());
+                let p = ui.painter();
+                p.rect_filled(screen, 0.0, Color32::from_black_alpha(150));
+                let mut mesh = egui::Mesh::default();
+                let (l, r) = (Color32::from_black_alpha(130), Color32::TRANSPARENT);
+                let mid = screen.left() + screen.width() * 0.6;
+                mesh.colored_vertex(screen.left_top(), l);
+                mesh.colored_vertex(egui::pos2(mid, screen.top()), r);
+                mesh.colored_vertex(egui::pos2(mid, screen.bottom()), r);
+                mesh.colored_vertex(screen.left_bottom(), l);
+                mesh.add_triangle(0, 1, 2);
+                mesh.add_triangle(0, 2, 3);
+                p.add(mesh);
+            });
+        }
         let pad = padui::active();
+        let side_open = matches!(self.pause_page, Page::Controls | Page::Failures);
         let margin = if screen.width() < 1100.0 { 40.0 } else { 72.0 };
-        let col_w = 380.0f32.min(screen.width() * 0.4);
-        egui::Area::new(egui::Id::unique("pause")).order(egui::Order::Foreground).anchor(Align2::LEFT_CENTER, [margin, 0.0]).show(ctx, |ui| {
+        let col_w = if vr { 400.0f32.min(screen.width() * 0.44) } else { 380.0f32.min(screen.width() * 0.4) };
+        let pause_anchor = if vr && !side_open {
+            (Align2::CENTER_CENTER, [0.0, 0.0])
+        } else {
+            (Align2::LEFT_CENTER, [margin, 0.0])
+        };
+        let draw_pause_col = |ui: &mut egui::Ui, pause_page: &mut Page, pad_home: &mut bool, act: &mut Option<PauseAct>| {
+            let focus_home = |pad_home: &mut bool, resp: &egui::Response| {
+                if *pad_home && padui::active() {
+                    resp.request_focus();
+                    *pad_home = false;
+                }
+            };
             ui.set_width(col_w);
-            menu::screen_heading(ui, t!("game.paused"));
-            ui.add_space(22.0);
+            menu::screen_heading(ui, if self.crashed { t!("game.vr_crashed_title") } else { t!("game.paused") });
+            if vr {
+                ui.add_space(4.0);
+                ui.label(RichText::new(format!("{}  ·  {}  ·  {}", self.spec.name, menu::latlon(lat, lon), menu::hhmm(local))).font(menu::caption()).color(DIM));
+            }
+            ui.add_space(if vr { 16.0 } else { 22.0 });
             ui.spacing_mut().item_spacing.y = 8.0;
-            let page = self.pause_page;
-            let resume = menu::big_button(ui, t!("game.resume"), Hint::of("Esc", "B"), true, false);
-            if resume.clicked() {
-                *act = Some(PauseAct::Resume);
-            }
-            if page == Page::Game {
-                self.pad_home_focus(&resume);
-            }
-            ui.add_space(8.0);
-            for (p, text) in [(Page::Settings, t!("game.settings")), (Page::Controls, t!("game.controls_reference")), (Page::Failures, t!("game.failures_2"))] {
-                let b = menu::big_button(ui, text, Hint::None, false, page == p);
-                if b.clicked() {
-                    self.pause_page = if page == p && p != Page::Settings { Page::Game } else { p };
-                    self.pad_home = p == Page::Settings;
+            let page = *pause_page;
+            if self.crashed {
+                let resp = menu::big_button(ui, t!("game.respawn_in_the_air"), Hint::of("R", "A"), true, false);
+                if resp.clicked() {
+                    *act = Some(PauseAct::Respawn);
                 }
-                if page == p {
-                    self.pad_home_focus(&b);
+                if page == Page::Game {
+                    focus_home(pad_home, &resp);
+                }
+                if menu::big_button(ui, t!("game.end_flight"), Hint::Text(t!("game.pick_a_new_start")), false, false).clicked() {
+                    *act = Some(PauseAct::Globe);
+                }
+                if menu::big_button(ui, t!("game.vr_back_to_crash"), Hint::of("Esc", "B"), false, false).clicked() {
+                    *act = Some(PauseAct::Resume);
+                }
+                ui.add_space(8.0);
+                for (p, text) in [(Page::Settings, t!("game.settings")), (Page::Controls, t!("game.controls_reference")), (Page::Failures, t!("game.failures_2"))] {
+                    let b = menu::big_button(ui, text, Hint::None, false, page == p);
+                    if b.clicked() {
+                        *pause_page = if page == p && p != Page::Settings { Page::Game } else { p };
+                        *pad_home = p == Page::Settings;
+                    }
+                    if page == p {
+                        focus_home(pad_home, &b);
+                    }
+                }
+            } else {
+                let resume = menu::big_button(ui, t!("game.resume"), Hint::of("Esc", "B"), true, false);
+                if resume.clicked() {
+                    *act = Some(PauseAct::Resume);
+                }
+                if page == Page::Game {
+                    focus_home(pad_home, &resume);
+                }
+                if vr {
+                    if menu::big_button(ui, t!("game.vr_radio_flight"), Hint::Text(t!("game.vr_btn_b")), false, false).clicked() {
+                        *act = Some(PauseAct::OpenRadio);
+                    }
+                }
+                ui.add_space(8.0);
+                for (p, text) in [(Page::Settings, t!("game.settings")), (Page::Controls, t!("game.controls_reference")), (Page::Failures, t!("game.failures_2"))] {
+                    let b = menu::big_button(ui, text, Hint::None, false, page == p);
+                    if b.clicked() {
+                        *pause_page = if page == p && p != Page::Settings { Page::Game } else { p };
+                        *pad_home = p == Page::Settings;
+                    }
+                    if page == p {
+                        focus_home(pad_home, &b);
+                    }
+                }
+                ui.add_space(14.0);
+                if menu::big_button(ui, t!("game.respawn_in_the_air"), Hint::of("R", ""), false, false).clicked() {
+                    *act = Some(PauseAct::Respawn);
+                }
+                // Leaving: back to the globe for a new start (its Menu button goes on to the main menu).
+                if menu::big_button(ui, t!("game.end_flight"), Hint::Text(t!("game.pick_a_new_start")), false, false).clicked() {
+                    *act = Some(PauseAct::Globe);
                 }
             }
             ui.add_space(14.0);
-            if menu::big_button(ui, t!("game.respawn_in_the_air"), Hint::of("R", ""), false, false).clicked() {
-                *act = Some(PauseAct::Respawn);
-            }
-            // Leaving: back to the globe for a new start (its Menu button goes on to the main menu).
-            if menu::big_button(ui, t!("game.end_flight"), Hint::Text(t!("game.pick_a_new_start")), false, false).clicked() {
-                *act = Some(PauseAct::Globe);
+            if vr {
+                if menu::big_button(ui, t!("game.quit_to_desktop"), Hint::None, false, false).clicked() {
+                    *act = Some(PauseAct::Quit);
+                }
+            } else {
+                // Quit, quieter: a plain line rather than a big button.
+                let q = ui.add(egui::Button::new(RichText::new(t!("game.quit_to_desktop")).font(menu::label()).color(DIM)).frame(false));
+                if q.clicked() {
+                    *act = Some(PauseAct::Quit);
+                }
             }
             ui.add_space(14.0);
-            // Quit, quieter: a plain line rather than a big button.
-            let q = ui.add(egui::Button::new(RichText::new(t!("game.quit_to_desktop")).font(menu::label()).color(DIM)).frame(false));
-            if q.clicked() {
-                *act = Some(PauseAct::Quit);
-            }
-            ui.add_space(18.0);
-            if pad {
+            if vr {
+                ui.add(egui::Label::new(RichText::new(t!("game.vr_pause_hint")).font(menu::caption()).color(DIM)).wrap());
+            } else if pad {
                 padui::prompts(ui, &[("Dpad", tr_en("move")), ("A", tr_en("press")), ("B", tr_en("back"))], 20.0, 12.0, DIM);
             } else {
                 let t = t!("game.while_you_fly_tab_opens");
                 ui.add(egui::Label::new(RichText::new(t).font(menu::caption()).color(DIM)).wrap());
             }
+        };
+        let mut pause_page = self.pause_page;
+        let mut pad_home = self.pad_home;
+        egui::Area::new(egui::Id::unique("pause")).order(egui::Order::Foreground).anchor(pause_anchor.0, pause_anchor.1).show(ctx, |ui| {
+            if vr {
+                let resp = menu::panel().inner_margin(24.0).show(ui, |ui| {
+                    draw_pause_col(ui, &mut pause_page, &mut pad_home, act);
+                });
+                let r = resp.response.rect;
+                let top_col = if self.crashed { menu::BAD } else { ACCENT };
+                ui.painter().rect_filled(egui::Rect::from_min_size(r.min, egui::vec2(r.width(), 3.0)), 0, top_col);
+            } else {
+                draw_pause_col(ui, &mut pause_page, &mut pad_home, act);
+            }
         });
+        self.pause_page = pause_page;
+        self.pad_home = pad_home;
 
-        // Where and when, small in the top right corner.
-        egui::Area::new(egui::Id::unique("pause_where")).order(egui::Order::Foreground).anchor(Align2::RIGHT_TOP, [-margin * 0.5, margin * 0.5]).show(ctx, |ui| {
-            ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
-                ui.spacing_mut().item_spacing.y = 3.0;
-                ui.label(RichText::new(self.spec.name).font(menu::item_title()).color(TEXT));
-                ui.label(RichText::new(menu::latlon(lat, lon)).font(menu::caption()).color(DIM));
-                ui.label(RichText::new(t!("game.local_2", menu::hhmm(local))).font(menu::caption()).color(DIM));
+        // Where and when, small in the top right corner (desktop; shown inside the VR card header).
+        if !vr {
+            egui::Area::new(egui::Id::unique("pause_where")).order(egui::Order::Foreground).anchor(Align2::RIGHT_TOP, [-margin * 0.5, margin * 0.5]).show(ctx, |ui| {
+                ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
+                    ui.spacing_mut().item_spacing.y = 3.0;
+                    ui.label(RichText::new(self.spec.name).font(menu::item_title()).color(TEXT));
+                    ui.label(RichText::new(menu::latlon(lat, lon)).font(menu::caption()).color(DIM));
+                    ui.label(RichText::new(t!("game.local_2", menu::hhmm(local))).font(menu::caption()).color(DIM));
+                });
             });
-        });
+        }
 
         // The key list or the failures, beside the buttons.
-        if matches!(self.pause_page, Page::Controls | Page::Failures) {
-            let x = margin + col_w + 48.0;
+        if side_open {
+            let x = margin + col_w + if vr { 72.0 } else { 48.0 };
             let w = (screen.width() - x - margin).clamp(300.0, 820.0);
             let h = screen.height() - 2.0 * margin.max(64.0);
             egui::Area::new(egui::Id::unique("pause_page")).order(egui::Order::Foreground).fixed_pos(egui::pos2(x, margin.max(64.0))).show(ctx, |ui| {
@@ -8460,23 +8677,33 @@ impl Game {
         }
     }
 
-    /// The flight panel (Tab): a see-through column on the right, over the
-    /// game that keeps running: instruments, places to go and the weather.
+    /// The flight panel (Tab / VR B): instruments, places, radio, autopilot, and weather.
     #[allow(clippy::too_many_arguments)]
     fn info_panel(&mut self, ctx: &egui::Context, act: &mut Option<PauseAct>, lon: f64) {
-        use egui::Align2;
+        use egui::{Align2, RichText};
         use menu::Page;
         if !self.info_page.is_info() {
             self.info_page = Page::Flight;
         }
-        // in the middle, under the heading strip, clear of the alerts at the foot.
-        let y = if self.hud_on() { flightui::HEADING_TOP + flightui::HEADING_H + 34.0 } else { 24.0 };
-        let max_h = (ctx.content_rect().height() - y - 84.0 - 36.0 - 48.0).max(160.0);
-        egui::Area::new(egui::Id::unique("info_panel")).anchor(Align2::CENTER_TOP, [0.0, y]).show(ctx, |ui| {
+        let vr = self.r.xr_active();
+        let screen = ctx.content_rect();
+        let card_w = if vr {
+            (screen.width() - 64.0).clamp(flightui::CARD_W, 780.0)
+        } else {
+            flightui::CARD_W
+        };
+        // In VR, center at comfortable eye level; on desktop, under the heading strip.
+        let (anchor, offset, max_h) = if vr {
+            (Align2::CENTER_CENTER, [0.0, 0.0], (screen.height() - 210.0).max(240.0))
+        } else {
+            let y = if self.hud_on() { flightui::HEADING_TOP + flightui::HEADING_H + 34.0 } else { 24.0 };
+            (Align2::CENTER_TOP, [0.0, y], (screen.height() - y - 84.0 - 36.0 - 48.0).max(160.0))
+        };
+        egui::Area::new(egui::Id::unique("info_panel")).anchor(anchor, offset).show(ctx, |ui| {
             // an area only offers last frame's height; a longer page needs the room up front.
-            ui.set_max_height(max_h + 120.0);
-            flightui::panel(ui, flightui::glass().inner_margin(18.0), |ui| {
-                ui.set_width(flightui::CARD_W);
+            ui.set_max_height(max_h + 170.0);
+            let panel_resp = flightui::panel(ui, flightui::glass().inner_margin(if vr { 22.0 } else { 18.0 }), |ui| {
+                ui.set_width(card_w);
                 let (to, close, x) = flightui::card_header(ui, self.info_page);
                 self.pad_home_focus(&x);
                 if let Some(p) = to {
@@ -8485,9 +8712,9 @@ impl Game {
                 if close {
                     self.info_open = false;
                 }
-                ui.add_space(10.0);
+                ui.add_space(if vr { 12.0 } else { 10.0 });
                 egui::ScrollArea::vertical().max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
-                    ui.set_width(flightui::CARD_W);
+                    ui.set_width(card_w);
                     ui.spacing_mut().item_spacing.y = 4.0;
                     match self.info_page {
                         Page::Places => self.places_page(ui, act),
@@ -8498,7 +8725,26 @@ impl Game {
                     }
                     padui::follow_focus(ui);
                 });
+                if vr {
+                    ui.add_space(10.0);
+                    let sep = ui.available_rect_before_wrap();
+                    ui.painter().hline(sep.x_range(), sep.top(), egui::Stroke::new(1.0, menu::LINE));
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(t!("game.vr_panel_hint")).font(menu::caption()).color(menu::DIM));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            if flightui::key(ui, t!("game.vr_pause_leave"), false, 134.0, 30.0).clicked() {
+                                *act = Some(PauseAct::OpenPause);
+                            }
+                        });
+                    });
+                }
             });
+            if vr {
+                let r = panel_resp.response.rect;
+                ui.painter().rect_filled(egui::Rect::from_min_size(r.min, egui::vec2(r.width(), 2.5)), 0, flightui::LIT);
+            }
         });
     }
 
@@ -9104,15 +9350,100 @@ impl Game {
                 self.wreck_t = 0.0;
             }
             self.wreck_seen = self.real;
+            let vr_crash_card = |ctx: &egui::Context, wrecked_only: bool, fade: f32, act: &mut Option<PauseAct>| {
+                let accent = if wrecked_only { Color32::from_rgb(255, 165, 72) } else { menu::BAD };
+                let title = if wrecked_only { t!("game.aircraft_wrecked") } else { t!("game.vr_crashed_title") };
+                egui::Area::new(egui::Id::unique("vr_crash_card"))
+                    .order(egui::Order::Foreground)
+                    .anchor(Align2::CENTER_CENTER, [0.0, 44.0])
+                    .show(ctx, |ui| {
+                        ui.multiply_opacity(fade);
+                        let resp = flightui::panel(ui, flightui::glass().inner_margin(egui::Margin::symmetric(28, 22)), |ui| {
+                            let w = 440.0f32.min(ctx.content_rect().width() - 48.0);
+                            ui.set_width(w);
+                            ui.vertical_centered(|ui| {
+                                ui.label(RichText::new(title).font(menu::bold(30.0)).color(accent).extra_letter_spacing(1.6));
+                                ui.add_space(2.0);
+                                ui.label(RichText::new(self.spec.name).font(menu::label()).color(flightui::SOFT));
+                            });
+                            ui.add_space(16.0);
+                            if flightui::key(ui, t!("game.respawn_in_the_air"), true, w, 46.0).clicked() {
+                                *act = Some(PauseAct::Respawn);
+                            }
+                            ui.add_space(8.0);
+                            let half = (w - 8.0) * 0.5;
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 8.0;
+                                if flightui::key(ui, t!("game.vr_choose_location"), false, half, 42.0).clicked() {
+                                    *act = Some(PauseAct::Globe);
+                                }
+                                if flightui::key(ui, t!("game.vr_go_to_place"), false, half, 42.0).clicked() {
+                                    *act = Some(PauseAct::GoTo);
+                                }
+                            });
+                            ui.add_space(8.0);
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 8.0;
+                                if flightui::key(ui, t!("game.vr_pause_menu"), false, half, 38.0).clicked() {
+                                    *act = Some(PauseAct::OpenPause);
+                                }
+                                if flightui::key(ui, t!("game.quit_to_desktop"), false, half, 38.0).clicked() {
+                                    *act = Some(PauseAct::Quit);
+                                }
+                            });
+                            ui.add_space(12.0);
+                            ui.vertical_centered(|ui| {
+                                ui.label(RichText::new(t!("game.vr_crash_hint")).font(menu::caption()).color(menu::DIM));
+                            });
+                        });
+                        let r = resp.response.rect;
+                        ui.painter().rect_filled(egui::Rect::from_min_size(r.min, egui::vec2(r.width(), 3.0)), 0, accent);
+                    });
+            };
             if !self.crashed && self.wreck_t > 2.0 && self.mode == Mode::Fly {
-                egui::Area::new(egui::Id::unique("wreck")).anchor(Align2::CENTER_CENTER, [0.0, 80.0]).show(ctx, |ui| {
-                    flightui::panel(ui, flightui::glass().inner_margin(egui::Margin::symmetric(24, 16)), |ui| {
-                        ui.vertical_centered(|ui| {
-                            ui.label(RichText::new(t!("game.aircraft_wrecked")).font(menu::bold(34.0)).color(Color32::from_rgb(255, 160, 80)).extra_letter_spacing(1.5));
-                            ui.add_space(6.0);
+                if self.r.xr_active() {
+                    if !self.info_open && !self.radial.open && !self.goto_open && !self.show_help && !self.minimap.full {
+                        let fade = ((self.wreck_t - 2.0) / 0.35).clamp(0.0, 1.0) as f32;
+                        if fade < 1.0 {
+                            ctx.request_repaint();
+                        }
+                        vr_crash_card(ctx, true, fade, &mut act);
+                    }
+                } else {
+                    egui::Area::new(egui::Id::unique("wreck")).anchor(Align2::CENTER_CENTER, [0.0, 80.0]).show(ctx, |ui| {
+                        flightui::panel(ui, flightui::glass().inner_margin(egui::Margin::symmetric(24, 16)), |ui| {
+                            ui.vertical_centered(|ui| {
+                                ui.label(RichText::new(t!("game.aircraft_wrecked")).font(menu::bold(34.0)).color(Color32::from_rgb(255, 160, 80)).extra_letter_spacing(1.5));
+                                ui.add_space(6.0);
+                                if pad {
+                                    let panel = padmap::spec_of("flight_panel");
+                                    let mut items = vec![("A", tr_en("respawn")), (panel.as_str(), tr_en("go somewhere else")), ("Menu", tr_en("menu: respawn, globe"))];
+                                    items.retain(|i| !i.0.is_empty());
+                                    padui::prompts(ui, &items, 24.0, 16.0, white);
+                                } else {
+                                    keys_line(ui, &[("R", t!("game.respawn")), ("G", t!("game.go_somewhere_else")), ("Esc", t!("game.menu_2"))]);
+                                }
+                            });
+                        });
+                    });
+                }
+            }
+            if self.crashed {
+                let since = self.real - self.crash_real;
+                if self.r.xr_active() {
+                    if since > 1.2 && !self.info_open && !self.radial.open && !self.goto_open && !self.show_help && !self.minimap.full {
+                        let fade = ((since - 1.2) / 0.4).clamp(0.0, 1.0) as f32;
+                        if fade < 1.0 {
+                            ctx.request_repaint();
+                        }
+                        vr_crash_card(ctx, false, fade, &mut act);
+                    }
+                } else if since > 3.5 {
+                    egui::Area::new(egui::Id::unique("crash")).anchor(Align2::CENTER_BOTTOM, [0.0, -70.0]).show(ctx, |ui| {
+                        flightui::panel(ui, flightui::glass().inner_margin(egui::Margin::symmetric(20, 12)), |ui| {
                             if pad {
                                 let panel = padmap::spec_of("flight_panel");
-                                let mut items = vec![(panel.as_str(), tr_en("go somewhere else")), ("Menu", tr_en("menu: respawn, globe"))];
+                                let mut items = vec![("A", tr_en("respawn")), (panel.as_str(), tr_en("go somewhere else")), ("Menu", tr_en("menu"))];
                                 items.retain(|i| !i.0.is_empty());
                                 padui::prompts(ui, &items, 24.0, 16.0, white);
                             } else {
@@ -9120,21 +9451,7 @@ impl Game {
                             }
                         });
                     });
-                });
-            }
-            if self.crashed && self.real - self.crash_real > 3.5 {
-                egui::Area::new(egui::Id::unique("crash")).anchor(Align2::CENTER_BOTTOM, [0.0, -70.0]).show(ctx, |ui| {
-                    flightui::panel(ui, flightui::glass().inner_margin(egui::Margin::symmetric(20, 12)), |ui| {
-                        if pad {
-                            let panel = padmap::spec_of("flight_panel");
-                            let mut items = vec![("A", tr_en("respawn")), (panel.as_str(), tr_en("go somewhere else")), ("Menu", tr_en("menu"))];
-                            items.retain(|i| !i.0.is_empty());
-                            padui::prompts(ui, &items, 24.0, 16.0, white);
-                        } else {
-                            keys_line(ui, &[("R", t!("game.respawn")), ("G", t!("game.go_somewhere_else")), ("Esc", t!("game.menu_2"))]);
-                        }
-                    });
-                });
+                }
             }
             self.minimap.trail.push(lat.to_degrees(), lon.to_degrees());
             self.minimap.tuned = minimap_tuned(&self.radios);
@@ -9162,15 +9479,32 @@ impl Game {
                 });
             }
             if self.goto_open {
-                egui::Window::new(t!("game.go_to")).id(egui::Id::unique("goto_window")).collapsible(false).resizable(false).anchor(Align2::CENTER_CENTER, [0.0, -80.0]).show(ctx, |ui| {
+                let vr = self.r.xr_active();
+                egui::Window::new(t!("game.go_to")).id(egui::Id::unique("goto_window")).collapsible(false).resizable(false).anchor(Align2::CENTER_CENTER, [0.0, if vr { -120.0 } else { -80.0 }]).show(ctx, |ui| {
                     ui.label(t!("game.city_landmark_street_address_or"));
-                    let resp = ui.add(egui::TextEdit::singleline(&mut self.goto_text).desired_width(360.0));
-                    resp.request_focus();
+                    ui.add_space(4.0);
+                    let resp = ui.add(egui::TextEdit::singleline(&mut self.goto_text).desired_width(if vr { 400.0 } else { 360.0 }));
+                    if !vr || !ctx.text_edit_focused() {
+                        resp.request_focus();
+                    }
                     if ui.input(|i| i.key_pressed(egui::Key::Enter)) && !self.goto_text.trim().is_empty() {
                         go = Some(self.goto_text.trim().to_string());
                     }
                     if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                         close_goto = true;
+                    }
+                    if vr {
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 8.0;
+                            let can_go = !self.goto_text.trim().is_empty();
+                            if flightui::key(ui, t!("game.vr_fly_here"), can_go, 196.0, 36.0).clicked() && can_go {
+                                go = Some(self.goto_text.trim().to_string());
+                            }
+                            if flightui::key(ui, t!("game.vr_close"), false, 196.0, 36.0).clicked() {
+                                close_goto = true;
+                            }
+                        });
                     }
                 });
             }
@@ -9214,6 +9548,14 @@ impl Game {
         }
         match act {
             Some(PauseAct::Resume) => self.set_pause_menu(false),
+            Some(PauseAct::OpenPause) => self.set_pause_menu(true),
+            Some(PauseAct::OpenRadio) => {
+                self.set_pause_menu(false);
+                self.radial.open = false;
+                self.info_open = true;
+                self.info_page = menu::Page::Radio;
+                self.pad_home = true;
+            }
             Some(PauseAct::Respawn) => {
                 self.set_pause_menu(false);
                 self.info_open = false;

@@ -126,37 +126,90 @@ pub fn meter(ui: &mut egui::Ui, frac: f32, col: Color32) {
 
 /// a pick from a list: a code, a name and a figure, lit when it is the one in use.
 pub fn pick_row(ui: &mut egui::Ui, code: &str, name: &str, right: &str, on: bool) -> egui::Response {
+    let vr = crate::vr::active();
     let w = ui.available_width();
-    let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
+    let row_h = if vr { 38.0 } else { 30.0 };
+    let (r, resp) = ui.allocate_exact_size(vec2(w, row_h), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, name));
     let lit = menu::ease(ui.ctx(), resp.id, resp.hovered() || resp.has_focus());
     let p = ui.painter();
     if on {
-        p.rect_filled(r, R_IN, LIT.gamma_multiply(0.16));
+        p.rect_filled(r, R_IN, LIT.gamma_multiply(0.18));
+        p.rect_filled(Rect::from_min_size(r.min, vec2(3.0, r.height())), 0, LIT);
     } else if lit > 0.0 {
-        p.rect_filled(r, R_IN, white(0.07 * lit));
+        p.rect_filled(r, R_IN, white(0.09 * lit));
+        if vr {
+            p.rect_stroke(r, R_IN, Stroke::new(1.0, white(0.22 * lit)), egui::StrokeKind::Inside);
+        }
     }
     let col = if on { LIT } else { Color32::WHITE };
-    let cg = p.layout_no_wrap(code.to_string(), num_s(), col);
-    let rg = p.layout_no_wrap(right.to_string(), menu::caption(), SOFT);
-    let left = r.left() + 10.0;
-    let name_x = left + cg.size().x.max(58.0) + 8.0;
+    let code_font = if vr { menu::semibold(14.5) } else { num_s() };
+    let name_font = if vr { menu::medium(14.0) } else { menu::caption() };
+    let right_font = if vr { menu::medium(13.0) } else { menu::caption() };
+    let cg = p.layout_no_wrap(code.to_string(), code_font, col);
+    let rg = p.layout_no_wrap(right.to_string(), right_font, SOFT);
+    let left = r.left() + if vr { 12.0 } else { 10.0 };
+    let name_x = left + cg.size().x.max(if vr { 64.0 } else { 58.0 }) + 8.0;
     let room = (r.right() - 10.0 - rg.size().x - 8.0 - name_x).max(0.0);
     p.galley(pos2(left, r.center().y - cg.size().y * 0.5), cg, col);
     p.galley(pos2(r.right() - 10.0 - rg.size().x, r.center().y - rg.size().y * 0.5), rg, SOFT);
-    let mut job = egui::text::LayoutJob::simple_singleline(name.to_string(), menu::caption(), TEXT);
+    let mut job = egui::text::LayoutJob::simple_singleline(name.to_string(), name_font, TEXT);
     job.wrap = egui::text::TextWrapping::truncate_at_width(room);
     let ng = p.layout_job(job);
     p.galley(pos2(name_x, r.center().y - ng.size().y * 0.5), ng, TEXT);
     resp
 }
 
-/// the card's header: the page's icon and name, the pages as icons, and a close button.
+/// the card's header: the page's icon and name, the pages as icons (or labeled VR tabs), and a close button.
 /// gives back the page asked for, and whether close was pressed.
 pub fn card_header(ui: &mut egui::Ui, page: Page) -> (Option<Page>, bool, egui::Response) {
     let mut to = None;
     let mut close = false;
     let mut close_resp = None;
+    if crate::vr::active() {
+        ui.horizontal(|ui| {
+            let (r, _) = ui.allocate_exact_size(vec2(28.0, 34.0), Sense::hover());
+            menu::icon(ui.painter(), page_icon(page), r.center(), 24.0, LIT);
+            ui.add_space(4.0);
+            ui.label(RichText::new(page.label()).font(menu::semibold(22.0)).color(Color32::WHITE));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let x = icon_key_sized(ui, None, "×", false, t!("flight.close_tab"), 36.0);
+                if x.clicked() {
+                    close = true;
+                }
+                close_resp = Some(x);
+            });
+        });
+        ui.add_space(6.0);
+        let n = Page::INFO.len() as f32;
+        let tab_w = ((ui.available_width() - 6.0 * (n - 1.0)) / n).max(76.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            for p in Page::INFO {
+                let on = p == page;
+                let (r, resp) = ui.allocate_exact_size(vec2(tab_w, 34.0), Sense::click());
+                resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, p.label()));
+                let lit = menu::ease(ui.ctx(), resp.id, resp.hovered() || resp.has_focus());
+                let pt = ui.painter();
+                if on {
+                    pt.rect_filled(r, R_IN, menu::mix(LIT, menu::ACCENT_HI, lit));
+                } else {
+                    pt.rect_filled(r, R_IN, white(0.06 + 0.11 * lit));
+                    pt.rect_stroke(r, R_IN, Stroke::new(1.0, white(0.18 + 0.22 * lit)), egui::StrokeKind::Inside);
+                }
+                let col = if on { menu::ON_ACCENT } else { menu::mix(TEXT, Color32::WHITE, lit) };
+                let g = pt.layout_no_wrap(p.label().to_string(), menu::semibold(13.5), col);
+                let total_w = 18.0 + 6.0 + g.size().x;
+                let start_x = r.center().x - total_w * 0.5;
+                menu::icon(pt, page_icon(p), pos2(start_x + 9.0, r.center().y), 16.0, col);
+                pt.galley(pos2(start_x + 24.0, r.center().y - g.size().y * 0.5), g, col);
+                if resp.clicked() && !on {
+                    to = Some(p);
+                }
+            }
+        });
+        return (to, close, close_resp.expect("close button"));
+    }
     ui.horizontal(|ui| {
         let (r, _) = ui.allocate_exact_size(vec2(26.0, 30.0), Sense::hover());
         menu::icon(ui.painter(), page_icon(page), r.center(), 22.0, LIT);
@@ -182,20 +235,27 @@ pub fn card_header(ui: &mut egui::Ui, page: Page) -> (Option<Page>, bool, egui::
 
 /// a square icon button, yellow when on.
 fn icon_key(ui: &mut egui::Ui, icon: Option<Icon>, text: &str, on: bool, hint: &str) -> egui::Response {
-    let (r, resp) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::click());
+    icon_key_sized(ui, icon, text, on, hint, 30.0)
+}
+
+fn icon_key_sized(ui: &mut egui::Ui, icon: Option<Icon>, text: &str, on: bool, hint: &str, size: f32) -> egui::Response {
+    let (r, resp) = ui.allocate_exact_size(vec2(size, size), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, hint));
     let lit = menu::ease(ui.ctx(), resp.id, resp.hovered() || resp.has_focus());
     let p = ui.painter();
     if on {
         p.rect_filled(r, R_IN, LIT);
     } else {
-        p.rect_filled(r, R_IN, white(0.04 + 0.1 * lit));
+        p.rect_filled(r, R_IN, white(0.06 + 0.12 * lit));
+        if size > 32.0 {
+            p.rect_stroke(r, R_IN, Stroke::new(1.0, white(0.20 + 0.22 * lit)), egui::StrokeKind::Inside);
+        }
     }
     let col = if on { menu::ON_ACCENT } else { menu::mix(SOFT, Color32::WHITE, lit) };
     match icon {
-        Some(i) => menu::icon(p, i, r.center(), 18.0, col),
+        Some(i) => menu::icon(p, i, r.center(), size * 0.6, col),
         None => {
-            p.text(r.center(), Align2::CENTER_CENTER, text, menu::medium(18.0), col);
+            p.text(r.center(), Align2::CENTER_CENTER, text, menu::medium(size * 0.6), col);
         }
     }
     resp.on_hover_text(hint)
@@ -218,6 +278,8 @@ pub enum Bar {
     Page(Page),
     Map,
     Camera,
+    Pause,
+    Recenter,
 }
 
 /// how long an airport notice shows (s), and its fade.
@@ -237,8 +299,20 @@ impl Game {
                     self.pad_home = true;
                 }
             }
-            Bar::Map => self.minimap.visible = !self.minimap.visible,
+            Bar::Map => {
+                if self.r.xr_active() {
+                    self.minimap.toggle_full();
+                } else {
+                    self.minimap.visible = !self.minimap.visible;
+                }
+            }
             Bar::Camera => self.next_view(),
+            Bar::Pause => self.set_pause_menu(true),
+            Bar::Recenter => {
+                self.r.recenter_vr();
+                self.status = "VR view recentered".into();
+                self.status_until = self.real + 3.0;
+            }
         }
     }
 
@@ -487,14 +561,23 @@ pub(crate) fn rounded(r: Rect, cr: egui::CornerRadius) -> Vec<egui::Pos2> {
 
 /// the panels' fill and edge, the start screen's tiles.
 const PANEL_FILL: Color32 = Color32::from_rgba_premultiplied(12, 16, 22, 226);
+const PANEL_FILL_VR: Color32 = Color32::from_rgba_premultiplied(11, 15, 22, 242);
 const PANEL_EDGE: Color32 = Color32::from_rgba_premultiplied(26, 26, 26, 26);
+const PANEL_EDGE_VR: Color32 = Color32::from_rgba_premultiplied(70, 82, 98, 90);
 
 /// a dark panel in `r` with a hairline edge.
 fn panel_shapes(r: Rect) -> Vec<egui::Shape> {
-    vec![
-        egui::Shape::rect_filled(r, 0, PANEL_FILL),
-        egui::Shape::rect_stroke(r, 0, Stroke::new(1.0, PANEL_EDGE), egui::StrokeKind::Inside),
-    ]
+    if crate::vr::active() {
+        vec![
+            egui::Shape::rect_filled(r, 0, PANEL_FILL_VR),
+            egui::Shape::rect_stroke(r, 0, Stroke::new(1.2, PANEL_EDGE_VR), egui::StrokeKind::Inside),
+        ]
+    } else {
+        vec![
+            egui::Shape::rect_filled(r, 0, PANEL_FILL),
+            egui::Shape::rect_stroke(r, 0, Stroke::new(1.0, PANEL_EDGE), egui::StrokeKind::Inside),
+        ]
+    }
 }
 
 /// paints a panel in `r`.
@@ -1111,10 +1194,11 @@ impl Game {
         if !self.radial.open {
             return;
         }
+        let vr = self.r.xr_active();
         let items = self.radial_items();
         let n = items.len();
         let screen = ctx.content_rect();
-        let c = screen.center();
+        let c = if vr { pos2(screen.center().x, screen.center().y - 24.0) } else { screen.center() };
         // a short entrance: it grows and fades in.
         let t = ((self.real - self.radial.since) / 0.16).clamp(0.0, 1.0) as f32;
         let k = 1.0 - (1.0 - t).powi(3);
@@ -1122,33 +1206,42 @@ impl Game {
             ctx.request_repaint();
         }
         let scale = 0.86 + 0.14 * k;
-        let (hub, r0, r1) = (HUB_R * scale, RING_IN * scale, RING_OUT * scale);
+        let vr_s = if vr { ((screen.height() / 720.0).clamp(0.95, 1.38)) * 1.24 } else { 1.0 };
+        let (hub, r0, r1) = (HUB_R * scale * vr_s, RING_IN * scale * vr_s, RING_OUT * scale * vr_s);
         let step = std::f32::consts::TAU / n as f32;
         // item 0 sits at the top, the rest clockwise.
         let mid = |i: usize| -std::f32::consts::FRAC_PI_2 + step * i as f32;
-        let gap = 0.035;
+        let gap = 0.032;
         let mut pick: Option<usize> = None;
+        let mut extra_bar: Option<Bar> = None;
         let mut close = false;
+        let mut hub_hover = false;
         egui::Area::new(egui::Id::unique("flight_menu")).order(egui::Order::Foreground).fixed_pos(screen.min).show(ctx, |ui| {
             ui.multiply_opacity(k);
             // the backdrop takes every click; the world stays visible.
             let back = ui.interact(screen, ui.scope_id().with("radial_back"), Sense::click());
             let p = ui.painter().clone();
-            p.rect_filled(screen, 0.0, Color32::from_black_alpha(70));
+            if !vr {
+                p.rect_filled(screen, 0.0, Color32::from_black_alpha(70));
+            }
             // which item the pointer points at, from its angle round the hub.
             let mut hover = None;
             if let Some(pos) = ctx.pointer_latest_pos() {
                 let d = pos - c;
-                if d.length() > hub && d.length() < r1 + 90.0 {
+                let dist = d.length();
+                if dist <= hub {
+                    hub_hover = true;
+                } else if dist < r1 + if vr { 48.0 } else { 90.0 } {
                     let a = (d.y.atan2(d.x) + std::f32::consts::FRAC_PI_2).rem_euclid(std::f32::consts::TAU);
                     hover = Some(((a + step * 0.5) / step) as usize % n);
                 }
             }
             // one clickable spot per icon. The gamepad picks its item
             // directly (Radial::pad), not through egui's focus.
+            let hit_sz = if vr { 72.0 } else { 44.0 };
             for (i, (_, label, _, _)) in items.iter().enumerate() {
                 let at = c + vec2(mid(i).cos(), mid(i).sin()) * (r0 + r1) * 0.5;
-                let r = ui.interact(Rect::from_center_size(at, vec2(44.0, 44.0)), ui.scope_id().with(("radial", i)), Sense::click());
+                let r = ui.interact(Rect::from_center_size(at, vec2(hit_sz, hit_sz)), ui.scope_id().with(("radial", i)), Sense::click());
                 r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, *label));
                 if r.clicked() {
                     pick = Some(i);
@@ -1168,31 +1261,121 @@ impl Game {
                     None => close = true,
                 }
             }
+            // Subtle outer halo in VR so the holographic wheel separates crisply from bright sky or cockpit.
+            if vr {
+                p.circle_stroke(c, r1 + 10.0, Stroke::new(1.5, Color32::from_rgba_unmultiplied(120, 150, 190, 52)));
+            }
+            let base_fill = if vr { PANEL_FILL_VR } else { PANEL_FILL };
+            let base_edge = if vr { PANEL_EDGE_VR } else { PANEL_EDGE };
             // the ring: a dark panel sector per item, the hovered one yellow.
-            for (i, (ic, _, _, on)) in items.iter().enumerate() {
+            for (i, (ic, label, _, on)) in items.iter().enumerate() {
                 let (a0, a1) = (mid(i) - step * 0.5 + gap, mid(i) + step * 0.5 - gap);
                 let lit = menu::ease(ctx, ui.scope_id().with(("radial_lit", i)), hover == Some(i));
-                let grow = 6.0 * lit;
-                p.add(sector(c, r0, r1 + grow, a0, a1, menu::mix(PANEL_FILL, LIT, lit)));
-                p.add(egui::Shape::closed_line(sector_edge(c, r0, r1 + grow, a0, a1), Stroke::new(1.0, menu::mix(PANEL_EDGE, LIT, lit))));
+                let grow = (if vr { 9.0 } else { 6.0 }) * lit;
+                p.add(sector(c, r0, r1 + grow, a0, a1, menu::mix(base_fill, LIT, lit)));
+                p.add(egui::Shape::closed_line(
+                    sector_edge(c, r0, r1 + grow, a0, a1),
+                    Stroke::new(if vr { 1.4 } else { 1.0 }, menu::mix(base_edge, LIT, lit)),
+                ));
                 let at = c + vec2(mid(i).cos(), mid(i).sin()) * ((r0 + r1 + grow) * 0.5);
-                menu::icon(&p, *ic, at, 26.0 + 4.0 * lit, menu::mix(Color32::WHITE, menu::ON_ACCENT, lit));
+                let fg = menu::mix(Color32::WHITE, menu::ON_ACCENT, lit);
+                if vr {
+                    menu::icon(&p, *ic, at - vec2(0.0, 11.0), 27.0 + 4.0 * lit, fg);
+                    p.text(at + vec2(0.0, 16.0), Align2::CENTER_CENTER, *label, menu::semibold(13.0), fg);
+                } else {
+                    menu::icon(&p, *ic, at, 26.0 + 4.0 * lit, fg);
+                }
                 // what is open or on: a small yellow dot by the outer edge.
                 if *on {
-                    p.circle_filled(c + vec2(mid(i).cos(), mid(i).sin()) * (r1 + grow - 11.0), 3.0, menu::mix(LIT, menu::ON_ACCENT, lit));
+                    p.circle_filled(c + vec2(mid(i).cos(), mid(i).sin()) * (r1 + grow - 11.0), if vr { 4.0 } else { 3.0 }, menu::mix(LIT, menu::ON_ACCENT, lit));
                 }
             }
-            // the hub: the pointed item's name, else what this is.
-            p.circle_filled(c, hub, PANEL_FILL);
-            p.circle_stroke(c, hub, Stroke::new(1.0, PANEL_EDGE));
+            // the hub: the pointed item's name, else what this is (or close when hovering hub in VR).
+            let hub_lit = if vr { menu::ease(ctx, ui.scope_id().with("radial_hub"), hub_hover && hover.is_none()) } else { 0.0 };
+            p.circle_filled(c, hub, menu::mix(base_fill, Color32::from_rgba_premultiplied(36, 44, 58, 245), hub_lit));
+            p.circle_stroke(c, hub, Stroke::new(if vr { 1.6 } else { 1.0 }, menu::mix(base_edge, LIT, hub_lit)));
             match hover {
                 Some(i) => {
-                    p.text(c, Align2::CENTER_CENTER, items[i].1, menu::semibold(16.0), Color32::WHITE);
+                    if vr {
+                        menu::icon(&p, items[i].0, c - vec2(0.0, 16.0), 22.0, LIT);
+                        p.text(c + vec2(0.0, 8.0), Align2::CENTER_CENTER, items[i].1, menu::semibold(17.0), Color32::WHITE);
+                        paint_tag_col(&p, c + vec2(0.0, 27.0), Align2::CENTER_CENTER, t!("game.vr_trigger_open"), white(0.60));
+                    } else {
+                        p.text(c, Align2::CENTER_CENTER, items[i].1, menu::semibold(16.0), Color32::WHITE);
+                    }
                 }
-                None => paint_tag(&p, c, Align2::CENTER_CENTER, t!("flight.flight")),
+                None if vr && hub_hover => {
+                    p.text(c - vec2(0.0, 7.0), Align2::CENTER_CENTER, "×", menu::semibold(24.0), LIT);
+                    paint_tag_col(&p, c + vec2(0.0, 16.0), Align2::CENTER_CENTER, t!("game.vr_close"), Color32::WHITE);
+                }
+                None => {
+                    if vr {
+                        paint_tag_col(&p, c - vec2(0.0, 6.0), Align2::CENTER_CENTER, t!("flight.flight"), Color32::WHITE);
+                        p.text(c + vec2(0.0, 13.0), Align2::CENTER_CENTER, t!("game.vr_b_to_close"), menu::caption(), SOFT);
+                    } else {
+                        paint_tag(&p, c, Align2::CENTER_CENTER, t!("flight.flight"));
+                    }
+                }
             }
         });
-        if let Some(i) = pick {
+        // In VR, float a crisp quick-action bar underneath the radial wheel for one-click
+        // Pause/Leave, Recenter, Close, and live cockpit Seat Position adjustment.
+        if vr {
+            let mut seat_delta = glam::Vec3::ZERO;
+            let mut seat_reset = false;
+            let bar_y = (c.y + r1 + 22.0).min(screen.bottom() - 98.0);
+            egui::Area::new(egui::Id::unique("flight_menu_vr_bar"))
+                .order(egui::Order::Tooltip)
+                .anchor(Align2::CENTER_TOP, [0.0, bar_y - screen.top()])
+                .show(ctx, |ui| {
+                    ui.multiply_opacity(k);
+                    panel(ui, glass().inner_margin(egui::Margin::symmetric(12, 8)), |ui| {
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 6.0;
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 8.0;
+                                if key(ui, t!("game.vr_pause_leave"), false, 138.0, 34.0).clicked() {
+                                    extra_bar = Some(Bar::Pause);
+                                }
+                                if key(ui, t!("game.vr_recenter"), false, 128.0, 34.0).clicked() {
+                                    extra_bar = Some(Bar::Recenter);
+                                }
+                                if key(ui, t!("game.vr_close"), false, 84.0, 34.0).clicked() {
+                                    close = true;
+                                }
+                            });
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 6.0;
+                                ui.label(RichText::new(t!("game.vr_seat")).font(menu::semibold(13.0)).color(TEXT));
+                                if key(ui, t!("game.vr_seat_back"), false, 60.0, 30.0).clicked() {
+                                    seat_delta.z += 0.03;
+                                }
+                                if key(ui, t!("game.vr_seat_fwd"), false, 56.0, 30.0).clicked() {
+                                    seat_delta.z -= 0.03;
+                                }
+                                if key(ui, t!("game.vr_seat_down"), false, 60.0, 30.0).clicked() {
+                                    seat_delta.y -= 0.025;
+                                }
+                                if key(ui, t!("game.vr_seat_up"), false, 48.0, 30.0).clicked() {
+                                    seat_delta.y += 0.025;
+                                }
+                                if key(ui, t!("game.vr_seat_reset"), false, 64.0, 30.0).clicked() {
+                                    seat_reset = true;
+                                }
+                            });
+                        });
+                    });
+                });
+            if seat_reset {
+                self.reset_vr_seat();
+            } else if seat_delta != glam::Vec3::ZERO {
+                self.nudge_vr_seat(seat_delta);
+            }
+        }
+        if let Some(b) = extra_bar {
+            *bar = Some(b);
+            self.radial.open = false;
+        } else if let Some(i) = pick {
             *bar = Some(items[i].2);
             self.radial.open = false;
         } else if close {
