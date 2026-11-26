@@ -57,6 +57,9 @@ wgpu = { version = "30", features = ["static-dxc"] }
 libloading = "0.8"
 # Vulkan handles for AMD's FSR 4 runtime (fsr4.rs); the version wgpu-hal uses
 ash = "0.38"
+# spreading the window over all the monitors under X11 (display.rs); already
+# in the tree through winit
+x11rb = "0.13"
 
 [dev-dependencies]
 # Keep in step with wgpu's naga version when upgrading wgpu.

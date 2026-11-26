@@ -235,13 +235,15 @@ pub fn show(ctx: &egui::Context, game: &mut Game, in_flight: bool) -> bool {
 
 impl Game {
     pub(crate) fn settings_screen(&mut self, ctx: &egui::Context, in_flight: bool) -> bool {
-        let screen = ctx.content_rect();
+        // (The backdrop over every screen when the window spans several; the settings on the one the menus are on.)
+        let (whole, screen) = (ctx.viewport_rect(), ctx.content_rect());
         let mut closed = false;
-        egui::Area::new(egui::Id::unique("settings_screen")).order(egui::Order::Foreground).fixed_pos(screen.min).show(ctx, |ui| {
+        egui::Area::new(egui::Id::unique("settings_screen")).order(egui::Order::Foreground).constrain_to(whole).fixed_pos(whole.min).show(ctx, |ui| {
+            ui.set_clip_rect(whole);
             // The backdrop takes every click; the game (or globe) behind is all but hidden.
-            ui.interact(screen, ui.scope_id().with("backdrop"), Sense::click());
+            ui.interact(whole, ui.scope_id().with("backdrop"), Sense::click());
             let p = ui.painter().clone();
-            p.rect_filled(screen, 0.0, if in_flight { Color32::from_rgba_premultiplied(4, 6, 9, 226) } else { menu::BG });
+            p.rect_filled(whole, 0.0, if in_flight { Color32::from_rgba_premultiplied(4, 6, 9, 226) } else { menu::BG });
             let side_w = if screen.width() < 1000.0 { 220.0 } else { 264.0 };
             let side = Rect::from_min_size(screen.min, vec2(side_w, screen.height()));
             p.rect_filled(side, 0.0, Color32::from_black_alpha(110));
@@ -345,7 +347,7 @@ impl Game {
         });
         card(ui, t!("settings.display"), |ui| {
             row(ui, t!("settings.full_screen"), t!("settings.f11_or_alt_enter_switches_at"), |ui| {
-                let mut on = self.window.fullscreen().is_some();
+                let mut on = self.display.mode != crate::display::Mode::Windowed;
                 if menu::switch(ui, &mut on).changed() {
                     self.set_fullscreen(on);
                 }
@@ -411,6 +413,8 @@ impl Game {
         card(ui, t!("settings.preset"), |ui| self.gfx.preset_ui(ui));
         card(ui, t!("settings.quality"), |ui| self.gfx.quality_ui(ui));
         card(ui, t!("settings.display"), |ui| self.gfx.display_ui(ui, (size.width, size.height), self.fps));
+        // Window, full screen, or one view across several monitors (display.rs).
+        card(ui, t!("settings.screens"), |ui| self.display_settings(ui));
         let cx = crate::graphics::UpscaleCx { gpu: &self.r.gpu, window: (size.width, size.height), active: self.r.up.active(), fsr4_blocked: crate::fsr4::blocked(&self.r.gpu, self.r.up.fsr4_error()), fsr4_provider: self.r.up.fsr4_provider().map(str::to_owned) };
         card(ui, t!("settings.upscaling"), |ui| self.gfx.upscaler_ui(ui, &cx));
         card(ui, t!("settings.scenery"), |ui| {

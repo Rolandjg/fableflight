@@ -101,6 +101,8 @@ All bindings can be customized in **Settings → Controls**. In cockpit view, ho
 
 The game starts in borderless full screen. Turn this off in **Settings → General**, or pass `--windowed` (or `--width`/`--height`) for a single run.
 
+**Settings → Graphics → Screens** chooses a window, full screen on the monitor of your choice, or **All screens**: one view across several monitors (2 side by side, 3, 6 in two rows…), laid out as the system has them, with a small map of the monitors to take each one in or leave it out. The menus and instruments stay on one screen (the main one by default), and the view straight ahead is centred on it unless you turn that off (3 or 5 monitors). **Widest view** (110° by default) keeps a 32:9 or wider view from bending at the edges. `F11` switches between the window and the last full-screen choice. The choice is kept in `display.json`; `--display windowed|fullscreen|span` sets it for one run. On a Wayland desktop, All screens runs through XWayland: restart the game after choosing it.
+
 ## Configuration & Data Paths
 
 | Platform | Config (settings, bindings, Google key, MCP token) | Cache (tiles, downloaded hangar cache) |

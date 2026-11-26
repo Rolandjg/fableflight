@@ -54,7 +54,7 @@ impl Guide {
         // Only the arrival side gets gates, never the departure/rollout side.
         let along = (self.threshold - aircraft).dot(self.direction);
         if !(0.0..=18_000.0).contains(&along) { return; }
-        let screen = ctx.content_rect();
+        let screen = ctx.viewport_rect(); // (the whole window: world positions, see display.rs)
         let painter = ctx.layer_painter(egui::LayerId::background());
         let project = |point: DVec3| -> Option<Pos2> {
             let c = vp * (point - camera).as_vec3().extend(1.0);
