@@ -1917,7 +1917,9 @@ impl Iterator for Synth {
             self.radio = self.s.radio.lock().pop_front();
         }
         if let Some(t) = self.radio.as_mut().filter(|_| p.live > 0.5) {
-            let v = t.sample() * 0.42;
+            // (loud enough to stand clear of a piston engine at cruise power,
+            // as a headset's would: measured in a recorded approach)
+            let v = t.sample() * 0.8;
             l += v;
             r += v;
             if t.done() {

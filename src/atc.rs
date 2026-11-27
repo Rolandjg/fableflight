@@ -5,10 +5,17 @@
 //! handoffs to departure and approach. at an airport without a tower the
 //! calls go out to the traffic on the ctaf. what was said is kept as a log
 //! and shown as subtitles. not real phraseology training, a game's version.
+//!
+//! with `auto` on ("talk me through"), `controller` follows the flight's
+//! phases and makes the controllers' calls on its own, from the taxi
+//! clearance to "taxi to parking", tuning com 1 to each station in turn; the
+//! pilot's own calls are then kept to the ctaf.
 
+pub mod controller;
 pub mod install;
 pub mod lexicon;
 pub mod listen;
+pub mod phrase;
 pub mod tts;
 pub mod voice;
 
@@ -118,7 +125,7 @@ fn table() -> &'static HashMap<String, Vec<(Kind, f32)>> {
 }
 
 /// the short name a controller goes by: the city for a big airport, else the airport's own.
-fn place_name(a: &Apt) -> String {
+pub(crate) fn place_name(a: &Apt) -> String {
     let n = a.name.replace(" International Airport", "").replace(" Airport", "").replace(" Airfield", "").replace(" Aerodrome", "");
     let n = n.trim();
     if n.is_empty() { a.ident.clone() } else { n.to_string() }
@@ -306,15 +313,38 @@ pub struct Ctx {
     pub jet: bool,
 }
 
+/// a reply due: when, who, the station, the words shown. a call from the
+/// automatic controllers also carries the words as said, its frequency (com 1
+/// is tuned to it) and how well it comes in.
+#[derive(Clone)]
+struct Due {
+    at: f64,
+    who: Who,
+    station: String,
+    text: String,
+    said: Option<String>,
+    mhz: Option<f32>,
+    signal: Option<f32>,
+}
+
+impl Due {
+    fn reply(at: f64, who: Who, station: &str, text: String) -> Self {
+        Due { at, who, station: station.into(), text, said: None, mhz: None, signal: None }
+    }
+}
+
 pub struct Atc {
     pub on: bool,
+    /// the controllers call the flight through on their own (`controller`).
+    pub auto: bool,
+    pub controller: controller::Controller,
     /// com 1, active and standby (mhz).
     pub com: f32,
     pub standby: f32,
     pub phase: Phase,
     pub log: Vec<Line>,
-    /// replies due: when, who, station, text.
-    pending: Vec<(f64, Who, String, String)>,
+    /// replies due.
+    pending: Vec<Due>,
     /// the departure airport, the runway given, the altitude given (ft).
     pub from: Option<u32>,
     pub rwy: Option<String>,
@@ -346,7 +376,7 @@ pub struct Atc {
 
 impl Default for Atc {
     fn default() -> Self {
-        Self { on: true, com: 122.800, standby: 121.500, phase: Phase::Ground, log: Vec::new(), pending: Vec::new(), from: None, rwy: None, alt_ft: None, squawk: 1200, atis: HashMap::new(), violations: 0, ifr: false, t_phase: 0.0, t_nag: 0.0, ground: true, up_for: 0.0, still: 0.0, heard: None, voice: voice::Voice::default(), speak: false, signal: 1.0, t_signal: -10.0, t_atis: -1e9 }
+        Self { on: true, auto: false, controller: controller::Controller::new(""), com: 122.800, standby: 121.500, phase: Phase::Ground, log: Vec::new(), pending: Vec::new(), from: None, rwy: None, alt_ft: None, squawk: 1200, atis: HashMap::new(), violations: 0, ifr: false, t_phase: 0.0, t_nag: 0.0, ground: true, up_for: 0.0, still: 0.0, heard: None, voice: voice::Voice::default(), speak: false, signal: 1.0, t_signal: -10.0, t_atis: -1e9 }
     }
 }
 
@@ -377,10 +407,15 @@ fn dist_nm(a: &Apt, lat: f64, lon: f64) -> f64 {
 }
 
 impl Atc {
+    /// with the automatic controllers on or off (the saved setting).
+    pub fn with_auto(auto: bool) -> Self {
+        Self { auto, ..Default::default() }
+    }
+
     /// starts over for a new flight, keeping the radio as tuned.
     pub fn reset(&mut self) {
-        let (on, com, standby) = (self.on, self.com, self.standby);
-        *self = Self { on, com, standby, ..Default::default() };
+        let (on, auto, com, standby) = (self.on, self.auto, self.com, self.standby);
+        *self = Self { on, auto, com, standby, ..Default::default() };
     }
 
     fn set(&mut self, p: Phase, now: f64) {
@@ -389,11 +424,21 @@ impl Atc {
     }
 
     fn say(&mut self, now: f64, who: Who, station: &str, text: String) {
+        self.say_as(now, who, station, text, None, None);
+    }
+
+    /// as `say`, with the words as said when they differ from those shown
+    /// (the automatic controllers write both), and the station's own signal.
+    fn say_as(&mut self, now: f64, who: Who, station: &str, text: String, said: Option<&str>, signal: Option<f32>) {
         // the pilot's own words when they spoke the call, and then not said again.
         let spoke = who == Who::Pilot && self.heard.is_some();
         let text = if who == Who::Pilot { self.heard.take().unwrap_or(text) } else { text };
         if self.speak && who != Who::Info && !spoke {
-            self.voice.speak(who == Who::Pilot, station, &text, self.signal);
+            let signal = signal.unwrap_or(self.signal);
+            match said {
+                Some(w) => self.voice.speak_words(who == Who::Pilot, station, w, signal),
+                None => self.voice.speak(who == Who::Pilot, station, &text, signal),
+            }
         }
         self.log.push(Line { t: now, who, station: station.into(), text });
         if self.log.len() > 60 {
@@ -402,7 +447,7 @@ impl Atc {
     }
 
     fn reply(&mut self, at: f64, station: &str, text: String) {
-        self.pending.push((at, Who::Atc, station.into(), text));
+        self.pending.push(Due::reply(at, Who::Atc, station, text));
     }
 
     /// the stations near enough to hear, nearest airport first.
@@ -509,7 +554,27 @@ impl Atc {
             }
             _ => {}
         }
+        if self.auto {
+            v.retain(|r| matches!(r, Req::Advisory | Req::AnnounceTaxi | Req::AnnounceDeparture | Req::AnnounceInbound | Req::AnnounceFinal | Req::AnnounceClear));
+        }
         v
+    }
+
+    /// the automatic controllers (`auto`): one step of the flight's phases;
+    /// their calls are queued one after another, each `after` seconds behind
+    /// the one before (the pilot reads back in between).
+    pub fn drive(&mut self, s: &controller::Situation, dt: f64, cs: &str, now: f64) {
+        if !self.on || !self.auto {
+            return;
+        }
+        if self.controller.callsign != cs {
+            self.controller.callsign = cs.to_string();
+        }
+        let mut at = self.pending.iter().map(|p| p.at).fold(now, f64::max);
+        for call in self.controller.step(s, dt) {
+            at += call.after;
+            self.pending.push(Due { at, who: Who::Atc, station: call.station, text: call.phrase.shown, said: Some(call.phrase.said), mhz: Some(call.freq_khz as f32 / 1000.0), signal: Some(call.signal) });
+        }
     }
 
     /// the pilot makes a call; the controller answers a moment later.
@@ -709,17 +774,25 @@ impl Atc {
             }
         }
         // the replies due.
-        let mut due: Vec<(f64, Who, String, String)> = Vec::new();
+        let mut due: Vec<Due> = Vec::new();
         self.pending.retain(|p| {
-            if p.0 <= c.now {
+            if p.at <= c.now {
                 due.push(p.clone());
                 false
             } else {
                 true
             }
         });
-        for (_, w, st, text) in due {
-            self.say(c.now, w, &st, text);
+        for d in due {
+            // an automatic controller's call: com 1 is on its frequency.
+            if let Some(f) = d.mhz {
+                self.com = f;
+            }
+            self.say_as(c.now, d.who, &d.station, d.text, d.said.as_deref(), d.signal);
+        }
+        // the automatic controllers see to the takeoffs, landings and hand-offs.
+        if self.auto {
+            return;
         }
         let you = say(cs);
         // takeoff and landing, a short hop is a bounce.
@@ -860,12 +933,61 @@ impl Game {
         }
     }
 
+    /// what the automatic controllers go by: where the aircraft is and what
+    /// it is doing, the airfield it is at, the weather and the flight plan.
+    pub(crate) fn atc_situation(&self) -> controller::Situation {
+        let p = &self.plane;
+        let (la, lo, alt) = geo::pos_to_lla(p.pos);
+        let up = p.pos.normalize();
+        let vs = p.vel.dot(up);
+        let gs = (p.vel - up * vs).length();
+        let agl = (alt - self.world.ground(la, lo).map_or(0.0, |g| g.h) - p.wheel_height()).max(0.0);
+        let wind_kt = self.wx.wind * 1.94384;
+        let field = self.world.airfield_near(p.pos, 18_000.0).map(|f| {
+            let g = &f.geo;
+            let runway = f.traffic.active.or_else(|| g.active(self.wx.wind_from as f32, wind_kt as f32)).map(|(ri, e)| g.runways[ri].ident[e].clone());
+            let lp = g.local(p.pos);
+            let (mut on_runway, mut at_hold) = (None, false);
+            if p.on_ground {
+                let fw = p.forward();
+                let hd = glam::Vec2::new(fw.dot(g.e) as f32, fw.dot(g.n) as f32).normalize_or_zero();
+                on_runway = g.on_runway(lp, 0.0).map(|ri| {
+                    let r = &g.runways[ri];
+                    r.ident[if hd.dot(r.dir) >= 0.0 { 0 } else { 1 }].clone()
+                });
+                at_hold = g.holds.iter().any(|h| (h.p - lp).length() < 40.0);
+            }
+            controller::Field { idx: g.idx, runway, on_runway, at_hold }
+        });
+        let dest = self.plan.destination().and_then(|w| Db::get().find(&w.ident));
+        controller::Situation {
+            lat: la.to_degrees(),
+            lon: lo.to_degrees(),
+            alt_ft: alt / 0.3048,
+            agl_ft: agl / 0.3048,
+            gs_kt: gs * 1.94384,
+            vs_fpm: vs * 196.85,
+            on_ground: p.on_ground,
+            engine: p.running,
+            field,
+            wind_from: self.wx.wind_from,
+            wind_kt,
+            qnh: self.wx.qnh,
+            dest,
+            cruise_ft: if self.plan.is_empty() { 0.0 } else { self.plan.cruise_ft },
+        }
+    }
+
     pub(crate) fn atc_step(&mut self, dt: f64) {
         let c = self.atc_ctx();
         let cs = self.callsign();
         self.atc.speak = self.atc_voices && self.sound_on && self.audio.is_some() && tts::Tts::available();
         if !self.atc.speak {
             self.atc.voice.clear();
+        }
+        if self.atc.auto && self.atc.on {
+            let s = self.atc_situation();
+            self.atc.drive(&s, dt, &cs, c.now);
         }
         self.atc.step(dt, &cs, &c);
         self.atc.voice.pump(self.audio.as_ref());
@@ -952,6 +1074,10 @@ impl Game {
                     }
                 }
                 note(ui, &format!("{} {:04}  ·  {}", tr_en("squawk"), self.atc.squawk, if self.atc.ifr { "IFR" } else { "VFR" }));
+                if self.atc.auto {
+                    let phase = self.atc.controller.phase();
+                    note(ui, &if phase.is_empty() { tr_en("Talk me through").to_string() } else { format!("{}  ·  {}", tr_en("Talk me through"), tr_en(phase)) });
+                }
             }
         });
         // the atis reads itself out while it is tuned.
@@ -1124,6 +1250,45 @@ mod tests {
         a.heard("uh hello", "FABLE 123", &Ctx { now: 120.0, ..c });
         a.step(0.1, "FABLE 123", &Ctx { now: 125.0, ..c });
         assert!(a.log.last().is_some_and(|l| l.text.ends_with("say again.")));
+    }
+
+    /// talk me through: the controllers call on their own, one after the
+    /// other, on the airport's real frequencies, and com 1 follows them; the
+    /// pilot is left only the ctaf calls.
+    #[test]
+    fn talk_me_through_calls_and_tunes() {
+        let db = Db::get();
+        let sfo = db.find("KSFO").expect("sfo");
+        let a = &db.apts[sfo as usize];
+        let c = |now: f64| Ctx { now, lat: a.lat, lon: a.lon, alt_ft: 13.0, agl_ft: 0.0, on_ground: true, kt: 0.0, wind_from: 290.0, wind_kt: 9.0, qnh: 1013.0, utc: 12.0, dest: None, cruise_ft: None, runway_busy: false, jet: false };
+        let mut atc = Atc::with_auto(true);
+        let field = controller::Field { idx: sfo, runway: Some("28R".into()), ..Default::default() };
+        let mut s = controller::Situation { lat: a.lat, lon: a.lon, alt_ft: 13.0, on_ground: true, engine: true, field: Some(field), wind_from: 290.0, wind_kt: 9.0, qnh: 1013.0, ..Default::default() };
+        let mut now = 0.0;
+        let run = |atc: &mut Atc, s: &controller::Situation, secs: f64, now: &mut f64| {
+            for _ in 0..(secs * 2.0) as usize {
+                *now += 0.5;
+                atc.drive(s, 0.5, "N172SP", *now);
+                atc.step(0.5, "N172SP", &c(*now));
+            }
+        };
+        run(&mut atc, &s, 10.0, &mut now);
+        let gnd = stations(sfo).into_iter().find(|f| f.kind == Kind::Gnd).expect("ground");
+        let l = atc.log.last().expect("ground calls");
+        assert!(l.who == Who::Atc && l.station == gnd.name() && l.text.contains("taxi to holding point"), "{}: {}", l.station, l.text);
+        assert!((atc.com - gnd.mhz).abs() < 0.001, "com 1 on ground: {}", atc.com);
+        assert!(atc.requests(&c(now)).is_empty(), "the tower's calls are the controllers'");
+        // at the hold: the tower clears the takeoff; the climb out goes to departure.
+        s.field.as_mut().unwrap().at_hold = true;
+        run(&mut atc, &s, 5.0, &mut now);
+        assert!(atc.log.last().is_some_and(|l| l.text.contains("cleared for takeoff")));
+        (s.field, s.on_ground, s.agl_ft, s.alt_ft, s.gs_kt) = (None, false, 1_200.0, 1_200.0, 100.0);
+        run(&mut atc, &s, 2.0, &mut now);
+        let n = atc.log.len();
+        assert!(atc.log.last().is_some_and(|l| l.text.contains("contact")), "the tower hands over first");
+        run(&mut atc, &s, 10.0, &mut now);
+        assert!(atc.log.len() == n + 1 && atc.log[n].text.contains("radar contact"), "then departure, a moment later");
+        assert_eq!(atc.violations, 0, "the takeoff was cleared");
     }
 
     #[test]

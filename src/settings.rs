@@ -41,6 +41,9 @@ pub struct Settings {
     pub atc_voices: bool,
     /// the microphone push to talk records (its name; empty: the system's default)
     pub atc_mic: String,
+    /// the controllers call the flight through on their own (atc/controller.rs)
+    /// rather than waiting for the pilot's calls
+    pub atc_auto: bool,
     /// what the pilot is flying shows on their discord profile (discord.rs)
     pub discord: bool,
     pub minimap_plan: bool,
@@ -101,7 +104,7 @@ impl LastStart {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { lang: None, sound_on: true, volume: 1.0, cam_mode: 0, cockpit_fov: crate::cockpit::FOV, look_sens: 1.0, invert_look_cockpit: false, invert_look_outside_x: false, invert_look_outside_y: false, show_hud: true, hud_cockpit: false, path_marker: false, minimap: true, landing_guidance: true, arcade: false, minimap_plan: false, minimap_heading_up: false, minimap_zoom: 12, minimap_size: 280.0, minimap_height: 280.0, map_airports: true, map_navaids: true, taa: true, fullscreen: true, live_traffic: true, live_weather: true, real_time: true, snow: crate::snow::Mode::Auto, last: None, multiplayer: true, mp_server: "auto".into(), mp_name: String::new(), topple_buildings: false, atc_voices: true, atc_mic: String::new(), discord: true, simbrief: String::new() }
+        Self { lang: None, sound_on: true, volume: 1.0, cam_mode: 0, cockpit_fov: crate::cockpit::FOV, look_sens: 1.0, invert_look_cockpit: false, invert_look_outside_x: false, invert_look_outside_y: false, show_hud: true, hud_cockpit: false, path_marker: false, minimap: true, landing_guidance: true, arcade: false, minimap_plan: false, minimap_heading_up: false, minimap_zoom: 12, minimap_size: 280.0, minimap_height: 280.0, map_airports: true, map_navaids: true, taa: true, fullscreen: true, live_traffic: true, live_weather: true, real_time: true, snow: crate::snow::Mode::Auto, last: None, multiplayer: true, mp_server: "auto".into(), mp_name: String::new(), topple_buildings: false, atc_voices: true, atc_mic: String::new(), atc_auto: false, discord: true, simbrief: String::new() }
     }
 }
 
@@ -155,6 +158,7 @@ impl Settings {
             arcade: b("arcade", d.arcade),
             topple_buildings: b("topple_buildings", d.topple_buildings),
             atc_voices: b("atc_voices", d.atc_voices),
+            atc_auto: b("atc_auto", d.atc_auto),
             atc_mic: j["atc_mic"].as_str().map(|s| s.trim().chars().take(200).collect()).unwrap_or(d.atc_mic),
             discord: b("discord", d.discord),
             minimap_plan: b("minimap_plan", d.minimap_plan),
@@ -201,6 +205,7 @@ impl Settings {
             "topple_buildings": self.topple_buildings,
             "atc_voices": self.atc_voices,
             "atc_mic": self.atc_mic,
+            "atc_auto": self.atc_auto,
             "discord": self.discord,
             "minimap_plan": self.minimap_plan,
             "minimap_heading_up": self.minimap_heading_up,
@@ -242,7 +247,7 @@ mod tests {
 
     #[test]
     fn round_trip() {
-        let s = Settings { lang: Lang::parse("fr"), sound_on: false, volume: 0.4, cam_mode: 1, cockpit_fov: 50.0, look_sens: 1.5, invert_look_cockpit: true, invert_look_outside_x: true, invert_look_outside_y: false, show_hud: false, hud_cockpit: true, path_marker: true, minimap: false, landing_guidance: false, arcade: true, minimap_plan: true, minimap_heading_up: true, minimap_zoom: 15, minimap_size: 420.0, minimap_height: 300.0, map_airports: false, map_navaids: false, taa: false, fullscreen: false, live_traffic: false, live_weather: false, real_time: false, snow: crate::snow::Mode::Always, last: Some(LastStart { lat: 37.6, lon: -122.4, name: "KSFO".into(), airport: Some("KSFO".into()), start: "approach".into(), runway: Some("28L".into()), aircraft: "c172".into() }), multiplayer: true, mp_server: "example.org:7000".into(), mp_name: "Dany".into(), topple_buildings: true, atc_voices: false, atc_mic: "Laptop mic".into(), discord: false, simbrief: "pilot42".into() };
+        let s = Settings { lang: Lang::parse("fr"), sound_on: false, volume: 0.4, cam_mode: 1, cockpit_fov: 50.0, look_sens: 1.5, invert_look_cockpit: true, invert_look_outside_x: true, invert_look_outside_y: false, show_hud: false, hud_cockpit: true, path_marker: true, minimap: false, landing_guidance: false, arcade: true, minimap_plan: true, minimap_heading_up: true, minimap_zoom: 15, minimap_size: 420.0, minimap_height: 300.0, map_airports: false, map_navaids: false, taa: false, fullscreen: false, live_traffic: false, live_weather: false, real_time: false, snow: crate::snow::Mode::Always, last: Some(LastStart { lat: 37.6, lon: -122.4, name: "KSFO".into(), airport: Some("KSFO".into()), start: "approach".into(), runway: Some("28L".into()), aircraft: "c172".into() }), multiplayer: true, mp_server: "example.org:7000".into(), mp_name: "Dany".into(), topple_buildings: true, atc_voices: false, atc_mic: "Laptop mic".into(), atc_auto: true, discord: false, simbrief: "pilot42".into() };
         assert_eq!(Settings::from_json(&s.to_json()), s);
         // Multiplayer: on by default, and once for settings saved before it was;
         // turned off since, it stays off.

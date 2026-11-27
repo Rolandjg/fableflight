@@ -31,13 +31,17 @@ pub struct Voice {
 impl Voice {
     /// queues one line. `station` is the name the controller goes by, empty for none.
     pub fn speak(&mut self, pilot: bool, station: &str, text: &str, signal: f32) {
-        let words = spoken(text);
+        self.speak_words(pilot, station, &spoken(text), signal);
+    }
+
+    /// as `speak`, the words already written as they are said.
+    pub fn speak_words(&mut self, pilot: bool, station: &str, words: &str, signal: f32) {
         if words.trim().is_empty() || self.queue.len() >= 8 {
             return;
         }
         let seed = hash(station);
         let (voice, speed, st) = if pilot { (PILOT, 1.05, Station::RADAR) } else { (controller(seed), 1.15, filter(station)) };
-        let rx = Tts::get().say(&words, voice, speed);
+        let rx = Tts::get().say(words, voice, speed);
         self.queue.push_back(Item { rx, st, signal: if pilot { 1.0 } else { signal.clamp(0.15, 1.0) }, seed: seed ^ self.queue.len() as u32, since: Instant::now() });
     }
 

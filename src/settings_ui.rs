@@ -561,6 +561,10 @@ impl Game {
             row(ui, t!("settings.atc_voices"), t!("settings.atc_voices_hint"), |ui| {
                 menu::switch(ui, &mut self.atc_voices);
             });
+            // the controllers call the flight through on their own (atc/controller.rs).
+            row(ui, t!("settings.atc_auto"), t!("settings.atc_auto_hint"), |ui| {
+                menu::switch(ui, &mut self.atc.auto);
+            });
             // a bluetooth headset drops to call quality while its own mic is open: another mic keeps it in music mode.
             row_help(ui, t!("settings.atc_microphone"), t!("settings.atc_microphone_hint"), |ui| {
                 let mics = crate::atc::listen::microphones();
