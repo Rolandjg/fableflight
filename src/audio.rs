@@ -19,6 +19,9 @@
 //! close by, a long low rumble rolling in from far off, arriving at the speed
 //! of sound), and rain (a hiss all round; in the cockpit, drops drumming on
 //! the windshield and roof, turning into a roar at speed).
+//!
+//! In the main menu, music (see `music`): recorded chord progressions in a
+//! random order, with light aircraft flying over now and then.
 use parking_lot::Mutex;
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
 use std::num::NonZero;
@@ -26,6 +29,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
+mod music;
 pub(crate) mod radio;
 
 /// The cockpit warnings that are sounding.
@@ -56,8 +60,10 @@ pub struct Warn {
 pub struct Params {
     /// 1 while flying; 0 paused, in the menu or crashed (the aircraft falls silent)
     pub live: f32,
-    /// overall volume (0 = muted)
+    /// the game's sounds' volume (0 = muted)
     pub master: f32,
+    /// the menu music's volume: 0 out of the menu (it fades out and stops)
+    pub music: f32,
     /// engine revolutions per minute
     pub rpm: f32,
     /// power being made, 0..1 of rated, and where the throttle is
@@ -179,6 +185,7 @@ impl Audio {
             .or_else(|_| rodio::DeviceSinkBuilder::open_default_sink())
             .map_err(|e| log::warn!("no sound: {e}"))
             .ok()?;
+        music::preload();
         sink.mixer().add(Synth::new(shared.clone()));
         Some(sink)
     }
@@ -195,6 +202,7 @@ impl Audio {
     /// No sound device: samples are generated on demand with `take`.
     pub fn offline() -> Self {
         let shared = Arc::new(Shared::default());
+        music::preload();
         let synth = Synth::new(shared.clone());
         Self { shared, sink: Mutex::new(None), broken: Arc::new(AtomicBool::new(false)), last_try: Mutex::new(Instant::now()), offline: Some(Mutex::new(synth)) }
     }
@@ -1580,6 +1588,7 @@ struct Synth {
     right: Option<f32>,
     /// the radio message playing
     radio: Option<radio::Transmission>,
+    music: music::Music,
     /// sums of squares of each part of the mix, for tuning the levels in the tests
     #[cfg(test)]
     meter: [f64; 10],
@@ -1612,6 +1621,7 @@ impl Synth {
             dc: [Bq::new(Bq::hp, 18.0, 0.7); 2],
             right: None,
             radio: None,
+            music: music::Music::new(0x9e37_79b9 ^ std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos())),
             #[cfg(test)]
             meter: [0.0; 10],
         }
@@ -1929,8 +1939,10 @@ impl Iterator for Synth {
         for (m, v) in self.meter.iter_mut().zip([ex, prop, mech, w[0], w[2], sl, ml, il - w[2] - sl, alarm, l]) {
             *m += (v * v) as f64;
         }
+        // The menu music, at its own volume.
+        let (ml, mr) = self.music.sample(self.t.music);
         // Master: a gentle limiter, then a soft clip.
-        let (l, r) = (self.dc[0].run(l) * p.master * 0.8, self.dc[1].run(r) * p.master * 0.8);
+        let (l, r) = ((self.dc[0].run(l) * p.master + ml) * 0.8, (self.dc[1].run(r) * p.master + mr) * 0.8);
         let pk = l.abs().max(r.abs());
         self.lim = if pk > self.lim { pk } else { self.lim * self.lim_k };
         let g = if self.lim > 0.8 { 0.8 / self.lim } else { 1.0 };

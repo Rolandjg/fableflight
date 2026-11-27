@@ -52,6 +52,8 @@ zip = { version = "9.6.0", default-features = false, features = ["deflate"] }
 # from the downloaded voice pack, never linked in. A 2.0 release candidate:
 # keep it pinned.
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic"] }
+# Ogg Vorbis decoding for the menu music (src/audio/music.rs); pure Rust.
+lewton = "0.10.2"
 
 # Windows: shaders compiled with DXC built in. wgpu otherwise falls back to
 # FXC, which can't compile the composite pass (it gives up unrolling its

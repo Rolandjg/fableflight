@@ -555,6 +555,12 @@ impl Game {
             row(ui, t!("settings.volume"), "", |ui| {
                 ui.add_enabled(self.sound_on, egui::Slider::new(&mut self.volume, 0.0..=1.0).custom_formatter(|v, _| format!("{:.0}%", v * 100.0)));
             });
+            row(ui, t!("settings.effects_volume"), t!("settings.effects_volume_hint"), |ui| {
+                ui.add_enabled(self.sound_on, egui::Slider::new(&mut self.effects_volume, 0.0..=1.0).custom_formatter(|v, _| format!("{:.0}%", v * 100.0)));
+            });
+            row(ui, t!("settings.music_volume"), t!("settings.music_volume_hint"), |ui| {
+                ui.add_enabled(self.sound_on, egui::Slider::new(&mut self.music_volume, 0.0..=1.0).custom_formatter(|v, _| format!("{:.0}%", v * 100.0)));
+            });
         });
         // the controllers heard on the radio, with the voice pack downloaded on request (atc/install.rs).
         card(ui, t!("settings.atc"), |ui| {
