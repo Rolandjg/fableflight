@@ -12,7 +12,10 @@ pub struct Settings {
     /// None: follow the system's language
     pub lang: Option<Lang>,
     pub sound_on: bool,
+    /// the overall volume, and under it the game's sounds' and the menu music's
     pub volume: f32,
+    pub effects_volume: f32,
+    pub music_volume: f32,
     /// 0 chase, 1 cockpit, 2 fixed rear view
     pub cam_mode: u8,
     pub cockpit_fov: f32,
@@ -101,7 +104,7 @@ impl LastStart {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { lang: None, sound_on: true, volume: 1.0, cam_mode: 0, cockpit_fov: crate::cockpit::FOV, look_sens: 1.0, invert_look_cockpit: false, invert_look_outside_x: false, invert_look_outside_y: false, show_hud: true, hud_cockpit: false, path_marker: false, minimap: true, landing_guidance: true, arcade: false, minimap_plan: false, minimap_heading_up: false, minimap_zoom: 12, minimap_size: 280.0, minimap_height: 280.0, map_airports: true, map_navaids: true, taa: true, fullscreen: true, live_traffic: true, live_weather: true, real_time: true, snow: crate::snow::Mode::Auto, last: None, multiplayer: true, mp_server: "auto".into(), mp_name: String::new(), topple_buildings: false, atc_voices: true, atc_mic: String::new(), discord: true, simbrief: String::new() }
+        Self { lang: None, sound_on: true, volume: 1.0, effects_volume: 1.0, music_volume: 0.7, cam_mode: 0, cockpit_fov: crate::cockpit::FOV, look_sens: 1.0, invert_look_cockpit: false, invert_look_outside_x: false, invert_look_outside_y: false, show_hud: true, hud_cockpit: false, path_marker: false, minimap: true, landing_guidance: true, arcade: false, minimap_plan: false, minimap_heading_up: false, minimap_zoom: 12, minimap_size: 280.0, minimap_height: 280.0, map_airports: true, map_navaids: true, taa: true, fullscreen: true, live_traffic: true, live_weather: true, real_time: true, snow: crate::snow::Mode::Auto, last: None, multiplayer: true, mp_server: "auto".into(), mp_name: String::new(), topple_buildings: false, atc_voices: true, atc_mic: String::new(), discord: true, simbrief: String::new() }
     }
 }
 
@@ -139,6 +142,8 @@ impl Settings {
             lang: j["language"].as_str().and_then(Lang::parse),
             sound_on: b("sound", d.sound_on),
             volume: f("volume", d.volume as f64).clamp(0.0, 1.0) as f32,
+            effects_volume: f("effects_volume", d.effects_volume as f64).clamp(0.0, 1.0) as f32,
+            music_volume: f("music_volume", d.music_volume as f64).clamp(0.0, 1.0) as f32,
             cam_mode: match j["camera"].as_str() { Some("cockpit") => 1, Some("tail") => TAIL_VIEW, _ => 0 },
             cockpit_fov: f("cockpit_fov", d.cockpit_fov as f64).clamp(35.0, 85.0) as f32,
             look_sens: f("mouse_look_speed", d.look_sens).clamp(0.25, 3.0),
@@ -184,6 +189,8 @@ impl Settings {
             "language": self.lang.map(|l| l.code()),
             "sound": self.sound_on,
             "volume": self.volume,
+            "effects_volume": self.effects_volume,
+            "music_volume": self.music_volume,
             "camera": match self.cam_mode { 1 => "cockpit", TAIL_VIEW => "tail", _ => "chase" },
             "cockpit_fov": self.cockpit_fov,
             "mouse_look_speed": self.look_sens,
@@ -242,7 +249,7 @@ mod tests {
 
     #[test]
     fn round_trip() {
-        let s = Settings { lang: Lang::parse("fr"), sound_on: false, volume: 0.4, cam_mode: 1, cockpit_fov: 50.0, look_sens: 1.5, invert_look_cockpit: true, invert_look_outside_x: true, invert_look_outside_y: false, show_hud: false, hud_cockpit: true, path_marker: true, minimap: false, landing_guidance: false, arcade: true, minimap_plan: true, minimap_heading_up: true, minimap_zoom: 15, minimap_size: 420.0, minimap_height: 300.0, map_airports: false, map_navaids: false, taa: false, fullscreen: false, live_traffic: false, live_weather: false, real_time: false, snow: crate::snow::Mode::Always, last: Some(LastStart { lat: 37.6, lon: -122.4, name: "KSFO".into(), airport: Some("KSFO".into()), start: "approach".into(), runway: Some("28L".into()), aircraft: "c172".into() }), multiplayer: true, mp_server: "example.org:7000".into(), mp_name: "Dany".into(), topple_buildings: true, atc_voices: false, atc_mic: "Laptop mic".into(), discord: false, simbrief: "pilot42".into() };
+        let s = Settings { lang: Lang::parse("fr"), sound_on: false, volume: 0.4, effects_volume: 0.5, music_volume: 0.25, cam_mode: 1, cockpit_fov: 50.0, look_sens: 1.5, invert_look_cockpit: true, invert_look_outside_x: true, invert_look_outside_y: false, show_hud: false, hud_cockpit: true, path_marker: true, minimap: false, landing_guidance: false, arcade: true, minimap_plan: true, minimap_heading_up: true, minimap_zoom: 15, minimap_size: 420.0, minimap_height: 300.0, map_airports: false, map_navaids: false, taa: false, fullscreen: false, live_traffic: false, live_weather: false, real_time: false, snow: crate::snow::Mode::Always, last: Some(LastStart { lat: 37.6, lon: -122.4, name: "KSFO".into(), airport: Some("KSFO".into()), start: "approach".into(), runway: Some("28L".into()), aircraft: "c172".into() }), multiplayer: true, mp_server: "example.org:7000".into(), mp_name: "Dany".into(), topple_buildings: true, atc_voices: false, atc_mic: "Laptop mic".into(), discord: false, simbrief: "pilot42".into() };
         assert_eq!(Settings::from_json(&s.to_json()), s);
         // Multiplayer: on by default, and once for settings saved before it was;
         // turned off since, it stays off.
@@ -258,9 +265,10 @@ mod tests {
         let legacy = Settings::from_json(&serde_json::json!({"minimap_size": 420}));
         assert_eq!((legacy.minimap_size, legacy.minimap_height), (420.0, 420.0));
         // Missing or odd values fall back to the defaults.
-        let j = serde_json::json!({ "volume": 7.0, "language": "xx" });
+        let j = serde_json::json!({ "volume": 7.0, "music_volume": -1.0, "language": "xx" });
         let t = Settings::from_json(&j);
         assert_eq!((t.volume, t.lang, t.taa), (1.0, None, true));
+        assert_eq!((t.effects_volume, t.music_volume), (1.0, 0.0));
         assert_eq!(t.snow, crate::snow::Mode::Auto);
         assert_eq!(Settings::from_json(&serde_json::json!({"terrain_snow": "OFF"})).snow, crate::snow::Mode::Off);
         assert_eq!((t.minimap, t.minimap_heading_up, t.minimap_zoom), (true, false, 12));
